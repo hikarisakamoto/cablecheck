@@ -1,0 +1,5 @@
+/cablecheck
+/dist/
+cablecheck-report-*/
+*.test
+*.out
