@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -139,9 +140,12 @@ func TestRegistryOwnershipVerification(t *testing.T) {
 		t.Fatalf("write corrupt pidfile: %v", err)
 	}
 
-	stale, err := ScanStale(filepath.Join(base, "cablecheck"))
+	stale, warns, err := ScanStale(filepath.Join(base, "cablecheck"))
 	if err != nil {
 		t.Fatalf("ScanStale: %v", err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("ScanStale warnings = %v, want none", warns)
 	}
 	if len(stale) != 1 || stale[0].PID != self || stale[0].TestID != "t-old" {
 		t.Errorf("ScanStale = %+v, want exactly the live t-old survivor", stale)
@@ -161,8 +165,8 @@ func TestRegistryOwnershipVerification(t *testing.T) {
 	}
 
 	// ScanStale on a missing base dir is not an error.
-	if got, err := ScanStale(filepath.Join(base, "nope")); err != nil || len(got) != 0 {
-		t.Errorf("ScanStale(missing dir) = (%v, %v), want (empty, nil)", got, err)
+	if got, warns, err := ScanStale(filepath.Join(base, "nope")); err != nil || len(warns) != 0 || len(got) != 0 {
+		t.Errorf("ScanStale(missing dir) = (%v, %v, %v), want (empty, none, nil)", got, warns, err)
 	}
 
 	unregister()
@@ -170,6 +174,227 @@ func TestRegistryOwnershipVerification(t *testing.T) {
 		t.Errorf("pidfile still present after unregister: stat err = %v", err)
 	}
 	unregister() // idempotent
+}
+
+// fakeEUID makes every state-dir ownership check compare against euid for the
+// duration of the test, so foreign-ownership refusal is testable without root.
+func fakeEUID(t *testing.T, euid int) {
+	t.Helper()
+	orig := geteuid
+	geteuid = func() int { return euid }
+	t.Cleanup(func() { geteuid = orig })
+}
+
+func TestDefaultBaseDirPrefersRunForRoot(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+
+	fakeEUID(t, 0)
+	if got := DefaultBaseDir(); got != "/run/cablecheck" {
+		t.Errorf("DefaultBaseDir() as root = %q, want /run/cablecheck", got)
+	}
+	fakeEUID(t, 1000)
+	if got := DefaultBaseDir(); got != "/tmp/cablecheck" {
+		t.Errorf("DefaultBaseDir() as non-root = %q, want /tmp/cablecheck", got)
+	}
+}
+
+func TestStateDirRefusesForeignOwnership(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	// With the euid seam displaced, every directory MkdirAll creates looks
+	// like it belongs to another local user — exactly what a root cablecheck
+	// sees when an unprivileged user pre-planted /tmp/cablecheck.
+	fakeEUID(t, os.Geteuid()+1)
+
+	_, err := NewRegistry("t-foreign", clock.Real{})
+	var sde *StateDirError
+	if err == nil || !errors.As(err, &sde) {
+		t.Fatalf("NewRegistry with foreign-owned state dir: err = %v, want *StateDirError", err)
+	}
+}
+
+func TestStateDirRefusesSymlinks(t *testing.T) {
+	t.Run("symlinked base dir", func(t *testing.T) {
+		runtimeDir := t.TempDir()
+		t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+		target := t.TempDir() // attacker-controlled directory elsewhere
+		if err := os.Symlink(target, filepath.Join(runtimeDir, "cablecheck")); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		_, err := NewRegistry("t-sym", clock.Real{})
+		var sde *StateDirError
+		if err == nil || !errors.As(err, &sde) {
+			t.Fatalf("NewRegistry with symlinked base dir: err = %v, want *StateDirError", err)
+		}
+	})
+
+	t.Run("symlinked session dir", func(t *testing.T) {
+		runtimeDir := t.TempDir()
+		t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+		base := filepath.Join(runtimeDir, "cablecheck")
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		target := t.TempDir()
+		if err := os.Symlink(target, filepath.Join(base, "t-sym")); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		_, err := NewRegistry("t-sym", clock.Real{})
+		var sde *StateDirError
+		if err == nil || !errors.As(err, &sde) {
+			t.Fatalf("NewRegistry with symlinked session dir: err = %v, want *StateDirError", err)
+		}
+	})
+}
+
+func TestStateDirModeRepairedWhenOwnedByUs(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	base := DefaultBaseDir()
+	dir := filepath.Join(base, "t-mode")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, p := range []string{base, dir} {
+		if err := os.Chmod(p, 0o755); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+	}
+
+	if _, err := NewRegistry("t-mode", clock.Real{}); err != nil {
+		t.Fatalf("NewRegistry must repair a wrong mode on dirs we own: %v", err)
+	}
+	for _, p := range []string{base, dir} {
+		fi, err := os.Lstat(p)
+		if err != nil {
+			t.Fatalf("lstat %s: %v", p, err)
+		}
+		if fi.Mode().Perm() != 0o700 {
+			t.Errorf("mode of %s = %#o after NewRegistry, want 0700", p, fi.Mode().Perm())
+		}
+	}
+}
+
+func TestScanStaleSkipsUntrustedDirs(t *testing.T) {
+	self := os.Getpid()
+
+	t.Run("symlinked session dir", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "cablecheck")
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		// An attacker-planted symlink whose target holds a pidfile describing
+		// a live, ownership-verifiable process (us, standing in for the
+		// victim). ScanStale must neither report it as stale nor clean
+		// through the symlink.
+		target := t.TempDir()
+		victim, err := NewProcessInfo(self, "victim", "t-planted")
+		if err != nil {
+			t.Fatalf("NewProcessInfo: %v", err)
+		}
+		pidfile := filepath.Join(target, fmt.Sprintf("%d.json", self))
+		writeJSON(t, pidfile, victim)
+		if err := os.Symlink(target, filepath.Join(root, "t-planted")); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+
+		stale, warns, err := ScanStale(root)
+		if err != nil {
+			t.Fatalf("ScanStale: %v", err)
+		}
+		if len(stale) != 0 {
+			t.Errorf("ScanStale = %+v, want empty (planted pidfiles must never be reported)", stale)
+		}
+		var sde *StateDirError
+		if len(warns) != 1 || !errors.As(warns[0], &sde) {
+			t.Errorf("ScanStale warnings = %v, want one *StateDirError for the symlinked dir", warns)
+		}
+		if _, err := os.Stat(pidfile); err != nil {
+			t.Errorf("ScanStale reached through the symlink: %v", err)
+		}
+	})
+
+	t.Run("foreign-owned dirs", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "cablecheck")
+		dir := filepath.Join(root, "t-victim")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		victim, err := NewProcessInfo(self, "victim", "t-victim")
+		if err != nil {
+			t.Fatalf("NewProcessInfo: %v", err)
+		}
+		pidfile := filepath.Join(dir, fmt.Sprintf("%d.json", self))
+		writeJSON(t, pidfile, victim)
+		fakeEUID(t, os.Geteuid()+1) // everything now looks foreign-owned
+
+		stale, warns, err := ScanStale(root)
+		if err != nil {
+			t.Fatalf("ScanStale: %v", err)
+		}
+		if len(stale) != 0 {
+			t.Errorf("ScanStale = %+v, want empty (foreign-owned state must never be trusted)", stale)
+		}
+		if len(warns) == 0 {
+			t.Error("ScanStale returned no warning for foreign-owned state dir")
+		}
+		if _, err := os.Stat(pidfile); err != nil {
+			t.Errorf("ScanStale cleaned inside a foreign-owned dir: %v", err)
+		}
+	})
+}
+
+func TestSessionMarkerRepairedOnReuse(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	dir := filepath.Join(DefaultBaseDir(), "t-reuse")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A leftover marker from a crashed run that reused this testID: it
+	// describes a dead process, so once it fails verification a sibling's
+	// ScanStale would treat the whole directory — including the live
+	// session's pidfiles — as dead.
+	staleMarker := ProcessInfo{PID: deadPID, PGID: deadPID, StartTicks: 1, Argv0: "cablecheck", Label: "cablecheck-session", TestID: "t-reuse"}
+	marker := filepath.Join(dir, sessionFileName)
+	writeJSON(t, marker, staleMarker)
+
+	reg, err := NewRegistry("t-reuse", clock.Real{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	want, err := NewProcessInfo(os.Getpid(), "cablecheck-session", "t-reuse")
+	if err != nil {
+		t.Fatalf("NewProcessInfo: %v", err)
+	}
+	readMarker := func() ProcessInfo {
+		t.Helper()
+		data, err := os.ReadFile(marker)
+		if err != nil {
+			t.Fatalf("read marker: %v", err)
+		}
+		var got ProcessInfo
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("unmarshal marker: %v", err)
+		}
+		return got
+	}
+	if got := readMarker(); got != want {
+		t.Errorf("marker after NewRegistry = %+v, want this process's identity %+v", got, want)
+	}
+
+	// Register re-runs ensureStateDir, so it must also repair a marker
+	// clobbered mid-session (e.g. by a same-testID session that since died).
+	writeJSON(t, marker, staleMarker)
+	info, err := NewProcessInfo(os.Getpid(), "self", "t-reuse")
+	if err != nil {
+		t.Fatalf("NewProcessInfo: %v", err)
+	}
+	unregister, err := reg.Register(info)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	defer unregister()
+	if got := readMarker(); got != want {
+		t.Errorf("marker after Register = %+v, want this process's identity %+v", got, want)
+	}
 }
 
 func TestScanStaleDeadSessionCleanup(t *testing.T) {
@@ -185,9 +410,12 @@ func TestScanStaleDeadSessionCleanup(t *testing.T) {
 	deadProc := ProcessInfo{PID: deadPID, PGID: deadPID, StartTicks: 1, Argv0: "iperf3", Label: "x", TestID: "t-gone"}
 	writeJSON(t, filepath.Join(goneDir, fmt.Sprintf("%d.json", deadPID)), deadProc)
 
-	stale, err := ScanStale(root)
+	stale, warns, err := ScanStale(root)
 	if err != nil {
 		t.Fatalf("ScanStale: %v", err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("ScanStale warnings = %v, want none", warns)
 	}
 	if len(stale) != 0 {
 		t.Errorf("ScanStale = %+v, want empty (everything in the dead session is dead)", stale)

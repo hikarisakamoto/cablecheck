@@ -47,14 +47,76 @@ type ProcessInfo struct {
 	TestID string `json:"testID"`
 }
 
-// DefaultBaseDir returns the root of the pidfile state tree:
-// ${XDG_RUNTIME_DIR:-/tmp}/cablecheck.
+// geteuid returns the current effective uid. It is a package variable so
+// tests can exercise the foreign-ownership refusal in checkStateDir (and the
+// root-only /run preference in DefaultBaseDir) without needing root.
+var geteuid = os.Geteuid
+
+// DefaultBaseDir returns the root of the pidfile state tree. XDG_RUNTIME_DIR
+// (a per-user private directory) wins when set; when running as root and /run
+// exists, /run/cablecheck is preferred — unlike the final /tmp fallback it is
+// root-owned and not world-writable, so other local users cannot pre-plant
+// it. State found under /tmp is therefore never trusted blindly: see
+// checkStateDir.
 func DefaultBaseDir() string {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		base = "/tmp"
+	if base := os.Getenv("XDG_RUNTIME_DIR"); base != "" {
+		return filepath.Join(base, "cablecheck")
 	}
-	return filepath.Join(base, "cablecheck")
+	if geteuid() == 0 {
+		if fi, err := os.Lstat("/run"); err == nil && fi.IsDir() {
+			return filepath.Join("/run", "cablecheck")
+		}
+	}
+	return filepath.Join("/tmp", "cablecheck")
+}
+
+// StateDirError reports a pidfile state directory that failed the trust
+// boundary: a symlink, a non-directory, a directory owned by another uid, or
+// one whose mode could not be repaired. Registry setup refuses such a
+// directory outright; ScanStale skips it and surfaces the error as a warning.
+type StateDirError struct {
+	// Path is the offending directory.
+	Path string
+	// Reason describes which check failed.
+	Reason string
+}
+
+// Error implements the error interface.
+func (e *StateDirError) Error() string {
+	return fmt.Sprintf("runner: unsafe state dir %s: %s", e.Path, e.Reason)
+}
+
+// checkStateDir enforces the state-dir trust boundary on path: it must be a
+// real directory (never a symlink), owned by the current effective uid, with
+// mode 0700. A wrong mode on a directory we own is repaired in place; a
+// symlink, non-directory, or foreign owner is refused with a *StateDirError.
+// Under a world-writable parent such as /tmp, any of those means another
+// local user planted the path — trusting its pidfiles would let that user
+// direct an ownership-verified kill at an arbitrary live process group.
+func checkStateDir(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return &StateDirError{Path: path, Reason: fmt.Sprintf("lstat: %v", err)}
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return &StateDirError{Path: path, Reason: "is a symlink"}
+	}
+	if !fi.IsDir() {
+		return &StateDirError{Path: path, Reason: "not a directory"}
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return &StateDirError{Path: path, Reason: "no ownership metadata"}
+	}
+	if euid := geteuid(); int(st.Uid) != euid {
+		return &StateDirError{Path: path, Reason: fmt.Sprintf("owned by uid %d, not the current euid %d", st.Uid, euid)}
+	}
+	if perm := fi.Mode().Perm(); perm != 0o700 {
+		if err := os.Chmod(path, 0o700); err != nil {
+			return &StateDirError{Path: path, Reason: fmt.Sprintf("mode %#o, chmod 0700 failed: %v", perm, err)}
+		}
+	}
+	return nil
 }
 
 // Registry tracks the external processes owned by one test session and
@@ -72,10 +134,10 @@ type Registry struct {
 }
 
 // NewRegistry creates (if needed) the state directory
-// ${XDG_RUNTIME_DIR:-/tmp}/cablecheck/<testID>/, writes the session-liveness
-// marker identifying the calling process, and returns a Registry rooted
-// there. clk paces KillAll's SIGTERM-to-SIGKILL grace wait; production
-// callers pass clock.Real{}.
+// DefaultBaseDir()/<testID>/, verifies it against the checkStateDir trust
+// boundary, writes the session-liveness marker identifying the calling
+// process, and returns a Registry rooted there. clk paces KillAll's
+// SIGTERM-to-SIGKILL grace wait; production callers pass clock.Real{}.
 func NewRegistry(testID string, clk clock.Clock) (*Registry, error) {
 	if testID == "" || testID != filepath.Base(testID) || testID == "." || testID == ".." {
 		return nil, fmt.Errorf("runner: invalid registry test id %q", testID)
@@ -100,13 +162,29 @@ func NewRegistry(testID string, clk clock.Clock) (*Registry, error) {
 // marker. Register re-runs it on every registration, so pidfile writes
 // survive a sibling session's ScanStale pruning the directory in the narrow
 // window before the marker exists.
+//
+// Both the base dir and the session dir must pass checkStateDir — MkdirAll
+// alone would silently adopt a directory (or symlink) pre-planted under /tmp
+// by another local user. The marker is rewritten unless it already carries
+// this registry's own session identity: a leftover marker from a crashed run
+// that reused the testID (or from a same-id sibling) would fail verification
+// and let a concurrent ScanStale prune this live session's pidfiles.
 func (r *Registry) ensureStateDir() error {
 	if err := os.MkdirAll(r.stateDir, 0o700); err != nil {
 		return fmt.Errorf("runner: create registry state dir: %w", err)
 	}
+	if err := checkStateDir(filepath.Dir(r.stateDir)); err != nil {
+		return err
+	}
+	if err := checkStateDir(r.stateDir); err != nil {
+		return err
+	}
 	marker := filepath.Join(r.stateDir, sessionFileName)
-	if _, err := os.Stat(marker); err == nil {
-		return nil
+	if data, err := os.ReadFile(marker); err == nil {
+		var existing ProcessInfo
+		if json.Unmarshal(data, &existing) == nil && existing == r.session {
+			return nil // marker already identifies this very session
+		}
 	}
 	data, err := json.MarshalIndent(r.session, "", "  ")
 	if err != nil {
@@ -267,27 +345,39 @@ func NewProcessInfo(pid int, label, testID string) (ProcessInfo, error) {
 // whose owning session is dead but whose processes are still alive and
 // ownership-verified — true stale survivors of a crashed or killed run.
 //
+// baseDir and every session directory must first pass the checkStateDir
+// trust boundary (real directory, no symlink, owned by the current euid,
+// mode 0700, repaired when merely loose). Anything failing it was planted by
+// another local user and is SKIPPED untouched, reported in the returned
+// warnings — its pidfiles are never trusted, cleaned, or turned into kills.
+//
 // Directories whose session marker still verifies against a live process
 // belong to a concurrently running cablecheck session and are skipped
 // untouched: their processes are NOT stale and must never be signalled. In
 // dead-session directories, pidfiles for dead or unverifiable processes,
 // unparseable pidfiles, the dead session marker, and stray temp files are
 // removed silently; emptied testID directories are pruned. A missing baseDir
-// yields (nil, nil).
-func ScanStale(baseDir string) ([]ProcessInfo, error) {
+// yields (nil, nil, nil).
+func ScanStale(baseDir string) (stale []ProcessInfo, warnings []error, err error) {
+	if _, err := os.Lstat(baseDir); errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err := checkStateDir(baseDir); err != nil {
+		return nil, []error{err}, nil // untrusted root: touch nothing
+	}
 	dirs, err := os.ReadDir(baseDir)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("runner: scan stale state: %w", err)
+		return nil, nil, fmt.Errorf("runner: scan stale state: %w", err)
 	}
-	var stale []ProcessInfo
 	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
+		if !d.IsDir() && d.Type()&os.ModeSymlink == 0 {
+			continue // stray file: not a session dir
 		}
 		dir := filepath.Join(baseDir, d.Name())
+		if err := checkStateDir(dir); err != nil {
+			warnings = append(warnings, err)
+			continue // planted dir or symlink: never trust its pidfiles
+		}
 		if sessionAlive(dir) {
 			continue // a live cablecheck session owns this dir: hands off
 		}
@@ -317,7 +407,7 @@ func ScanStale(baseDir string) ([]ProcessInfo, error) {
 		}
 		os.Remove(dir) // prunes only if now empty; error ignored
 	}
-	return stale, nil
+	return stale, warnings, nil
 }
 
 // sessionAlive reports whether dir belongs to a currently running cablecheck
