@@ -18,7 +18,9 @@ import (
 //
 // Default behavior: Wait blocks until the test calls Exit, until Terminate
 // or Kill synthesize an ExitCode -1 signal-death result, until the script's
-// Delay channel closes (auto-exit with the scripted result), or until the
+// Delay channel closes (auto-exit with the scripted result), until the Start
+// ctx is canceled (synthesized SIGTERM death whose Wait error wraps
+// ctx.Err(), mirroring the real runner's parent-cancel path), or until the
 // Wait ctx is done.
 type FakeProcess struct {
 	pid     int
@@ -87,16 +89,35 @@ func (p *FakeProcess) Wait(ctx context.Context) (*runner.CommandResult, error) {
 // Exit makes Wait return res (with the spec filled in). Only the first exit
 // — scripted, test-driven, or signal-synthesized — takes effect.
 func (p *FakeProcess) Exit(res runner.CommandResult) {
+	p.exit(res, nil)
+}
+
+// exit is the single exit point: it installs res and waitErr exactly once.
+// A TimedOut result with a nil waitErr gets the contract timeout error.
+func (p *FakeProcess) exit(res runner.CommandResult, waitErr error) {
 	p.exitOnce.Do(func() {
 		res.Spec = p.spec
 		p.mu.Lock()
 		p.result = &res
-		if res.TimedOut {
+		p.waitErr = waitErr
+		if res.TimedOut && waitErr == nil {
 			p.waitErr = timeoutError(p.spec.Name)
 		}
 		p.mu.Unlock()
 		close(p.exited)
 	})
+}
+
+// dieBySignal synthesizes a signal death (ExitCode -1, carrying the scripted
+// stdout) with waitErr as the Wait error: nil for consumer-initiated
+// Terminate/Kill (signal death is data), a ctx-wrapping error for the
+// Start-ctx cancellation path.
+func (p *FakeProcess) dieBySignal(sig string, waitErr error) {
+	p.exit(runner.CommandResult{
+		Stdout:   slices.Clone(p.content),
+		ExitCode: -1,
+		Signal:   sig,
+	}, waitErr)
 }
 
 // Terminate observably closes TermCh and, if the process is still running,
@@ -106,11 +127,7 @@ func (p *FakeProcess) Terminate() error {
 	p.terminated = true
 	p.mu.Unlock()
 	p.termOnce.Do(func() { close(p.termCh) })
-	p.Exit(runner.CommandResult{
-		Stdout:   slices.Clone(p.content),
-		ExitCode: -1,
-		Signal:   "SIGTERM",
-	})
+	p.dieBySignal("SIGTERM", nil)
 	return nil
 }
 
@@ -121,11 +138,7 @@ func (p *FakeProcess) Kill() error {
 	p.killed = true
 	p.mu.Unlock()
 	p.killOnce.Do(func() { close(p.killCh) })
-	p.Exit(runner.CommandResult{
-		Stdout:   slices.Clone(p.content),
-		ExitCode: -1,
-		Signal:   "SIGKILL",
-	})
+	p.dieBySignal("SIGKILL", nil)
 	return nil
 }
 

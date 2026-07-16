@@ -98,7 +98,7 @@ func (e *Exec) start(ctx context.Context, spec CommandSpec, live bool) (*proc, e
 	}
 	var liveBuf *streamBuffer
 	if live {
-		liveBuf = newStreamBuffer()
+		liveBuf = newStreamBuffer(spec.MaxOutputBytes)
 		stdoutW = append(stdoutW, liveBuf)
 	}
 	cmd.Stdout = io.MultiWriter(stdoutW...)
@@ -219,7 +219,11 @@ func (e *Exec) start(ctx context.Context, spec CommandSpec, live bool) (*proc, e
 func (p *proc) PID() int { return p.pid }
 
 // Stdout returns the live stdout stream. For processes created by Run (which
-// has no live leg) it returns an empty, already-closed stream.
+// has no live leg) it returns an empty, already-closed stream. The live
+// stream is bounded: it delivers at most CommandSpec.MaxOutputBytes bytes —
+// past the cap, reads block until the process is reaped and then return
+// io.EOF. It exists for readiness scanning, not full-stream consumption; use
+// a tee file for the complete stream.
 func (p *proc) Stdout() io.Reader {
 	if p.live == nil {
 		return eofReader{}
@@ -267,30 +271,44 @@ type eofReader struct{}
 
 func (eofReader) Read([]byte) (int, error) { return 0, io.EOF }
 
-// streamBuffer is a non-blocking, unbounded in-memory pipe: writes always
+// streamBuffer is a non-blocking, bounded in-memory pipe: writes always
 // succeed immediately (so the exec copy goroutine can never stall on a slow
 // or absent reader), reads block until data arrives or the buffer is closed.
+//
+// Only the first max bytes of the stream are retained; everything after the
+// cap is silently dropped. The live leg exists for readiness scanning — once
+// the scanner stops reading, an unbounded buffer would accumulate the entire
+// output of a long-lived child until reap, which is exactly what the
+// per-stream cap prevents. The capped CommandResult copy and the (complete)
+// tee file remain the durable records.
 type streamBuffer struct {
+	max     int64 // total-stream cap; bytes past it are dropped
+	written int64 // bytes accepted so far (read or not)
+
 	mu     sync.Mutex
 	cond   *sync.Cond
 	buf    []byte
 	closed bool
 }
 
-func newStreamBuffer() *streamBuffer {
-	s := &streamBuffer{}
+func newStreamBuffer(max int64) *streamBuffer {
+	s := &streamBuffer{max: max}
 	s.cond = sync.NewCond(&s.mu)
 	return s
 }
 
-// Write appends p; it never blocks and never fails. Writes after Close are
-// silently discarded.
+// Write appends p up to the total-stream cap; it never blocks and never
+// fails, and always reports len(p) consumed so io.MultiWriter siblings keep
+// receiving the full stream. Writes after Close are silently discarded.
 func (s *streamBuffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.closed {
-		s.buf = append(s.buf, p...)
-		s.cond.Broadcast()
+		if keep := min(s.max-s.written, int64(len(p))); keep > 0 {
+			s.buf = append(s.buf, p[:keep]...)
+			s.written += keep
+			s.cond.Broadcast()
+		}
 	}
 	return len(p), nil
 }

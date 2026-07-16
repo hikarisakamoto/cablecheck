@@ -65,7 +65,8 @@ type CommandSpec struct {
 	// GracePeriod is the SIGTERM-to-SIGKILL escalation delay on kill
 	// paths; 0 means DefaultGracePeriod.
 	GracePeriod time.Duration
-	// MaxOutputBytes caps the per-stream in-memory capture; 0 means
+	// MaxOutputBytes caps the per-stream in-memory capture, and equally the
+	// live stdout stream returned by Process.Stdout; 0 means
 	// DefaultMaxOutputBytes. Tee files always receive the full stream.
 	MaxOutputBytes int64
 	// TeeStdoutPath, when non-empty, names a file that receives the
@@ -135,9 +136,12 @@ type Runner interface {
 type Process interface {
 	// PID returns the child's process id (== its process group id).
 	PID() int
-	// Stdout returns the live stdout stream for readiness scanning. The
-	// capped copy still lands in the eventual CommandResult. The stream
-	// reaches EOF once the process has been reaped.
+	// Stdout returns the live stdout stream for readiness scanning. It is
+	// bounded by CommandSpec.MaxOutputBytes: at most that many bytes are
+	// delivered, then reads block until the process is reaped and return
+	// io.EOF — it is not meant for full-stream consumption (configure a tee
+	// file for that). The capped copy still lands in the eventual
+	// CommandResult.
 	Stdout() io.Reader
 	// Wait blocks until the process has been reaped or ctx is done. It
 	// is idempotent and safe from multiple goroutines; ctx bounds only

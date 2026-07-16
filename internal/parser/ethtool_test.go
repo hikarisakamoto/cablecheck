@@ -191,16 +191,3 @@ func TestEthtoolStatsParse(t *testing.T) {
 		}
 	})
 }
-
-func TestEthtoolDriverInfo(t *testing.T) {
-	di := ParseEthtoolDriverInfo(fixture(t, "ethtool", "driverinfo_e1000e.txt"))
-	if got := di["driver"]; got != "e1000e" {
-		t.Errorf(`driverinfo["driver"] = %q, want "e1000e"`, got)
-	}
-	if got := di["bus-info"]; got != "0000:00:1f.6" {
-		t.Errorf(`driverinfo["bus-info"] = %q, want "0000:00:1f.6"`, got)
-	}
-	if got, ok := di["expansion-rom-version"]; !ok || got != "" {
-		t.Errorf(`driverinfo["expansion-rom-version"] = %q (present=%v), want present and empty`, got, ok)
-	}
-}

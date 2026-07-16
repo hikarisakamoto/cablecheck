@@ -239,13 +239,20 @@ func (f *FakeRunner) LookPath(name string) (string, error) {
 
 // Run executes a scripted command to completion, honoring the real Runner
 // error contract (non-zero exit is data; TimedOut results carry the timeout
-// error; ctx cancellation during Delay wraps ctx.Err()).
+// error; a pre-canceled ctx fails outright like the real cmd.Start; ctx
+// cancellation during Delay wraps ctx.Err()).
 func (f *FakeRunner) Run(ctx context.Context, spec runner.CommandSpec) (*runner.CommandResult, error) {
 	s, err := f.admit(spec, "run")
 	if err != nil {
 		return nil, err
 	}
 	signalStarted(s)
+	// A pre-canceled ctx fails Run outright, like the real Exec.Run whose
+	// cmd.Start fails before the child ever launches: nil result, error
+	// wrapping ctx.Err(). Mirrors the identical check in Start.
+	if err := ctx.Err(); err != nil {
+		return nil, canceledError(spec.Name, err)
+	}
 	if s.Delay != nil {
 		select {
 		case <-s.Delay:
@@ -258,7 +265,7 @@ func (f *FakeRunner) Run(ctx context.Context, spec runner.CommandSpec) (*runner.
 				// against production behavior.
 				res.Signal = "SIGTERM"
 			}
-			return res, fmt.Errorf("runnertest: %s canceled: %w", spec.Name, ctx.Err())
+			return res, canceledError(spec.Name, ctx.Err())
 		case <-f.aborted:
 			return nil, fmt.Errorf("runnertest: FakeRunner shut down during run of %s", spec.Name)
 		}
@@ -279,11 +286,18 @@ func (f *FakeRunner) Run(ctx context.Context, spec runner.CommandSpec) (*runner.
 // Start launches a scripted long-lived process and returns its FakeProcess.
 // If the script has a Delay channel, the process exits with the scripted
 // result when the channel is closed; otherwise it lives until Exit,
-// Terminate or Kill.
+// Terminate or Kill. Mirroring the real Runner.Start contract ("Cancelling
+// ctx kills the process group"): a pre-canceled ctx fails Start outright
+// (like the real cmd.Start), and canceling ctx later synthesizes a SIGTERM
+// death whose Wait error wraps ctx.Err().
 func (f *FakeRunner) Start(ctx context.Context, spec runner.CommandSpec) (runner.Process, error) {
 	s, err := f.admit(spec, "start")
 	if err != nil {
 		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		signalStarted(s)
+		return nil, fmt.Errorf("runnertest: start %s: %w", spec.Name, err)
 	}
 	if s.Err != nil {
 		signalStarted(s)
@@ -303,18 +317,23 @@ func (f *FakeRunner) Start(ctx context.Context, spec runner.CommandSpec) (runner
 
 	// Signalled only after the process is observable via Processes().
 	signalStarted(s)
-	if s.Delay != nil {
-		delay := s.Delay
-		scripted := *res
-		go func() {
-			select {
-			case <-delay:
-				p.Exit(scripted)
-			case <-p.Done():
-			case <-f.aborted:
-			}
-		}()
-	}
+	// Lifecycle watcher: auto-exit with the scripted result when Delay
+	// closes (a nil Delay channel blocks forever), and mirror the real
+	// runner's parent-cancel kill by synthesizing a SIGTERM death when ctx
+	// is canceled. TermCh/KillCh stay untouched: ctx cancellation is not a
+	// consumer-initiated Terminate/Kill.
+	delay := s.Delay
+	scripted := *res
+	go func() {
+		select {
+		case <-delay:
+			p.Exit(scripted)
+		case <-ctx.Done():
+			p.dieBySignal("SIGTERM", canceledError(spec.Name, ctx.Err()))
+		case <-p.Done():
+		case <-f.aborted:
+		}
+	}()
 	return p, nil
 }
 
@@ -417,6 +436,13 @@ func notFoundError(name string) error {
 func timeoutError(name string) error {
 	return fmt.Errorf("runnertest: %s timed out: %w",
 		name, errors.Join(runner.ErrTimeout, context.DeadlineExceeded))
+}
+
+// canceledError mirrors the real runner's parent-cancel error contract: the
+// returned error wraps cause (the ctx.Err() observed at cancellation), so
+// errors.Is(err, context.Canceled) holds for a canceled parent ctx.
+func canceledError(name string, cause error) error {
+	return fmt.Errorf("runnertest: %s canceled: %w", name, cause)
 }
 
 // FromFixture loads a canned CommandResult from testdata: either a plain

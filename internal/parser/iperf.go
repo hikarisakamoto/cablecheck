@@ -60,7 +60,7 @@ type iperfUDP struct {
 // iperfInterval is one per-second entry of the intervals array. In bidir
 // mode 3.12+ emit sum (forward) plus sum_bidir_reverse (reverse); 3.7-3.11
 // emit two duplicate "sum" keys instead (Go keeps the last, reverse one), so
-// the per-stream rows are kept as the fallback source for either direction.
+// the per-stream rows are kept as the fallback source for the forward series.
 type iperfInterval struct {
 	Streams         []iperfSum `json:"streams"`
 	Sum             *iperfSum  `json:"sum"`
@@ -216,6 +216,12 @@ type Iperf3Result struct {
 	UDP *UDPStats
 	// Intervals are the per-second interval sum rows (forward direction).
 	Intervals []IntervalStat
+	// IntervalsReverse are the per-second rows of the reverse (peer-to-local)
+	// direction of a --bidir run: intervals[].sum_bidir_reverse when present
+	// (3.12+), otherwise re-derived from the per-stream rows. Empty for
+	// one-way runs. Their retransmit counters are usually nil — the reverse
+	// interval rows are the local receive view, which has none.
+	IntervalsReverse []IntervalStat
 	// IntervalMinBps is the slowest interval, excluding the first
 	// (slow-start) interval.
 	IntervalMinBps float64
@@ -230,27 +236,6 @@ type Iperf3Result struct {
 	// Collapses lists runs of intervals below 10% of the median interval
 	// throughput (first interval excluded from both median and detection).
 	Collapses []CollapseEvent
-	// ReverseIntervals are the per-second reverse-direction (peer-to-local)
-	// interval rows of a --bidir run, taken from
-	// intervals[].sum_bidir_reverse (3.12+), the surviving duplicate "sum"
-	// key (3.7-3.11), or re-derived from the per-stream rows; empty for
-	// one-way runs.
-	ReverseIntervals []IntervalStat
-	// ReverseIntervalMinBps is the slowest reverse-direction interval of a
-	// --bidir run, excluding the first (slow-start) interval.
-	ReverseIntervalMinBps float64
-	// ReverseIntervalMaxBps is the fastest reverse-direction interval,
-	// excluding the first interval.
-	ReverseIntervalMaxBps float64
-	// ReverseIntervalAvgBps is the mean reverse-direction interval
-	// throughput, excluding the first interval.
-	ReverseIntervalAvgBps float64
-	// ReverseIntervalCoV is the coefficient of variation of the
-	// reverse-direction interval throughput, excluding the first interval.
-	ReverseIntervalCoV float64
-	// ReverseCollapses lists reverse-direction interval runs below 10% of
-	// the reverse median (same rules as Collapses).
-	ReverseCollapses []CollapseEvent
 	// CPU is iperf3's CPU utilization report; nil when absent.
 	CPU *CPUUtil
 	// CongSender is the sender-side TCP congestion algorithm, when reported.
@@ -274,15 +259,15 @@ type Iperf3Result struct {
 //   - Bidir runs (detected via end.streams[] rows whose direction flag is
 //     false, since -R is never used) ignore the top-level end sums entirely
 //     and aggregate per direction from the streams — 3.7-3.11 emit duplicate
-//     misattributed bidir sum keys. Reverse-direction intervals come from
-//     sum_bidir_reverse (3.12+), the surviving duplicate "sum" key
-//     (3.7-3.11), or are re-derived from the per-stream interval rows.
+//     misattributed bidir sum keys. The forward interval series comes from
+//     intervals[].sum (re-derived from the stream rows when the surviving
+//     duplicate is the reverse one) and the reverse series from
+//     intervals[].sum_bidir_reverse, likewise falling back to the streams.
 //   - UDP out_of_order is read from end.sum when present and otherwise
 //     summed from end.streams[].udp (where iperf3 actually emits it); it
 //     stays nil when no row reports one — absent is not zero.
 //   - Interval statistics (min/max/avg/CoV, collapse detection) exclude the
-//     first interval to keep TCP slow-start out of the variation signal;
-//     the reverse direction of a bidir run gets the same analysis.
+//     first interval to keep TCP slow-start out of the variation signal.
 func ParseIperf3(out []byte) (Iperf3Result, error) {
 	var w iperfWire
 	if err := json.Unmarshal(out, &w); err != nil {
@@ -340,25 +325,16 @@ func ParseIperf3(out []byte) (Iperf3Result, error) {
 		} else if row := deriveIntervalRow(iv.Streams, true); row != nil {
 			res.Intervals = append(res.Intervals, *row)
 		}
-		// Reverse: sum_bidir_reverse (3.12+), the misattributed surviving
-		// "sum" (3.7-3.11), or re-derived from the per-stream rows.
-		switch {
-		case iv.SumBidirReverse != nil:
-			res.ReverseIntervals = append(res.ReverseIntervals, intervalRow(iv.SumBidirReverse))
-		case iv.Sum != nil && !iv.Sum.Sender:
-			res.ReverseIntervals = append(res.ReverseIntervals, intervalRow(iv.Sum))
-		default:
-			if row := deriveIntervalRow(iv.Streams, false); row != nil {
-				res.ReverseIntervals = append(res.ReverseIntervals, *row)
-			}
+		// Reverse: sum_bidir_reverse when the version emits it (3.12+);
+		// otherwise re-derived from the per-stream rows.
+		if iv.SumBidirReverse != nil {
+			res.IntervalsReverse = append(res.IntervalsReverse, intervalRow(iv.SumBidirReverse))
+		} else if row := deriveIntervalRow(iv.Streams, false); row != nil {
+			res.IntervalsReverse = append(res.IntervalsReverse, *row)
 		}
 	}
 	res.IntervalMinBps, res.IntervalMaxBps, res.IntervalAvgBps, res.IntervalCoV, res.Collapses =
 		analyzeIntervals(res.Intervals)
-	if len(res.ReverseIntervals) > 0 {
-		res.ReverseIntervalMinBps, res.ReverseIntervalMaxBps, res.ReverseIntervalAvgBps,
-			res.ReverseIntervalCoV, res.ReverseCollapses = analyzeIntervals(res.ReverseIntervals)
-	}
 
 	switch {
 	case bidir:

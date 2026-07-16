@@ -168,24 +168,3 @@ func ParseEthtoolStats(out []byte) map[string]uint64 {
 	}
 	return stats
 }
-
-// ParseEthtoolDriverInfo parses `ethtool -i <iface>` output ("driver: e1000e",
-// "bus-info: 0000:00:1f.6", ...) into a key/value map. Values may be empty
-// ("expansion-rom-version:"); keys without a colon are ignored. This is the
-// fallback used when the sysfs driver symlink is unreadable.
-func ParseEthtoolDriverInfo(out []byte) map[string]string {
-	info := map[string]string{}
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		info[strings.TrimSpace(key)] = strings.TrimSpace(value)
-	}
-	return info
-}

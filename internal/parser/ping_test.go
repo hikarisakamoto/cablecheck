@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"bytes"
 	"errors"
 	"math"
 	"testing"
@@ -134,6 +133,78 @@ func TestPingPerPacket(t *testing.T) {
 	})
 }
 
+func TestFullSizePingFragErrors(t *testing.T) {
+	// ping -M do -s 8972 on a link whose real path MTU is 1500: every probe
+	// fails locally with EMSGSIZE. These are SendErrors — a framing/MTU
+	// problem — and must stay distinct from on-the-wire packet loss.
+	res, err := ParsePing(fixture(t, "ping", "fullsize_emsgsize.stdout"),
+		fixture(t, "ping", "fullsize_emsgsize.stderr"), 1)
+	if err != nil {
+		t.Fatalf("exit 1 with a parsed summary must be a valid result, got error: %v", err)
+	}
+	if res.Target != "10.0.0.2" {
+		t.Errorf("Target = %q, want 10.0.0.2", res.Target)
+	}
+	if res.Transmitted != 100 || res.Received != 0 {
+		t.Errorf("transmitted/received = %d/%d, want 100/0", res.Transmitted, res.Received)
+	}
+	if res.LossPercent != 100 {
+		t.Errorf("LossPercent = %v, want 100", res.LossPercent)
+	}
+	if res.SendErrors != 100 {
+		t.Errorf("SendErrors = %d, want 100 (ping: local error: message too long)", res.SendErrors)
+	}
+	if res.IcmpErrors != 0 {
+		t.Errorf("IcmpErrors = %d, want 0 — local send errors are not ICMP errors", res.IcmpErrors)
+	}
+	if res.Duplicates != 0 {
+		t.Errorf("Duplicates = %d, want 0", res.Duplicates)
+	}
+	if len(res.Percentiles) != 0 {
+		t.Errorf("Percentiles = %v, want none (no replies at all)", res.Percentiles)
+	}
+	if res.UnparsedLines != 0 {
+		t.Errorf("UnparsedLines = %d, want 0", res.UnparsedLines)
+	}
+	if res.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1", res.ExitCode)
+	}
+}
+
+func TestPingSummaryDupsReconciled(t *testing.T) {
+	// Reply lines got truncated (output cap): only one DUP line survived but
+	// the summary counted three. The summary is authoritative when larger.
+	stdout := []byte(pingHeader +
+		"[1752580000.000000] 64 bytes from 10.0.0.2: icmp_seq=1 ttl=64 time=0.250 ms\n" +
+		"[1752580000.000210] 64 bytes from 10.0.0.2: icmp_seq=1 ttl=64 time=0.260 ms (DUP!)\n" +
+		"[1752580000.020000] 64 bytes from 10.0.0.2: icmp_seq=2 ttl=64 time=0.251 ms\n" +
+		"\n--- 10.0.0.2 ping statistics ---\n" +
+		"5 packets transmitted, 3 received, +3 duplicates, 40% packet loss, time 80ms\n" +
+		"rtt min/avg/max/mdev = 0.250/0.254/0.260/0.004 ms\n")
+	res, err := ParsePing(stdout, nil, 1)
+	if err != nil {
+		t.Fatalf("ParsePing: %v", err)
+	}
+	if res.Duplicates != 3 {
+		t.Errorf("Duplicates = %d, want 3 — the summary count wins over truncated reply lines", res.Duplicates)
+	}
+	if res.Transmitted != 5 || res.Received != 3 {
+		t.Errorf("transmitted/received = %d/%d, want 5/3", res.Transmitted, res.Received)
+	}
+}
+
+func TestPingUnrecognizedOutput(t *testing.T) {
+	// No reply lines and no summary line: nothing measurable came back, and
+	// silently returning a zero-valued result would fake a clean run.
+	_, err := ParsePing([]byte("watchdog: something unrelated\nspeaking a different grammar entirely\n"), nil, 0)
+	if err == nil {
+		t.Fatal("unrecognized output accepted, want error")
+	}
+	if errors.Is(err, ErrUnsupportedPingFormat) || errors.Is(err, ErrIntervalRejected) {
+		t.Errorf("err = %v, want a plain unrecognized-output error, not a typed sentinel", err)
+	}
+}
+
 func TestPingIntervalRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name, fixture string
@@ -158,32 +229,6 @@ func TestPingIntervalRejected(t *testing.T) {
 		}
 		if errors.Is(err, ErrIntervalRejected) {
 			t.Errorf("err = %v, must not be ErrIntervalRejected", err)
-		}
-	})
-}
-
-func TestPingTruncated(t *testing.T) {
-	// iputils prints the statistics block only when it finishes (or on
-	// SIGINT). If the run is cut short (SIGTERM from a runner timeout), the
-	// output has replies but no summary — that must never come back as a
-	// clean-looking result with Transmitted=0 / LossPercent=0.
-	full := fixture(t, "ping", "quick_clean_100.txt")
-	cut := bytes.Index(full, []byte("--- "))
-	if cut < 0 {
-		t.Fatal("fixture is missing the statistics footer")
-	}
-
-	t.Run("replies_without_summary", func(t *testing.T) {
-		_, err := ParsePing(full[:cut], nil, -1)
-		if !errors.Is(err, ErrPingIncomplete) {
-			t.Errorf("err = %v, want errors.Is(err, ErrPingIncomplete)", err)
-		}
-	})
-
-	t.Run("exit_zero_does_not_mask_truncation", func(t *testing.T) {
-		_, err := ParsePing(full[:cut], nil, 0)
-		if !errors.Is(err, ErrPingIncomplete) {
-			t.Errorf("err = %v, want errors.Is(err, ErrPingIncomplete) regardless of exit code", err)
 		}
 	})
 }

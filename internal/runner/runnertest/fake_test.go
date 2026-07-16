@@ -300,6 +300,90 @@ func TestDelayStartedChannels(t *testing.T) {
 	})
 }
 
+func TestFakeRunPreCanceledCtx(t *testing.T) {
+	f := runnertest.New(t)
+	f.Script(runnertest.Script{Name: "iperf3", Match: runnertest.AnyArgs()})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	res, err := f.Run(ctx, runSpec("iperf3", "-c", "peer"))
+	// The real Exec.Run fails at cmd.Start when ctx is already canceled,
+	// wrapping ctx.Err(); the fake must not return a canned success that
+	// production would never produce.
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want errors.Is(err, context.Canceled)", err)
+	}
+	if res != nil {
+		t.Errorf("result = %+v, want nil on pre-canceled ctx (real Run never launches)", res)
+	}
+	if got := len(f.Calls()); got != 1 {
+		t.Errorf("Calls() = %d entries, want 1 (failed Run is still recorded)", got)
+	}
+}
+
+func TestFakeStartPreCanceledCtx(t *testing.T) {
+	f := runnertest.New(t)
+	f.Script(runnertest.Script{Name: "iperf3", Match: runnertest.AnyArgs()})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	p, err := f.Start(ctx, runSpec("iperf3", "-s"))
+	// The real runner's cmd.Start fails when ctx is already canceled; the
+	// fake must not hand out a live process that production would never see.
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want errors.Is(err, context.Canceled)", err)
+	}
+	if p != nil {
+		t.Errorf("process = %v, want nil on pre-canceled ctx", p)
+	}
+	if got := len(f.Processes()); got != 0 {
+		t.Errorf("Processes() = %d entries after failed Start, want 0", got)
+	}
+	if got := len(f.Calls()); got != 1 {
+		t.Errorf("Calls() = %d entries, want 1 (failed Start is still recorded)", got)
+	}
+}
+
+func TestFakeStartCtxCancelSynthesizesDeath(t *testing.T) {
+	testutil.LeakCheck(t)
+	f := runnertest.New(t)
+	banner := []byte("Server listening on 5201\n")
+	f.Script(runnertest.Script{Name: "iperf3", Match: runnertest.AnyArgs(),
+		Result: runner.CommandResult{Stdout: banner}})
+	ctx, cancel := context.WithCancel(t.Context())
+	p, err := f.Start(ctx, runSpec("iperf3", "-s"))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	cancel()
+	// In production, canceling the Start ctx kills the process group, so a
+	// Wait with a FRESH context must return promptly with a SIGTERM death.
+	res, err := p.Wait(t.Context())
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Wait err = %v, want errors.Is(err, context.Canceled)", err)
+	}
+	if res == nil {
+		t.Fatal("result = nil, want synthesized signal-death result")
+	}
+	if res.Signal != "SIGTERM" || res.ExitCode != -1 {
+		t.Errorf("Signal=%q ExitCode=%d, want SIGTERM/-1 (fidelity with the real cancel path)", res.Signal, res.ExitCode)
+	}
+	if res.TimedOut {
+		t.Error("TimedOut = true, want false (parent cancel is not a timeout)")
+	}
+	if string(res.Stdout) != string(banner) {
+		t.Errorf("Stdout = %q, want the scripted stream %q", res.Stdout, banner)
+	}
+	select {
+	case <-p.Done():
+	default:
+		t.Error("Done() not closed after ctx cancellation")
+	}
+	// The synthesized death is not a consumer-initiated Terminate/Kill:
+	// TermCh/KillCh observability must stay untouched.
+	if fp := f.Processes()[0]; fp.Terminated() || fp.Killed() {
+		t.Error("Terminated()/Killed() = true after ctx cancel, want false")
+	}
+}
+
 func TestCallRecording(t *testing.T) {
 	f := runnertest.New(t)
 	f.Script(runnertest.Script{Name: "ethtool", Match: runnertest.AnyArgs()})

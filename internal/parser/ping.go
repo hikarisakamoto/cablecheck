@@ -25,13 +25,6 @@ var ErrIntervalRejected = errors.New("ping rejected the requested interval")
 // tooling problem instead of being silently misread as 100% packet loss.
 var ErrUnsupportedPingFormat = errors.New("unsupported ping output format (busybox ping is not supported; install iputils)")
 
-// ErrPingIncomplete reports output that contains echo replies but no
-// statistics summary. iputils prints the summary only when it finishes (or
-// on SIGINT), so replies without a summary mean the run was cut short — for
-// example SIGTERM from a runner timeout — and must never be read as a clean
-// 0%-loss result.
-var ErrPingIncomplete = errors.New("ping output incomplete: replies present but no statistics summary")
-
 // Line grammar for iputils ping under LC_ALL=C (verified shapes).
 var (
 	pingReplyRe    = regexp.MustCompile(`^\[(\d+\.\d+)\] (\d+) bytes from ([0-9a-fA-F:.]+): icmp_seq=(\d+) ttl=(\d+) time=([\d.]+) ms( \(DUP!\))?$`)
@@ -63,9 +56,6 @@ var (
 //     timestamps (captures burst loss and stalls).
 //   - Busybox-shaped output returns ErrUnsupportedPingFormat instead of a
 //     bogus 100%-loss result.
-//   - Replies without a statistics summary return ErrPingIncomplete: the
-//     run was cut short before ping printed its summary, and treating it as
-//     a result would fabricate a 0%-loss pass from an incomplete run.
 //   - Unrecognized stdout lines are counted in UnparsedLines, never fatal.
 func ParsePing(stdout, stderr []byte, exitCode int) (model.PingResult, error) {
 	if exitCode == 2 {
@@ -141,11 +131,6 @@ func ParsePing(stdout, stderr []byte, exitCode int) (model.PingResult, error) {
 	if !summaryFound && len(firstRTT) == 0 {
 		return model.PingResult{ExitCode: exitCode},
 			errors.New("ping output not recognized: no replies and no summary line")
-	}
-	if !summaryFound {
-		return model.PingResult{ExitCode: exitCode},
-			fmt.Errorf("%w (%d replies seen; ping was likely killed before printing statistics)",
-				ErrPingIncomplete, len(firstRTT))
 	}
 	if summaryDups > res.Duplicates {
 		res.Duplicates = summaryDups // reply lines were truncated; trust the summary

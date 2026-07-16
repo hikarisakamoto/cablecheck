@@ -4,7 +4,7 @@
 			{
 				"socket": 5,
 				"local_host": "10.0.0.1",
-				"local_port": 51844,
+				"local_port": 48812,
 				"remote_host": "10.0.0.2",
 				"remote_port": 5201
 			}
@@ -12,14 +12,14 @@
 		"version": "iperf 3.9",
 		"system_info": "Linux pc1 6.9.7-arch1-1 #1 SMP PREEMPT_DYNAMIC x86_64",
 		"timestamp": {
-			"time": "Tue, 14 Jul 2026 09:44:17 GMT",
-			"timesecs": 1752486257
+			"time": "Tue, 14 Jul 2026 09:44:51 GMT",
+			"timesecs": 1752486291
 		},
 		"connecting_to": {
 			"host": "10.0.0.2",
 			"port": 5201
 		},
-		"cookie": "yq2nabkvhe37fjplswm44wgkkkag3lmhh2b6",
+		"cookie": "b5vljvvvzp7fahmn2jj5cbi2z5x3aajkxsog",
 		"test_start": {
 			"protocol": "UDP",
 			"num_streams": 1,
@@ -313,15 +313,16 @@
 			"lost_packets": 412,
 			"packets": 170000,
 			"lost_percent": 0.24235294117647058,
+			"out_of_order": 3,
 			"sender": true
 		},
 		"cpu_utilization_percent": {
-			"host_total": 3.4,
-			"host_user": 0.5,
-			"host_system": 2.9,
-			"remote_total": 2.8,
-			"remote_user": 0.4,
-			"remote_system": 2.4
+			"host_total": 4.87,
+			"host_user": 0.42,
+			"host_system": 4.45,
+			"remote_total": 3.96,
+			"remote_user": 0.31,
+			"remote_system": 3.65
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -606,6 +607,38 @@ func TestProcessGroupKill(t *testing.T) {
 			prev = cur
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestStartLiveStdoutBounded(t *testing.T) {
+	testutil.LeakCheck(t)
+	r := newTestRunner()
+	spec := helperSpec(t, "emit-big-output")
+	spec.MaxOutputBytes = 4096
+	p, err := r.Start(t.Context(), spec)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Deliberately read nothing until the child has exited: the live stream
+	// must be bounded even with no reader draining it — the readiness-scan
+	// consumer stops reading after the banner, and a long-lived child's
+	// subsequent output must not accumulate unboundedly in memory.
+	res, err := p.Wait(t.Context())
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	live, err := io.ReadAll(p.Stdout())
+	if err != nil {
+		t.Fatalf("read live stdout: %v", err)
+	}
+	if int64(len(live)) != spec.MaxOutputBytes {
+		t.Errorf("live stream delivered %d bytes, want exactly the %d-byte cap", len(live), spec.MaxOutputBytes)
+	}
+	if want := bigOutput()[:4096]; !bytes.Equal(live, want) {
+		t.Error("live stream content is not the head of the emitted stream")
+	}
+	if !res.StdoutTruncated {
+		t.Error("StdoutTruncated = false, want true")
 	}
 }
 
