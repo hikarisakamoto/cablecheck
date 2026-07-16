@@ -1,0 +1,10 @@
+driver: e1000e
+version: 6.9.7-arch1-1
+firmware-version: 1.8-0
+expansion-rom-version:
+bus-info: 0000:00:1f.6
+supports-statistics: yes
+supports-test: yes
+supports-eeprom-access: yes
+supports-register-dump: yes
+supports-priv-flags: yes

@@ -1,0 +1,1 @@
+ping: cannot flood, minimal interval for user must be >= 2 ms, use -i 0.002 (or higher)
