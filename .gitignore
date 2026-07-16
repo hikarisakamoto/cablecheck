@@ -3,3 +3,4 @@
 cablecheck-report-*/
 *.test
 *.out
+.claude/
