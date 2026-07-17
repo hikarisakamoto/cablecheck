@@ -216,12 +216,6 @@ type Iperf3Result struct {
 	UDP *UDPStats
 	// Intervals are the per-second interval sum rows (forward direction).
 	Intervals []IntervalStat
-	// IntervalsReverse are the per-second rows of the reverse (peer-to-local)
-	// direction of a --bidir run: intervals[].sum_bidir_reverse when present
-	// (3.12+), otherwise re-derived from the per-stream rows. Empty for
-	// one-way runs. Their retransmit counters are usually nil — the reverse
-	// interval rows are the local receive view, which has none.
-	IntervalsReverse []IntervalStat
 	// IntervalMinBps is the slowest interval, excluding the first
 	// (slow-start) interval.
 	IntervalMinBps float64
@@ -259,10 +253,9 @@ type Iperf3Result struct {
 //   - Bidir runs (detected via end.streams[] rows whose direction flag is
 //     false, since -R is never used) ignore the top-level end sums entirely
 //     and aggregate per direction from the streams — 3.7-3.11 emit duplicate
-//     misattributed bidir sum keys. The forward interval series comes from
-//     intervals[].sum (re-derived from the stream rows when the surviving
-//     duplicate is the reverse one) and the reverse series from
-//     intervals[].sum_bidir_reverse, likewise falling back to the streams.
+//     misattributed bidir sum keys. The interval series keeps the forward
+//     direction: intervals[].sum, re-derived from the stream rows when the
+//     surviving duplicate is the reverse one.
 //   - UDP out_of_order is read from end.sum when present and otherwise
 //     summed from end.streams[].udp (where iperf3 actually emits it); it
 //     stays nil when no row reports one — absent is not zero.
@@ -324,13 +317,6 @@ func ParseIperf3(out []byte) (Iperf3Result, error) {
 			res.Intervals = append(res.Intervals, intervalRow(iv.Sum))
 		} else if row := deriveIntervalRow(iv.Streams, true); row != nil {
 			res.Intervals = append(res.Intervals, *row)
-		}
-		// Reverse: sum_bidir_reverse when the version emits it (3.12+);
-		// otherwise re-derived from the per-stream rows.
-		if iv.SumBidirReverse != nil {
-			res.IntervalsReverse = append(res.IntervalsReverse, intervalRow(iv.SumBidirReverse))
-		} else if row := deriveIntervalRow(iv.Streams, false); row != nil {
-			res.IntervalsReverse = append(res.IntervalsReverse, *row)
 		}
 	}
 	res.IntervalMinBps, res.IntervalMaxBps, res.IntervalAvgBps, res.IntervalCoV, res.Collapses =
@@ -404,8 +390,9 @@ func intervalRow(s *iperfSum) IntervalStat {
 
 // deriveIntervalRow aggregates the per-stream rows of one direction of a
 // bidir interval into a synthetic sum row; nil when the interval has no rows
-// for that direction. Retransmits stay nil unless at least one stream row
-// reports them — absent is not zero.
+// for that direction (sender true = forward, the only direction the result
+// carries). Retransmits stay nil unless at least one stream row reports
+// them — absent is not zero.
 func deriveIntervalRow(streams []iperfSum, sender bool) *IntervalStat {
 	var out *IntervalStat
 	for i := range streams {

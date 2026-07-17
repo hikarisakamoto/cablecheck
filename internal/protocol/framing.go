@@ -53,10 +53,12 @@ const readBufSize = 64 << 10
 
 // FrameError reports a fatal framing violation: a declared length outside
 // [MinFrameSize, MaxFrameSize], a body that does not parse as a JSON
-// envelope, or an outbound envelope that would exceed MaxFrameSize. A
-// corrupt length prefix cannot be resynchronized, so on the read side the
-// caller must close the connection; on the write side it is a caller bug
-// (the frame is never truncated or sent).
+// envelope, an outbound envelope that would exceed MaxFrameSize, or a read
+// on a Conn already poisoned by an earlier failure. A corrupt length prefix
+// cannot be resynchronized, so on the read side the caller must close the
+// connection; on the write side it is a caller bug (the frame is never
+// truncated or sent). Note the converse does not hold: every ReadEnvelope
+// error is fatal, not only FrameErrors — see ReadEnvelope.
 type FrameError struct {
 	// Len is the offending frame length: declared by the peer on reads,
 	// attempted locally on writes.
@@ -85,6 +87,7 @@ func (e *FrameError) Unwrap() error { return e.Err }
 type Conn struct {
 	nc          net.Conn
 	br          *bufio.Reader // sole reader of nc after construction
+	readErr     error         // first ReadEnvelope failure; poisons later reads (single-reader contract, like br)
 	wmu         sync.Mutex    // serializes WriteEnvelope
 	maxFrame    uint32
 	writeTO     time.Duration
@@ -110,10 +113,33 @@ func NewConn(nc net.Conn) *Conn {
 // ReadEnvelope blocks until one whole frame arrives and returns its decoded
 // envelope. A single absolute read deadline — now plus the idle timeout, set
 // fresh per frame — covers both the 4-byte header and the body, so a stalled
-// body times out too. Length violations and unparseable bodies return a
-// *FrameError, after which the stream is unsyncable and the caller must
-// close the connection; deadline errors match os.ErrDeadlineExceeded.
+// body times out too.
+//
+// ANY error return is fatal to the connection: the caller must close the
+// Conn and must never retry the read. A deadline or I/O error can fire after
+// the header or body was partially consumed, leaving the stream position
+// unknown — a retry would decode arbitrary body bytes as a length prefix and
+// desynchronize silently. To make that misuse loud instead of silent, a
+// failed ReadEnvelope poisons the Conn: every later call returns an
+// immediate *FrameError wrapping the original cause without touching the
+// wire. First errors keep their natural type: length violations and
+// unparseable bodies are *FrameError, idle timeouts match
+// os.ErrDeadlineExceeded (via errors.Is), truncation is io.ErrUnexpectedEOF.
 func (c *Conn) ReadEnvelope() (*Envelope, error) {
+	if c.readErr != nil {
+		return nil, &FrameError{Reason: "read after prior failure; stream position unknown, connection must be closed", Err: c.readErr}
+	}
+	env, err := c.readEnvelope()
+	if err != nil {
+		c.readErr = err
+		return nil, err
+	}
+	return env, nil
+}
+
+// readEnvelope reads and decodes exactly one frame; ReadEnvelope wraps it
+// with the poison-on-error bookkeeping.
+func (c *Conn) readEnvelope() (*Envelope, error) {
 	deadline := wallClock.Now().Add(time.Duration(c.idleTimeout.Load()))
 	if err := c.nc.SetReadDeadline(deadline); err != nil {
 		return nil, err
@@ -172,7 +198,10 @@ func (c *Conn) WriteEnvelope(env *Envelope) error {
 
 // SetIdleTimeout changes the per-frame read deadline used by subsequent
 // ReadEnvelope calls. It exists for the cable-test feature, which
-// pre-arranges a link-loss window on both sides before the link goes down.
+// pre-arranges a link-loss window on both sides before the link goes down —
+// widening the deadline in advance so the blocked read survives the outage.
+// It is not a polling knob: once a ReadEnvelope has timed out the connection
+// is done (see ReadEnvelope); there is no timeout-and-retry pattern.
 func (c *Conn) SetIdleTimeout(d time.Duration) {
 	c.idleTimeout.Store(int64(d))
 }

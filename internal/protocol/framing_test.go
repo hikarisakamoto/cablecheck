@@ -374,6 +374,97 @@ func TestFrameZeroLength(t *testing.T) {
 	}
 }
 
+// TestFrameInvalidJSONBody rejects a correctly-lengthed frame whose body is
+// not valid JSON with a typed *FrameError that carries the underlying JSON
+// error, reachable via Unwrap/errors.As. Downstream packages rely on the
+// FrameError type to decide close-vs-log, so this branch needs the same
+// typed-error guarantee as the length-violation branches.
+func TestFrameInvalidJSONBody(t *testing.T) {
+	testutil.LeakCheck(t)
+	p1, p2 := net.Pipe()
+	reader := protocol.NewConn(p1)
+	t.Cleanup(func() {
+		reader.Close()
+		p2.Close()
+	})
+
+	// Long enough to clear MinFrameSize, syntactically broken JSON.
+	body := []byte(`{"protocolVersion":"1",garbage`)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		writeRawFrame(t, p2, body)
+	}()
+
+	_, err := reader.ReadEnvelope()
+	var fe *protocol.FrameError
+	if !errors.As(err, &fe) {
+		t.Fatalf("ReadEnvelope on invalid JSON = %v (%T), want *protocol.FrameError", err, err)
+	}
+	if fe.Len != uint64(len(body)) {
+		t.Errorf("FrameError.Len = %d, want %d", fe.Len, len(body))
+	}
+	if fe.Err == nil {
+		t.Error("FrameError.Err is nil, want the underlying JSON error")
+	}
+	var syn *json.SyntaxError
+	if !errors.As(err, &syn) {
+		t.Errorf("json.SyntaxError not reachable via errors.As from %v", err)
+	}
+	testutil.WaitFor(t, done, "invalid-JSON writer goroutine")
+}
+
+// TestReadEnvelopePoisonedAfterError verifies that once ReadEnvelope fails —
+// here a deadline firing mid-frame, after the header and part of the body were
+// consumed — the Conn is poisoned: a retry (the classic poll pattern that
+// would otherwise resume mid-frame and decode a garbage length) gets an
+// immediate *FrameError that still exposes the original cause, instead of
+// silently desynchronized reads.
+func TestReadEnvelopePoisonedAfterError(t *testing.T) {
+	testutil.LeakCheck(t)
+	p1, p2 := net.Pipe()
+	reader := protocol.NewConn(p1)
+	t.Cleanup(func() {
+		reader.Close()
+		p2.Close()
+	})
+	reader.SetIdleTimeout(200 * time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var hdr [4]byte
+		binary.BigEndian.PutUint32(hdr[:], 100)
+		frame := append(hdr[:], []byte(`{"partial":true`)...) // 15 of the promised 100 body bytes, then silence
+		// A pathologically slow reader may deadline before consuming these
+		// bytes; the reader.Close below then unblocks this write with
+		// ErrClosedPipe, which is not a test failure.
+		if _, err := p2.Write(frame); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+			t.Errorf("write partial frame: %v", err)
+		}
+	}()
+
+	_, err := reader.ReadEnvelope()
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("first ReadEnvelope = %v, want os.ErrDeadlineExceeded", err)
+	}
+	var fe *protocol.FrameError
+	if errors.As(err, &fe) {
+		t.Fatalf("first ReadEnvelope error = %v, want the raw deadline error, not *FrameError", err)
+	}
+
+	_, err = reader.ReadEnvelope()
+	if !errors.As(err, &fe) {
+		t.Fatalf("ReadEnvelope after failure = %v (%T), want *protocol.FrameError", err, err)
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("poisoned error %v does not unwrap to the original os.ErrDeadlineExceeded", err)
+	}
+
+	reader.Close() // unblock the writer if it is still pending
+	testutil.WaitFor(t, done, "partial-frame writer goroutine")
+}
+
 // TestFrameTruncatedStream verifies that a peer hanging up mid-body surfaces
 // io.ErrUnexpectedEOF from the interrupted io.ReadFull.
 func TestFrameTruncatedStream(t *testing.T) {

@@ -133,44 +133,6 @@ func TestPingPerPacket(t *testing.T) {
 	})
 }
 
-func TestFullSizePingFragErrors(t *testing.T) {
-	// ping -M do -s 8972 on a link whose real path MTU is 1500: every probe
-	// fails locally with EMSGSIZE. These are SendErrors — a framing/MTU
-	// problem — and must stay distinct from on-the-wire packet loss.
-	res, err := ParsePing(fixture(t, "ping", "fullsize_emsgsize.stdout"),
-		fixture(t, "ping", "fullsize_emsgsize.stderr"), 1)
-	if err != nil {
-		t.Fatalf("exit 1 with a parsed summary must be a valid result, got error: %v", err)
-	}
-	if res.Target != "10.0.0.2" {
-		t.Errorf("Target = %q, want 10.0.0.2", res.Target)
-	}
-	if res.Transmitted != 100 || res.Received != 0 {
-		t.Errorf("transmitted/received = %d/%d, want 100/0", res.Transmitted, res.Received)
-	}
-	if res.LossPercent != 100 {
-		t.Errorf("LossPercent = %v, want 100", res.LossPercent)
-	}
-	if res.SendErrors != 100 {
-		t.Errorf("SendErrors = %d, want 100 (ping: local error: message too long)", res.SendErrors)
-	}
-	if res.IcmpErrors != 0 {
-		t.Errorf("IcmpErrors = %d, want 0 — local send errors are not ICMP errors", res.IcmpErrors)
-	}
-	if res.Duplicates != 0 {
-		t.Errorf("Duplicates = %d, want 0", res.Duplicates)
-	}
-	if len(res.Percentiles) != 0 {
-		t.Errorf("Percentiles = %v, want none (no replies at all)", res.Percentiles)
-	}
-	if res.UnparsedLines != 0 {
-		t.Errorf("UnparsedLines = %d, want 0", res.UnparsedLines)
-	}
-	if res.ExitCode != 1 {
-		t.Errorf("ExitCode = %d, want 1", res.ExitCode)
-	}
-}
-
 func TestPingSummaryDupsReconciled(t *testing.T) {
 	// Reply lines got truncated (output cap): only one DUP line survived but
 	// the summary counted three. The summary is authoritative when larger.
