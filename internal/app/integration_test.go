@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -210,14 +211,64 @@ func readReport(t *testing.T, outputDir string) (*model.Report, string) {
 	return &rep, dir
 }
 
+// assertQuickTrafficCalls asserts the full traffic suite's tool invocations
+// were recorded on one side's runner: the full-size -M do ping with the
+// MTU-derived -s 1472 payload, the UDP client with `-u -b 800000000` (80% of
+// the fixture's 1 Gb/s link, plain integer) and `-l 1472` (MTU-28), and — on
+// the coordinator — the native --bidir client.
+func assertQuickTrafficCalls(t *testing.T, side *intSide, wantBidirClient bool) {
+	t.Helper()
+	var fullSize, udp, bidir bool
+	contains := func(args []string, toks ...string) bool {
+		for _, tok := range toks {
+			if !slices.Contains(args, tok) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, c := range side.fr.Calls() {
+		switch c.Name {
+		case "ping":
+			if contains(c.Args, "-M", "do", "-s", "1472") {
+				fullSize = true
+			}
+		case "iperf3":
+			if contains(c.Args, "-u", "-b", "800000000", "-l", "1472") {
+				udp = true
+			}
+			if contains(c.Args, "-c", "--bidir") {
+				bidir = true
+			}
+		}
+	}
+	if !fullSize {
+		t.Errorf("no full-size ping call (-M do -s 1472) recorded")
+	}
+	if !udp {
+		t.Errorf("no UDP iperf3 client call (-u -b 800000000 -l 1472) recorded")
+	}
+	if bidir != wantBidirClient {
+		t.Errorf("--bidir client call recorded = %v, want %v", bidir, wantBidirClient)
+	}
+}
+
 // assertHealthyArtifacts asserts PC1's complete happy-path artifact set:
-// report.json parses with a passing classification, report.md carries all 23
-// section headers, summary.txt exists, and raw/ is non-empty.
+// report.json parses with a passing classification and the full traffic
+// suite's results, report.md carries all 23 section headers, summary.txt
+// exists, and raw/ is non-empty.
 func assertHealthyArtifacts(t *testing.T, pc1 *intSide) {
 	t.Helper()
 	rep, dir := readReport(t, pc1.cfg.OutputDir)
 	if rep.Partial {
 		t.Errorf("report.Partial = true, want false")
+	}
+	if len(rep.Tests.FullSizePing) != 2 || len(rep.Tests.UDP) != 2 {
+		t.Errorf("tests = %d full-size ping / %d UDP, want 2/2",
+			len(rep.Tests.FullSizePing), len(rep.Tests.UDP))
+	}
+	if rep.Tests.Bidirectional == nil {
+		t.Errorf("report carries no bidirectional result")
 	}
 	if rep.Classification != model.HealthGood && rep.Classification != model.HealthExcellent {
 		t.Errorf("classification = %s, want GOOD or EXCELLENT (reasons: %v)",
@@ -284,6 +335,11 @@ func testHappyPathQuickTCPOnly(t *testing.T) {
 			}
 		}
 		assertHealthyArtifacts(t, pc1)
+		// The full traffic suite's tool invocations reached the runners: the
+		// MTU-derived full-size ping and UDP client on both sides, and the
+		// native --bidir client only on the coordinator.
+		assertQuickTrafficCalls(t, pc1, true)
+		assertQuickTrafficCalls(t, pc2, false)
 	})
 
 	t.Run("Interactive", func(t *testing.T) {
@@ -323,6 +379,8 @@ func testHappyPathQuickTCPOnly(t *testing.T) {
 			t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
 		}
 		assertHealthyArtifacts(t, pc1)
+		assertQuickTrafficCalls(t, pc1, true)
+		assertQuickTrafficCalls(t, pc2, false)
 	})
 }
 

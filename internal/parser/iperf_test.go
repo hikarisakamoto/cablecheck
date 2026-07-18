@@ -115,6 +115,146 @@ func TestIperf3TCPVersions(t *testing.T) {
 	})
 }
 
+// TestIperf3UDP pins the UDP normalization: jitter/lost/total/percent come
+// from end.sum (server-observed, preferred over the per-stream rows, whose
+// values deliberately differ in the fixture), while out_of_order — which real
+// iperf3 emits only on end.streams[].udp — is aggregated from the streams as
+// the fallback and stays nil when no row reports one (absent is not zero).
+func TestIperf3UDP(t *testing.T) {
+	t.Run("v3.9_loss_with_out_of_order", func(t *testing.T) {
+		res, err := ParseIperf3(fixture(t, "iperf", "udp_39_loss.json"))
+		if err != nil {
+			t.Fatalf("ParseIperf3: %v", err)
+		}
+		if res.Protocol != "UDP" {
+			t.Fatalf("Protocol = %q, want UDP", res.Protocol)
+		}
+		if res.UDP == nil {
+			t.Fatal("UDP = nil, want end.sum stats")
+		}
+		if res.Sent != nil || res.Received != nil || res.Bidir != nil {
+			t.Errorf("Sent/Received/Bidir = %v/%v/%v, want all nil for UDP", res.Sent, res.Received, res.Bidir)
+		}
+		// end.sum is preferred: the stream row carries 0.043/410/0.241, the
+		// sum 0.041/412/0.24 — a streams-first parser fails here.
+		if res.UDP.JitterMs != 0.041 {
+			t.Errorf("JitterMs = %v, want 0.041 from end.sum (not 0.043 from the stream row)", res.UDP.JitterMs)
+		}
+		if res.UDP.Lost != 412 {
+			t.Errorf("Lost = %d, want 412 from end.sum (not 410 from the stream row)", res.UDP.Lost)
+		}
+		if res.UDP.Total != 170000 {
+			t.Errorf("Total = %d, want 170000", res.UDP.Total)
+		}
+		if res.UDP.LostPercent != 0.24 {
+			t.Errorf("LostPercent = %v, want 0.24", res.UDP.LostPercent)
+		}
+		if res.UDP.ActualBps != 100096000.0 {
+			t.Errorf("ActualBps = %v, want 100096000", res.UDP.ActualBps)
+		}
+		// out_of_order lives only on the stream rows in real iperf3 output:
+		// the parser must fall back to summing them.
+		if res.UDP.OutOfOrder == nil {
+			t.Fatal("OutOfOrder = nil, want 3 aggregated from end.streams[].udp")
+		}
+		if *res.UDP.OutOfOrder != 3 {
+			t.Errorf("OutOfOrder = %d, want 3", *res.UDP.OutOfOrder)
+		}
+		if res.CPU == nil || res.CPU.HostTotal != 5.104061 {
+			t.Errorf("CPU = %+v, want host_total 5.104061", res.CPU)
+		}
+	})
+
+	t.Run("v3.16_no_out_of_order_anywhere", func(t *testing.T) {
+		res, err := ParseIperf3(fixture(t, "iperf", "udp_316.json"))
+		if err != nil {
+			t.Fatalf("ParseIperf3: %v", err)
+		}
+		if res.UDP == nil {
+			t.Fatal("UDP = nil, want end.sum stats")
+		}
+		if res.UDP.OutOfOrder != nil {
+			t.Errorf("OutOfOrder = %d, want nil — absent is not zero", *res.UDP.OutOfOrder)
+		}
+		if res.UDP.Lost != 0 || res.UDP.Total != 135862 || res.UDP.LostPercent != 0 {
+			t.Errorf("loss = %d/%d (%v%%), want 0/135862 (0%%)", res.UDP.Lost, res.UDP.Total, res.UDP.LostPercent)
+		}
+		if res.UDP.JitterMs != 0.015 {
+			t.Errorf("JitterMs = %v, want 0.015", res.UDP.JitterMs)
+		}
+	})
+}
+
+// TestIperf3BidirFromStreams pins the bidir decision across both JSON
+// generations: per-direction totals always come from end.streams[] sender
+// flags — never the top-level sums, which the 3.9 fixture deliberately makes
+// inconsistent (the 3.7-3.11 duplicate-key bug) — and the forward interval
+// series survives both the duplicate-"sum" shape (3.9, re-derived from the
+// stream rows) and the sum/sum_bidir_reverse shape (3.14).
+func TestIperf3BidirFromStreams(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, version string
+	}{
+		{"v3.9_duplicate_sum_keys", "bidir_39.json", "iperf 3.9"},
+		{"v3.14_sum_bidir_reverse", "bidir_314.json", "iperf 3.14"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := ParseIperf3(fixture(t, "iperf", tc.file))
+			if err != nil {
+				t.Fatalf("ParseIperf3: %v", err)
+			}
+			if res.Version != tc.version {
+				t.Errorf("Version = %q, want %q", res.Version, tc.version)
+			}
+			if res.Bidir == nil {
+				t.Fatal("Bidir = nil, want per-direction totals from end.streams[]")
+			}
+			if res.Sent != nil || res.Received != nil {
+				t.Errorf("Sent/Received = %v/%v, want nil in bidir mode (top-level sums are buggy 3.7-3.11)",
+					res.Sent, res.Received)
+			}
+			fwd, rev := res.Bidir.LocalToPeer, res.Bidir.PeerToLocal
+			// The fixture's top-level sum_sent says 1828e6 — a parser reading
+			// it lands far from the per-stream truth.
+			if fwd.BitsPerSecond != 941e6 {
+				t.Errorf("LocalToPeer.BitsPerSecond = %v, want 941e6 from the sender-flagged stream", fwd.BitsPerSecond)
+			}
+			if fwd.Bytes != 1176250000 {
+				t.Errorf("LocalToPeer.Bytes = %d, want 1176250000", fwd.Bytes)
+			}
+			if fwd.Retransmits == nil || *fwd.Retransmits != 17 {
+				t.Errorf("LocalToPeer.Retransmits = %v, want 17", fwd.Retransmits)
+			}
+			if rev.BitsPerSecond != 887e6 {
+				t.Errorf("PeerToLocal.BitsPerSecond = %v, want 887e6 from the reverse stream", rev.BitsPerSecond)
+			}
+			if rev.Bytes != 1108750000 {
+				t.Errorf("PeerToLocal.Bytes = %d, want 1108750000", rev.Bytes)
+			}
+			if rev.Retransmits == nil || *rev.Retransmits != 4 {
+				t.Errorf("PeerToLocal.Retransmits = %v, want 4", rev.Retransmits)
+			}
+			// Forward interval series: 10 rows at the forward rate. In the 3.9
+			// shape the surviving duplicate "sum" is the reverse one, so the
+			// forward row must have been re-derived from the stream rows.
+			if len(res.Intervals) != 10 {
+				t.Fatalf("len(Intervals) = %d, want 10", len(res.Intervals))
+			}
+			for i, iv := range res.Intervals {
+				if iv.Bps != 941e6 {
+					t.Fatalf("Intervals[%d].Bps = %v, want the forward 941e6 (not the reverse 887e6)", i, iv.Bps)
+				}
+			}
+			if res.Intervals[2].Retransmits == nil || *res.Intervals[2].Retransmits != 1 {
+				t.Errorf("Intervals[2].Retransmits = %v, want 1", res.Intervals[2].Retransmits)
+			}
+			if res.CongSender != "cubic" {
+				t.Errorf("CongSender = %q, want cubic", res.CongSender)
+			}
+		})
+	}
+}
+
 func TestIperf3ErrorObject(t *testing.T) {
 	res, err := ParseIperf3(fixture(t, "iperf", "client_error_refused.stdout"))
 	if !errors.Is(err, ErrIperfClient) {

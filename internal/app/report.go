@@ -187,8 +187,11 @@ func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResult
 		PC1:             local,
 		PC2:             remote,
 		Tests: model.TestsSection{
-			Ping: results.Ping,
-			TCP:  results.TCP,
+			Ping:          results.Ping,
+			FullSizePing:  results.FullSizePing,
+			TCP:           results.TCP,
+			UDP:           results.UDP,
+			Bidirectional: results.Bidir,
 		},
 		InitialCounters: results.InitialCounters,
 		FinalCounters:   results.FinalCounters,
@@ -203,14 +206,11 @@ func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResult
 	return rep
 }
 
-// skippedTests names the planned tests this version cannot run yet: the v1
-// quick plan is TCP-only, and cable diagnostics ship in a later version.
+// skippedTests names the planned tests this version cannot run yet: the quick
+// plan now runs the full traffic suite (full-size ping, UDP, bidirectional
+// stress), so only the opt-in cable diagnostics remain unimplemented.
 func (a *App) skippedTests() []model.SkippedTest {
-	skipped := []model.SkippedTest{
-		{Name: "full_size_ping", Reason: "not part of the TCP-only quick plan in this version"},
-		{Name: "udp", Reason: "not part of the TCP-only quick plan in this version"},
-		{Name: "bidir", Reason: "not part of the TCP-only quick plan in this version"},
-	}
+	var skipped []model.SkippedTest
 	if a.cfg.CableTest {
 		skipped = append(skipped, model.SkippedTest{
 			Name: "cable_test", Reason: "cable diagnostics are not implemented in this version",

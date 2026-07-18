@@ -31,6 +31,18 @@ const (
 	OpIperfServerStop = "iperf3_server_stop"
 	// OpIperfClientRun runs a TCP iperf3 client phase (IperfClientRunParams).
 	OpIperfClientRun = "iperf3_client_run"
+	// OpPingFullSize runs the full-size non-fragmenting ping; the worker
+	// computes the -s payload from its OWN interface MTU, so the params
+	// carry only the target and count (PingFullSizeParams).
+	OpPingFullSize = "ping_fullsize"
+	// OpIperfUDPRun runs a UDP iperf3 client phase (UDPRunParams); the -l
+	// datagram size is computed from the worker's own MTU.
+	OpIperfUDPRun = "iperf3_udp_run"
+	// OpIperfCaps reports the worker's detected iperf3 capabilities (no
+	// params) so the coordinator can compute the effective set (local AND
+	// peer) before choosing the native --bidir path or the two-phase
+	// fallback.
+	OpIperfCaps = "iperf3_caps"
 	// OpCancel aborts the in-flight op; it is intercepted by the peer
 	// session layer and never reaches HandleOp.
 	OpCancel = "cancel"
@@ -89,6 +101,30 @@ type IperfClientRunParams struct {
 	Bidir bool `json:"bidir"`
 }
 
+// PingFullSizeParams are the parameters of OpPingFullSize. The payload size
+// is deliberately absent: each side derives MTU-28 from its own discovered
+// interface MTU (the two interfaces may be configured differently).
+type PingFullSizeParams struct {
+	// PeerIP is the address the worker pings (the coordinator's test IP).
+	PeerIP string `json:"peerIp"`
+	// Count is the number of echo requests.
+	Count int `json:"count"`
+}
+
+// UDPRunParams are the parameters of OpIperfUDPRun.
+type UDPRunParams struct {
+	// LocalIP is the worker-local address the client binds to (-B).
+	LocalIP string `json:"localIp"`
+	// PeerIP is the server address the client connects to (-c).
+	PeerIP string `json:"peerIp"`
+	// Port is the iperf3 port.
+	Port uint16 `json:"port"`
+	// DurationSec is the -t test duration in seconds.
+	DurationSec int `json:"durationSec"`
+	// RateBps is the -b target rate in bits per second (plain integer).
+	RateBps uint64 `json:"rateBps"`
+}
+
 // LinkSettingsResult is the payload of a completed OpLinkSettings.
 type LinkSettingsResult struct {
 	// Settings is the parsed ethtool link state.
@@ -126,6 +162,24 @@ type TCPRunResult struct {
 	Incomplete bool `json:"incomplete,omitempty"`
 }
 
+// UDPRunResult is the payload of a completed OpIperfUDPRun.
+type UDPRunResult struct {
+	// UDP is the loss/jitter result (Direction is filled by the coordinator).
+	UDP model.UDPResult `json:"udp"`
+	// Incomplete marks a partial result from a canceled or failed run.
+	Incomplete bool `json:"incomplete,omitempty"`
+}
+
+// BidirRunResult is the outcome of a native --bidir client run; it stays
+// local to the coordinator (the client always runs on PC1), but shares the
+// run-result shape of the other iperf3 phases.
+type BidirRunResult struct {
+	// Bidir is the bidirectional stress result.
+	Bidir model.BidirResult `json:"bidir"`
+	// Incomplete marks a partial result from a canceled or failed run.
+	Incomplete bool `json:"incomplete,omitempty"`
+}
+
 // opDecoders is the fixed op-to-result-decoder table: the op name alone
 // determines the concrete payload type — never reflection on foreign input.
 var opDecoders = map[string]func(json.RawMessage) (any, error){
@@ -135,6 +189,9 @@ var opDecoders = map[string]func(json.RawMessage) (any, error){
 	OpIperfServerStart: decodeAs[ServerStartResult],
 	OpIperfServerStop:  decodeAs[ServerStopResult],
 	OpIperfClientRun:   decodeAs[TCPRunResult],
+	OpPingFullSize:     decodeAs[PingRunResult],
+	OpIperfUDPRun:      decodeAs[UDPRunResult],
+	OpIperfCaps:        decodeAs[model.Iperf3Caps],
 }
 
 // decodeAs unmarshals raw into a fresh *T.
@@ -172,6 +229,13 @@ type Ops struct {
 	Ping *PingTester
 	// Iperf serves the iperf3 server and client ops.
 	Iperf *IperfManager
+	// MTU is the discovered MTU of the interface under test; the full-size
+	// ping payload and the UDP datagram size are computed from it (MTU-28,
+	// never hardcoded).
+	MTU int
+	// IperfCaps are the locally detected iperf3 capabilities, served by
+	// OpIperfCaps.
+	IperfCaps model.Iperf3Caps
 
 	mu      sync.Mutex
 	servers map[uint16]*ServerHandle
@@ -219,6 +283,25 @@ func (o *Ops) HandleOp(ctx context.Context, op string, params json.RawMessage,
 		}
 		return &PingRunResult{Ping: res, Notes: notes}, StatusOK, nil
 
+	case OpPingFullSize:
+		var p PingFullSizeParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, StatusRejected, err
+		}
+		addr, err := netip.ParseAddr(p.PeerIP)
+		if err != nil {
+			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad peerIp: %w", op, err)
+		}
+		res, notes, err := o.Ping.FullSize(ctx, addr, o.MTU, p.Count)
+		if err != nil {
+			return nil, statusFor(err), err
+		}
+		return &PingRunResult{Ping: res, Notes: notes}, StatusOK, nil
+
+	case OpIperfCaps:
+		caps := o.IperfCaps
+		return &caps, StatusOK, nil
+
 	case OpIperfServerStart:
 		return o.handleServerStart(ctx, params)
 
@@ -240,6 +323,26 @@ func (o *Ops) HandleOp(ctx context.Context, op string, params json.RawMessage,
 		}
 		res, err := o.Iperf.RunTCPClient(ctx, local, remote, p.Port,
 			time.Duration(p.DurationSec)*time.Second, p.Streams, p.Bidir)
+		if err != nil {
+			return res, statusFor(err), err
+		}
+		return res, StatusOK, nil
+
+	case OpIperfUDPRun:
+		var p UDPRunParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, StatusRejected, err
+		}
+		local, err := netip.ParseAddr(p.LocalIP)
+		if err != nil {
+			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad localIp: %w", op, err)
+		}
+		remote, err := netip.ParseAddr(p.PeerIP)
+		if err != nil {
+			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad peerIp: %w", op, err)
+		}
+		res, err := o.Iperf.RunUDPClient(ctx, local, remote, p.Port,
+			time.Duration(p.DurationSec)*time.Second, p.RateBps, UDPPayloadForMTU(o.MTU))
 		if err != nil {
 			return res, statusFor(err), err
 		}

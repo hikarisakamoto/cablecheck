@@ -3,6 +3,7 @@ package testsuite
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -20,10 +21,12 @@ func newTestOps(t *testing.T, fr *runnertest.FakeRunner) *Ops {
 	clk := clocktest.New(time.Unix(1_700_000_000, 0))
 	m := &IperfManager{R: fr, Clock: clk, TestID: "ct-test", Identify: fakeIdentify}
 	return &Ops{
-		Counters: &CounterCollector{R: fr, Clock: clk, IfName: "eth0", SysfsRoot: root},
-		Link:     &LinkInspector{R: fr, IfName: "eth0"},
-		Ping:     &PingTester{R: fr},
-		Iperf:    m,
+		Counters:  &CounterCollector{R: fr, Clock: clk, IfName: "eth0", SysfsRoot: root},
+		Link:      &LinkInspector{R: fr, IfName: "eth0"},
+		Ping:      &PingTester{R: fr},
+		Iperf:     m,
+		MTU:       1500,
+		IperfCaps: model.Iperf3Caps{Version: "3.16", JSON: true, Reverse: true, UDP: true, Bidir: true, OneOff: true},
 	}
 }
 
@@ -102,6 +105,41 @@ func TestOpsDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("IperfCaps", func(t *testing.T) {
+		ops := newTestOps(t, runnertest.New(t))
+		res, status, err := ops.HandleOp(ctx, OpIperfCaps, nil, discardProgress)
+		if err != nil || status != "ok" {
+			t.Fatalf("caps op = status %q err %v", status, err)
+		}
+		caps, ok := res.(*model.Iperf3Caps)
+		if !ok || !caps.Bidir || caps.Version != "3.16" {
+			t.Errorf("caps result = %T %+v, want the configured *model.Iperf3Caps", res, res)
+		}
+	})
+
+	t.Run("UDPClientRun", func(t *testing.T) {
+		fr := runnertest.New(t)
+		fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-u"),
+			StdoutFile: fixturePath("iperf", "udp_316.json")})
+		ops := newTestOps(t, fr)
+		params, _ := json.Marshal(UDPRunParams{LocalIP: "10.0.0.2", PeerIP: "10.0.0.1",
+			Port: 5201, DurationSec: 20, RateBps: 800000000})
+		res, status, err := ops.HandleOp(ctx, OpIperfUDPRun, params, discardProgress)
+		if err != nil || status != "ok" {
+			t.Fatalf("udp run op = status %q err %v", status, err)
+		}
+		ur, ok := res.(*UDPRunResult)
+		if !ok || ur.UDP.TargetBps != 800000000 {
+			t.Errorf("udp result = %T %+v, want *UDPRunResult with the requested target", res, res)
+		}
+		// The -l datagram size comes from the worker's OWN MTU (1500-28).
+		args := fr.CallsFor("iperf3")[0].Args
+		i := slices.Index(args, "-l")
+		if i < 0 || i+1 >= len(args) || args[i+1] != "1472" {
+			t.Errorf("udp client args %q: want -l 1472 computed from the worker MTU", args)
+		}
+	})
+
 	t.Run("UnknownOpRejected", func(t *testing.T) {
 		ops := newTestOps(t, runnertest.New(t))
 		_, status, err := ops.HandleOp(ctx, "warp_drive", nil, discardProgress)
@@ -175,6 +213,9 @@ func TestDecodeOpResult(t *testing.T) {
 		{OpIperfServerStart, &ServerStartResult{Port: 5201}},
 		{OpIperfServerStop, &ServerStopResult{Stopped: true}},
 		{OpIperfClientRun, &TCPRunResult{TCP: model.TCPResult{Retransmissions: &retr}}},
+		{OpPingFullSize, &PingRunResult{Ping: model.PingResult{Transmitted: 100, SendErrors: 100}}},
+		{OpIperfUDPRun, &UDPRunResult{UDP: model.UDPResult{TargetBps: 800000000, LossPercent: 0.24}}},
+		{OpIperfCaps, &model.Iperf3Caps{Version: "3.16", JSON: true, Bidir: true}},
 	}
 	for _, tc := range cases {
 		raw, err := json.Marshal(tc.payload)

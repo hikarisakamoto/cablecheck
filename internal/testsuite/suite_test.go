@@ -94,8 +94,14 @@ func TestQuickPlanDrivesSteps(t *testing.T) {
 	fr.Script(runnertest.Script{Name: "ip", Result: fixture(t, "ip", "linkstats_clean")})
 	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-i", "0.02"),
 		Result: fixture(t, "ping", "quick_clean_100")})
+	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-M", "do"),
+		StdoutFile: fixturePath("ping", "fullsize_ok.txt")})
 	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
 		StdoutFile: fixturePath("iperf", "tcp_39_fwd.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("--bidir"),
+		StdoutFile: fixturePath("iperf", "bidir_314.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-u"),
+		StdoutFile: fixturePath("iperf", "udp_316.json")})
 	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-s"),
 		StdoutFile: fixturePath("iperf", "server_listening.txt")})
 
@@ -105,24 +111,22 @@ func TestQuickPlanDrivesSteps(t *testing.T) {
 	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}})
 	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 1}})
 	rc.reply(OpPingRun, &PingRunResult{Ping: model.PingResult{Received: 100, IntervalUsedSec: 0.02}})
-	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
-	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+	rc.reply(OpPingFullSize, &PingRunResult{Ping: model.PingResult{Transmitted: 100, Received: 100}})
+	rc.reply(OpIperfCaps, &model.Iperf3Caps{Version: "3.16", JSON: true, UDP: true, Bidir: true})
+	// One one-off server per remote-hosted phase: TCP forward, bidir, UDP forward.
+	for range 3 {
+		rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+		rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+	}
 	rc.reply(OpIperfClientRun, &TCPRunResult{TCP: model.TCPResult{SenderBitsPerSecond: 5e8, ReceiverBitsPerSecond: 4.9e8}})
+	rc.reply(OpIperfUDPRun, &UDPRunResult{UDP: model.UDPResult{
+		TargetBps: 800000000, ActualSenderBps: 799958000, JitterMs: 0.02}})
 
 	var steps []string
 	results := &SessionResults{}
-	plan := &QuickPlan{
-		Ops:         ops,
-		LocalIP:     netip.MustParseAddr("10.0.0.1"),
-		PeerIP:      netip.MustParseAddr("10.0.0.2"),
-		IperfPort:   5201,
-		TCPDuration: 30 * time.Second,
-		Streams:     4,
-		PingCount:   100,
-		Results:     results,
-		OnStep: func(step, total int, name string) {
-			steps = append(steps, fmt.Sprintf("[%d/%d] %s", step, total, name))
-		},
+	plan := newQuickPlan(ops, results)
+	plan.OnStep = func(step, total int, name string) {
+		steps = append(steps, fmt.Sprintf("[%d/%d] %s", step, total, name))
 	}
 	if err := plan.Run(context.Background(), rc); err != nil {
 		t.Fatalf("plan.Run: %v", err)
@@ -139,8 +143,17 @@ func TestQuickPlanDrivesSteps(t *testing.T) {
 		}
 	}
 
-	wantOps := []string{OpLinkSettings, OpCountersSnapshot, OpPingRun,
-		OpIperfServerStart, OpIperfServerStop, OpIperfClientRun, OpCountersSnapshot}
+	wantOps := []string{
+		OpLinkSettings,                        // [1] link settings
+		OpCountersSnapshot,                    // [2] initial counters
+		OpPingRun,                             // [3] ping stability
+		OpPingFullSize,                        // [4] full-size ping
+		OpIperfServerStart, OpIperfServerStop, // [5] TCP fwd (server on PC2)
+		OpIperfClientRun,                                   // [6] TCP rev (client on PC2)
+		OpIperfCaps, OpIperfServerStart, OpIperfServerStop, // [7] native bidir
+		OpIperfServerStart, OpIperfServerStop, OpIperfUDPRun, // [8] UDP both directions
+		OpCountersSnapshot, // [9] final counters
+	}
 	if !slices.Equal(rc.ops, wantOps) {
 		t.Errorf("remote op order = %q, want %q", rc.ops, wantOps)
 	}
@@ -194,6 +207,19 @@ func assertQuickResults(t *testing.T, results *SessionResults) {
 		[]string{model.DirectionPC1ToPC2, model.DirectionPC2ToPC1}) {
 		t.Errorf("tcp directions = %q, want both directions in order", got)
 	}
+	if got := directions(t, results.FullSizePing, func(p model.PingResult) string { return p.Direction }); !slices.Equal(got,
+		[]string{model.DirectionPC1ToPC2, model.DirectionPC2ToPC1}) {
+		t.Errorf("full-size ping directions = %q, want both directions in order", got)
+	}
+	if got := directions(t, results.UDP, func(u model.UDPResult) string { return u.Direction }); !slices.Equal(got,
+		[]string{model.DirectionPC1ToPC2, model.DirectionPC2ToPC1}) {
+		t.Errorf("udp directions = %q, want both directions in order", got)
+	}
+	if results.Bidir == nil {
+		t.Errorf("results.Bidir = nil, want the bidirectional stress result")
+	} else if results.Bidir.TwoPhaseFallback {
+		t.Errorf("Bidir.TwoPhaseFallback = true, want native --bidir when both peers support it")
+	}
 }
 
 // directions maps a result slice to its direction labels.
@@ -207,17 +233,21 @@ func directions[T any](t *testing.T, items []T, key func(T) string) []string {
 }
 
 // newQuickPlan builds a QuickPlan over ops with the canonical test topology
-// (PC1 10.0.0.1, PC2 10.0.0.2, 30s TCP, 4 streams, 100-packet ping).
+// (PC1 10.0.0.1, PC2 10.0.0.2, 30s TCP, 20s UDP, 4 streams, 100-packet ping,
+// MTU 1500, bidir-capable local iperf3).
 func newQuickPlan(ops *Ops, results *SessionResults) *QuickPlan {
 	return &QuickPlan{
-		Ops:         ops,
-		LocalIP:     netip.MustParseAddr("10.0.0.1"),
-		PeerIP:      netip.MustParseAddr("10.0.0.2"),
-		IperfPort:   5201,
-		TCPDuration: 30 * time.Second,
-		Streams:     4,
-		PingCount:   100,
-		Results:     results,
+		Ops:            ops,
+		LocalIP:        netip.MustParseAddr("10.0.0.1"),
+		PeerIP:         netip.MustParseAddr("10.0.0.2"),
+		IperfPort:      5201,
+		TCPDuration:    30 * time.Second,
+		UDPDuration:    20 * time.Second,
+		MTU:            1500,
+		Streams:        4,
+		PingCount:      100,
+		LocalIperfCaps: model.Iperf3Caps{Version: "3.16", JSON: true, Reverse: true, UDP: true, Bidir: true, OneOff: true},
+		Results:        results,
 	}
 }
 
@@ -231,9 +261,12 @@ func scriptPreTCPSteps(t *testing.T, fr *runnertest.FakeRunner, rc *fakeCaller) 
 		Result: fixture(t, "ethtool", "stats_e1000e_clean")})
 	fr.Script(runnertest.Script{Name: "ip", Result: fixture(t, "ip", "linkstats_clean")})
 	fr.Script(runnertest.Script{Name: "ping", Result: fixture(t, "ping", "quick_clean_100")})
+	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-M", "do"),
+		StdoutFile: fixturePath("ping", "fullsize_ok.txt")})
 	rc.reply(OpLinkSettings, &LinkSettingsResult{Settings: model.LinkSettings{SpeedMbps: 1000, Duplex: "full"}})
 	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}})
 	rc.reply(OpPingRun, &PingRunResult{Ping: model.PingResult{Received: 100, IntervalUsedSec: 0.02}})
+	rc.reply(OpPingFullSize, &PingRunResult{Ping: model.PingResult{Transmitted: 100, Received: 100}})
 }
 
 // TestQuickPlanPreservesPartialTCPForward aborts the local forward TCP client

@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"time"
 
+	"cablecheck/internal/config"
 	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
 )
@@ -35,10 +36,26 @@ type SessionResults struct {
 	FinalCounters model.PeerCounters
 	// Ping holds the ping results, one per direction.
 	Ping []model.PingResult
+	// FullSizePing holds the full-MTU non-fragmenting ping results, one per
+	// direction.
+	FullSizePing []model.PingResult
 	// TCP holds the TCP throughput results, one per direction. An aborted
 	// run's partial result is preserved here too, with Incomplete set on
 	// the session results.
 	TCP []model.TCPResult
+	// Bidir holds the bidirectional stress result — a native --bidir run or
+	// the coordinated two-phase fallback.
+	Bidir *model.BidirResult
+	// UDP holds the UDP loss/jitter results, one per direction.
+	UDP []model.UDPResult
+	// UDPRateAssumed reports that the UDP target rate was assumed (100M
+	// fallback) because the negotiated link speed was unknown; the
+	// evaluator soft-pedals UDP findings on it.
+	UDPRateAssumed bool
+	// UDPNearSaturation reports that the UDP target rate exceeded 95% of
+	// the negotiated link speed (an explicit --udp-rate override): loss at
+	// self-inflicted saturation must not count against the cable.
+	UDPNearSaturation bool
 	// Notes records limitations hit during the run (denied ping interval,
 	// unavailable remote tools, ...).
 	Notes []string
@@ -46,15 +63,24 @@ type SessionResults struct {
 	Incomplete bool
 }
 
-// quickSteps are the display names of the TCP-only v1 quick plan, in order.
+// quickSteps are the display names of the quick plan's steps, in order. The
+// counters bracket every traffic step; link settings come first so the UDP
+// rate derivation later in the plan can use the negotiated speed.
 var quickSteps = []string{
 	"link settings",
 	"initial counter snapshot",
 	"ping stability",
+	"full-size ping",
 	"TCP throughput PC1 → PC2",
 	"TCP throughput PC2 → PC1",
+	"bidirectional stress",
+	"UDP loss and jitter",
 	"final counter snapshot",
 }
+
+// fullSizePingCount is the fixed probe count of the quick-mode full-size
+// ping (design tools.md §3: -c 100 -i 0.2).
+const fullSizePingCount = 100
 
 // QuickPlanSteps returns the ordered display names of the quick plan's
 // steps; progress lines render them as "[n/N] name".
@@ -64,10 +90,10 @@ func QuickPlanSteps() []string {
 	return out
 }
 
-// QuickPlan drives the TCP-only v1 quick test sequence on PC1: it executes
-// the local half of every step directly through Ops' components and the
-// remote half via the peer RemoteCaller, accumulating into Results. Its Run
-// method is the peer.PlanFunc the session executes.
+// QuickPlan drives the quick test sequence on PC1: it executes the local
+// half of every step directly through Ops' components and the remote half
+// via the peer RemoteCaller, accumulating into Results. Its Run method is
+// the peer.PlanFunc the session executes.
 type QuickPlan struct {
 	// Ops bundles the local test components (the same set the worker uses).
 	Ops *Ops
@@ -75,14 +101,26 @@ type QuickPlan struct {
 	LocalIP netip.Addr
 	// PeerIP is PC2's test-link address.
 	PeerIP netip.Addr
-	// IperfPort is the iperf3 data port.
+	// IperfPort is the iperf3 data port; the two-phase bidir fallback also
+	// uses IperfPort+1 (preflight probes both).
 	IperfPort uint16
 	// TCPDuration is the per-direction TCP test duration.
 	TCPDuration time.Duration
+	// UDPDuration is the per-direction UDP test duration.
+	UDPDuration time.Duration
+	// UDPRate is the explicit --udp-rate override; 0 derives 80% of the
+	// negotiated link speed at run time (config.DefaultUDPRate).
+	UDPRate model.Bitrate
+	// MTU is PC1's discovered interface MTU: the full-size ping payload and
+	// the UDP datagram size are MTU-28, computed, never hardcoded.
+	MTU int
 	// Streams is the iperf3 -P parallel stream count.
 	Streams int
 	// PingCount is the quick-ping packet count.
 	PingCount int
+	// LocalIperfCaps are PC1's detected iperf3 capabilities; the effective
+	// set is the AND with the worker's OpIperfCaps answer.
+	LocalIperfCaps model.Iperf3Caps
 	// Results receives everything measured; must be non-nil.
 	Results *SessionResults
 	// OnStep, when set, announces each step as (step, total, name).
@@ -96,8 +134,11 @@ func (q *QuickPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 		q.stepLink,
 		q.stepInitialCounters,
 		q.stepPing,
+		q.stepFullSizePing,
 		q.stepTCPForward,
 		q.stepTCPReverse,
+		q.stepBidir,
+		q.stepUDP,
 		q.stepFinalCounters,
 	}
 	for i, step := range steps {
@@ -219,10 +260,42 @@ func (q *QuickPlan) stepPing(ctx context.Context, rc peer.RemoteCaller) error {
 	return nil
 }
 
+// stepFullSizePing runs the full-size non-fragmenting ping in both
+// directions. Each side computes its own MTU-28 payload from its own
+// discovered MTU: PC1 from q.MTU here, the worker from its Ops.MTU inside
+// OpPingFullSize — the two interfaces may be configured differently.
+func (q *QuickPlan) stepFullSizePing(ctx context.Context, rc peer.RemoteCaller) error {
+	local, notes, err := q.Ops.Ping.FullSize(ctx, q.PeerIP, q.MTU, fullSizePingCount)
+	if err != nil {
+		return err
+	}
+	local.Direction = model.DirectionPC1ToPC2
+	q.Results.FullSizePing = append(q.Results.FullSizePing, local)
+	q.Results.Notes = append(q.Results.Notes, notes...)
+
+	out, err := q.callRemote(ctx, rc, OpPingFullSize,
+		PingFullSizeParams{PeerIP: q.LocalIP.String(), Count: fullSizePingCount}, q.fullSizeTimeout())
+	if err != nil {
+		return err
+	}
+	if pr, ok := out.(*PingRunResult); ok {
+		pr.Ping.Direction = model.DirectionPC2ToPC1
+		q.Results.FullSizePing = append(q.Results.FullSizePing, pr.Ping)
+		q.Results.Notes = append(q.Results.Notes, pr.Notes...)
+	}
+	return nil
+}
+
 // pingTimeout bounds the remote ping op: the worst ladder rung is -i 1.0
 // bounded by -w, plus slack for the earlier denied rungs and the RPC itself.
 func (q *QuickPlan) pingTimeout() time.Duration {
 	return time.Duration(q.PingCount)*1250*time.Millisecond + 30*time.Second
+}
+
+// fullSizeTimeout bounds the remote full-size ping op: the fixed 0.2s
+// interval bounded by -w plus the runner backstop and RPC grace.
+func (q *QuickPlan) fullSizeTimeout() time.Duration {
+	return time.Duration(fullSizePingCount)*250*time.Millisecond + 60*time.Second
 }
 
 // tcpTimeout bounds the remote iperf3 client op: -t plus the client's own
@@ -272,6 +345,133 @@ func (q *QuickPlan) recordTCP(res *TCPRunResult, direction string) {
 	}
 }
 
+// stepBidir runs the bidirectional stress test. It first asks the worker for
+// its iperf3 capabilities: with --bidir in the effective set (local AND peer)
+// it runs one native --bidir client on PC1 against a single one-off server on
+// PC2; otherwise it degrades to two coordinated one-way phases on IperfPort
+// and IperfPort+1 — recorded as a limitation note, never a failure.
+func (q *QuickPlan) stepBidir(ctx context.Context, rc peer.RemoteCaller) error {
+	out, err := q.callRemote(ctx, rc, OpIperfCaps, nil, opCallTimeout)
+	if err != nil {
+		return err
+	}
+	peerCaps, _ := out.(*model.Iperf3Caps)
+	if q.LocalIperfCaps.Bidir && peerCaps != nil && peerCaps.Bidir {
+		return q.bidirNative(ctx, rc)
+	}
+	note := fmt.Sprintf("iperf3 --bidir is unavailable on at least one peer; "+
+		"the bidirectional stress test ran as two coordinated one-way phases "+
+		"on ports %d and %d instead of a single simultaneous run",
+		q.IperfPort, q.IperfPort+1)
+	q.Results.Notes = append(q.Results.Notes, note)
+	return q.bidirFallback(ctx, rc, note)
+}
+
+// bidirNative runs the single-server --bidir path: server on PC2 (the design
+// exception — bidir is the one phase whose server side is fixed), client with
+// --bidir on PC1. A failed or aborted client still contributes its partial
+// result before the step reports the error.
+func (q *QuickPlan) bidirNative(ctx context.Context, rc peer.RemoteCaller) error {
+	out, err := q.callRemote(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout)
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		q.Results.Notes = append(q.Results.Notes,
+			"bidirectional stress skipped: peer iperf3 unavailable")
+		return nil
+	}
+	res, runErr := q.Ops.Iperf.RunBidirClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
+		q.TCPDuration, q.Streams)
+	if res != nil {
+		bidir := res.Bidir
+		q.Results.Bidir = &bidir
+		if res.Incomplete {
+			q.Results.Incomplete = true
+		}
+	}
+	if _, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
+		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout); runErr == nil && stopErr != nil {
+		return stopErr
+	}
+	return runErr
+}
+
+// bidirFallback runs the two-phase bidirectional fallback: both one-way
+// phases run SIMULTANEOUSLY (that is the stress), each on its own port —
+// PC1→PC2 toward the worker's server on IperfPort, PC2→PC1 toward a local
+// server on IperfPort+1 (both ports were preflight-probed). The local client
+// runs in its own goroutine while the remote client RPC blocks this one.
+func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, note string) error {
+	out, err := q.callRemote(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout)
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		q.Results.Notes = append(q.Results.Notes,
+			"bidirectional stress skipped: peer iperf3 unavailable")
+		return nil
+	}
+	h, err := q.Ops.Iperf.StartServer(ctx, q.LocalIP, q.IperfPort+1)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = h.Stop(ctx) }()
+	if err := h.Ready(ctx); err != nil {
+		return err
+	}
+
+	var localRes *TCPRunResult
+	var localErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		localRes, localErr = q.Ops.Iperf.RunTCPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
+			q.TCPDuration, q.Streams, false)
+	}()
+	remoteOut, remoteErr := q.callRemote(ctx, rc, OpIperfClientRun, IperfClientRunParams{
+		LocalIP:     q.PeerIP.String(),
+		PeerIP:      q.LocalIP.String(),
+		Port:        q.IperfPort + 1,
+		DurationSec: int(q.TCPDuration / time.Second),
+		Streams:     q.Streams,
+	}, q.tcpTimeout())
+	<-done
+
+	b := &model.BidirResult{
+		Duration:         model.Duration(q.TCPDuration),
+		ParallelStreams:  q.Streams,
+		TwoPhaseFallback: true,
+		Warnings:         []string{note},
+	}
+	if localRes != nil {
+		b.PC1ToPC2 = bidirDirFromTCP(localRes.TCP)
+		b.CPUUtilization = localRes.TCP.CPUUtilization
+		if localRes.Incomplete {
+			q.Results.Incomplete = true
+		}
+	}
+	if tr, ok := remoteOut.(*TCPRunResult); ok {
+		b.PC2ToPC1 = bidirDirFromTCP(tr.TCP)
+		if tr.Incomplete {
+			q.Results.Incomplete = true
+		}
+	}
+	q.Results.Bidir = b
+
+	if _, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
+		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout); stopErr != nil &&
+		localErr == nil && remoteErr == nil {
+		return stopErr
+	}
+	if localErr != nil {
+		return localErr
+	}
+	return remoteErr
+}
+
 // stepTCPReverse measures PC2 → PC1: the local side hosts the one-off
 // server, the worker's client sends toward PC1. When the remote run fails
 // but its failed status still carries a partial payload, that partial is
@@ -296,4 +496,116 @@ func (q *QuickPlan) stepTCPReverse(ctx context.Context, rc peer.RemoteCaller) er
 		q.recordTCP(tr, model.DirectionPC2ToPC1)
 	}
 	return err
+}
+
+// stepUDP measures UDP loss and jitter in both directions at one shared
+// target rate derived from the negotiated link speed (or the explicit
+// --udp-rate override). Each phase's server sits on the receiving side; each
+// client computes its -l datagram size from its own MTU.
+func (q *QuickPlan) stepUDP(ctx context.Context, rc peer.RemoteCaller) error {
+	rate := q.udpRate()
+
+	// Forward: server on PC2, local client sends.
+	out, err := q.callRemote(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout)
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		q.Results.Notes = append(q.Results.Notes,
+			"UDP loss/jitter skipped: peer iperf3 unavailable")
+		return nil
+	}
+	res, runErr := q.Ops.Iperf.RunUDPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
+		q.UDPDuration, uint64(rate), UDPPayloadForMTU(q.MTU))
+	q.recordUDP(res, model.DirectionPC1ToPC2)
+	if _, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
+		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout); runErr == nil && stopErr != nil {
+		return stopErr
+	}
+	if runErr != nil {
+		return runErr
+	}
+
+	// Reverse: local server, the worker's client sends toward PC1.
+	h, err := q.Ops.Iperf.StartServer(ctx, q.LocalIP, q.IperfPort)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = h.Stop(ctx) }()
+	if err := h.Ready(ctx); err != nil {
+		return err
+	}
+	out, err = q.callRemote(ctx, rc, OpIperfUDPRun, UDPRunParams{
+		LocalIP:     q.PeerIP.String(),
+		PeerIP:      q.LocalIP.String(),
+		Port:        q.IperfPort,
+		DurationSec: int(q.UDPDuration / time.Second),
+		RateBps:     uint64(rate),
+	}, q.udpTimeout())
+	if ur, ok := out.(*UDPRunResult); ok {
+		q.recordUDP(ur, model.DirectionPC2ToPC1)
+	}
+	return err
+}
+
+// recordUDP appends one UDP run outcome (complete or partial) to Results
+// under the given direction; a partial run additionally marks the session
+// results incomplete. A nil res records nothing.
+func (q *QuickPlan) recordUDP(res *UDPRunResult, direction string) {
+	if res == nil {
+		return
+	}
+	res.UDP.Direction = direction
+	q.Results.UDP = append(q.Results.UDP, res.UDP)
+	if res.Incomplete {
+		q.Results.Incomplete = true
+	}
+}
+
+// udpTimeout bounds the remote UDP client op: -t plus the client's own
+// runner slack plus RPC grace.
+func (q *QuickPlan) udpTimeout() time.Duration {
+	return q.UDPDuration + clientTimeoutSlack + 20*time.Second
+}
+
+// udpRate resolves the UDP target rate once per run and records its
+// side-effects into Results: an explicit --udp-rate is honored but flagged
+// (note + UDPNearSaturation) above 95% of the negotiated speed; otherwise
+// the rate is 80% of the negotiated speed via config.DefaultUDPRate, falling
+// back to 100M with a warning note and UDPRateAssumed when the speed is
+// unknown.
+func (q *QuickPlan) udpRate() model.Bitrate {
+	negotiated := q.negotiatedBitrate()
+	if q.UDPRate > 0 {
+		near, warns := config.CheckExplicitUDPRate(q.UDPRate, negotiated)
+		q.Results.Notes = append(q.Results.Notes, warns...)
+		if near {
+			q.Results.UDPNearSaturation = true
+		}
+		return q.UDPRate
+	}
+	rate, warns := config.DefaultUDPRate(negotiated)
+	q.Results.Notes = append(q.Results.Notes, warns...)
+	if negotiated == 0 {
+		q.Results.UDPRateAssumed = true
+	}
+	return rate
+}
+
+// negotiatedBitrate derives the negotiated link speed from the link-settings
+// step: the lowest positive speed either side reported (they should agree on
+// a healthy link; the minimum is the conservative choice), 0 when unknown.
+func (q *QuickPlan) negotiatedBitrate() model.Bitrate {
+	best := 0
+	for _, key := range []string{RolePC1Key, RolePC2Key} {
+		lr := q.Results.Link[key]
+		if lr == nil || lr.Settings.SpeedMbps <= 0 {
+			continue
+		}
+		if best == 0 || lr.Settings.SpeedMbps < best {
+			best = lr.Settings.SpeedMbps
+		}
+	}
+	return model.Bitrate(best) * 1_000_000
 }

@@ -183,10 +183,12 @@ func (a *App) buildSuite(pf *preflightInfo, rawDir, tag string, log *slog.Logger
 		}
 	}
 	ops := &testsuite.Ops{
-		Counters: &testsuite.CounterCollector{R: r, Clock: clk, IfName: pf.Iface.Name, SysfsRoot: a.sysfsRoot, RawDir: rawDir},
-		Link:     &testsuite.LinkInspector{R: r, IfName: pf.Iface.Name, RawDir: rawDir},
-		Ping:     &testsuite.PingTester{R: r, RawDir: rawDir},
-		Iperf:    &testsuite.IperfManager{R: r, Reg: registrar, RawDir: rawDir, Clock: clk, TestID: tag},
+		Counters:  &testsuite.CounterCollector{R: r, Clock: clk, IfName: pf.Iface.Name, SysfsRoot: a.sysfsRoot, RawDir: rawDir},
+		Link:      &testsuite.LinkInspector{R: r, IfName: pf.Iface.Name, RawDir: rawDir},
+		Ping:      &testsuite.PingTester{R: r, RawDir: rawDir},
+		Iperf:     &testsuite.IperfManager{R: r, Reg: registrar, RawDir: rawDir, Clock: clk, TestID: tag},
+		MTU:       pf.Iface.MTU,
+		IperfCaps: pf.LocalIperfCaps,
 	}
 	results := &testsuite.SessionResults{}
 	return &suite{
@@ -194,15 +196,19 @@ func (a *App) buildSuite(pf *preflightInfo, rawDir, tag string, log *slog.Logger
 		results: results,
 		reg:     reg,
 		plan: &testsuite.QuickPlan{
-			Ops:         ops,
-			LocalIP:     a.cfg.LocalIP,
-			PeerIP:      a.cfg.PeerIP,
-			IperfPort:   a.cfg.IperfPort,
-			TCPDuration: a.cfg.TCPDuration,
-			Streams:     a.cfg.ParallelStreams,
-			PingCount:   a.cfg.PingCount,
-			Results:     results,
-			OnStep:      a.deps.OnStep,
+			Ops:            ops,
+			LocalIP:        a.cfg.LocalIP,
+			PeerIP:         a.cfg.PeerIP,
+			IperfPort:      a.cfg.IperfPort,
+			TCPDuration:    a.cfg.TCPDuration,
+			UDPDuration:    a.cfg.UDPDuration,
+			UDPRate:        a.cfg.UDPRate,
+			MTU:            pf.Iface.MTU,
+			Streams:        a.cfg.ParallelStreams,
+			PingCount:      a.cfg.PingCount,
+			LocalIperfCaps: pf.LocalIperfCaps,
+			Results:        results,
+			OnStep:         a.deps.OnStep,
 		},
 	}
 }

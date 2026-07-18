@@ -32,10 +32,16 @@ func scriptQuickRun(fr *runnertest.FakeRunner) {
 		StdoutFile: fixture("ip", "linkstats_clean.json")})
 	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-c"),
 		StdoutFile: fixture("ping", "quick_clean_100.txt")})
+	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-M", "do"),
+		StdoutFile: fixture("ping", "fullsize_ok.txt")})
 	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-s"),
 		StdoutFile: fixture("iperf", "server_listening.txt")})
 	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
 		StdoutFile: fixture("iperf", "tcp_316_fwd.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("--bidir"),
+		StdoutFile: fixture("iperf", "bidir_314.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-u"),
+		StdoutFile: fixture("iperf", "udp_316.json")})
 }
 
 // syncBuffer is a mutex-guarded bytes.Buffer safe for concurrent writers.
@@ -246,8 +252,11 @@ func TestRunQuickHappyPath(t *testing.T) {
 
 	// PC1's step callbacks fired once per plan step, in order.
 	wantSteps := []string{
-		"link settings", "initial counter snapshot", "ping stability",
-		"TCP throughput PC1 → PC2", "TCP throughput PC2 → PC1", "final counter snapshot",
+		"link settings", "initial counter snapshot",
+		"ping stability", "full-size ping",
+		"TCP throughput PC1 → PC2", "TCP throughput PC2 → PC1",
+		"bidirectional stress", "UDP loss and jitter",
+		"final counter snapshot",
 	}
 	if len(steps) != len(wantSteps) {
 		t.Fatalf("steps = %q, want %q", steps, wantSteps)
@@ -290,6 +299,24 @@ func TestRunQuickHappyPath(t *testing.T) {
 	}
 	if len(rep.Tests.TCP) != 2 || len(rep.Tests.Ping) != 2 {
 		t.Errorf("tests = %d TCP / %d ping, want 2/2", len(rep.Tests.TCP), len(rep.Tests.Ping))
+	}
+	if len(rep.Tests.FullSizePing) != 2 {
+		t.Errorf("tests carry %d full-size ping results, want both directions", len(rep.Tests.FullSizePing))
+	}
+	if len(rep.Tests.UDP) != 2 {
+		t.Errorf("tests carry %d UDP results, want both directions", len(rep.Tests.UDP))
+	} else {
+		for _, u := range rep.Tests.UDP {
+			// 1G negotiated (the ethtool fixture) → 80% = 800000000.
+			if u.TargetBps != 800000000 {
+				t.Errorf("UDP %s TargetBps = %d, want the derived 800000000", u.Direction, u.TargetBps)
+			}
+		}
+	}
+	if rep.Tests.Bidirectional == nil {
+		t.Errorf("tests carry no bidirectional result")
+	} else if rep.Tests.Bidirectional.TwoPhaseFallback {
+		t.Errorf("bidirectional ran as the two-phase fallback despite --bidir on both peers")
 	}
 	if rep.PC2.NIC.Name != "eth0" {
 		t.Errorf("peer machine info missing: PC2.NIC = %+v", rep.PC2.NIC)

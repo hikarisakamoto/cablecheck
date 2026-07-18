@@ -28,6 +28,11 @@ type preflightInfo struct {
 	LinkObservations []string
 	// Caps is the capability set exchanged in the handshake.
 	Caps protocol.Capabilities
+	// LocalIperfCaps is this side's detected iperf3 capability set; the
+	// quick plan ANDs it with the peer's answer to choose the native
+	// --bidir path or the two-phase fallback, and the worker serves it via
+	// OpIperfCaps.
+	LocalIperfCaps model.Iperf3Caps
 	// ToolVersions maps tool name to its detected version string.
 	ToolVersions map[string]string
 	// Warnings are non-fatal preflight findings, echoed into the report.
@@ -157,6 +162,7 @@ func (a *App) preflight(ctx context.Context) (*preflightInfo, error) {
 		return nil, err
 	}
 	pf.ToolVersions["iperf3"] = iperfCaps.Version
+	pf.LocalIperfCaps = iperfCaps
 
 	// 10. Remaining tool versions and link state (best effort).
 	if res, err := r.Run(ctx, runner.CommandSpec{

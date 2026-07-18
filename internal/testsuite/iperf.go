@@ -242,6 +242,81 @@ func (m *IperfManager) RunTCPClient(ctx context.Context, local, peer netip.Addr,
 	return &TCPRunResult{TCP: tcpFromIperf(parsed, dur, streams)}, nil
 }
 
+// RunBidirClient runs one native bidirectional stress phase as the iperf3
+// client (`--bidir`) toward the peer's single one-off server: the client side
+// is PC1, so the parser's client-to-server direction is PC1→PC2. Per-direction
+// totals always come from the per-stream sender flags (iperf3 3.7-3.11 emit
+// duplicate, misattributed top-level bidir sums). On any failure a non-nil
+// result marked Incomplete is returned alongside the error.
+func (m *IperfManager) RunBidirClient(ctx context.Context, local, peer netip.Addr, port uint16,
+	dur time.Duration, streams int) (*BidirRunResult, error) {
+	args := []string{
+		"-c", peer.String(),
+		"-B", local.String(),
+		"-p", strconv.Itoa(int(port)),
+		"-J",
+		"--connect-timeout", "3000",
+		"-t", strconv.Itoa(int(dur / time.Second)),
+		"-P", strconv.Itoa(streams),
+		"--bidir",
+	}
+	spec := teeRaw(runner.CommandSpec{
+		Name:    "iperf3",
+		Args:    args,
+		Timeout: dur + clientTimeoutSlack,
+		Label:   "iperf3-bidir-client",
+	}, m.RawDir)
+
+	partial := &BidirRunResult{
+		Incomplete: true,
+		Bidir:      model.BidirResult{Duration: model.Duration(dur), ParallelStreams: streams},
+	}
+	res, err := m.R.Run(ctx, spec)
+	if err != nil {
+		return partial, fmt.Errorf("testsuite: iperf3 bidir client: %w", err)
+	}
+	parsed, err := parser.ParseIperf3(res.Stdout)
+	if err != nil {
+		return partial, fmt.Errorf("testsuite: iperf3 bidir client: %w", err)
+	}
+	if parsed.Bidir == nil {
+		return partial, fmt.Errorf("testsuite: iperf3 bidir client: output carries no bidirectional streams")
+	}
+	out := model.BidirResult{
+		Duration:        model.Duration(dur),
+		ParallelStreams: streams,
+		PC1ToPC2:        bidirDirFromStats(parsed.Bidir.LocalToPeer),
+		PC2ToPC1:        bidirDirFromStats(parsed.Bidir.PeerToLocal),
+	}
+	if parsed.CPU != nil {
+		out.CPUUtilization = model.CPUUsage{
+			HostTotal: parsed.CPU.HostTotal, HostUser: parsed.CPU.HostUser, HostSystem: parsed.CPU.HostSystem,
+			RemoteTotal: parsed.CPU.RemoteTotal, RemoteUser: parsed.CPU.RemoteUser, RemoteSystem: parsed.CPU.RemoteSystem,
+		}
+	}
+	return &BidirRunResult{Bidir: out}, nil
+}
+
+// bidirDirFromStats maps one stream-derived direction onto the report model.
+// The stream rows carry a single rate per direction, recorded as the sender
+// side; the receiver rate is not reported separately in bidir mode.
+func bidirDirFromStats(d parser.DirStats) model.BidirDirection {
+	return model.BidirDirection{
+		SenderBitsPerSecond: d.BitsPerSecond,
+		Retransmissions:     d.Retransmits,
+	}
+}
+
+// bidirDirFromTCP maps one completed one-way TCP phase of the two-phase
+// fallback onto a bidir direction.
+func bidirDirFromTCP(tr model.TCPResult) model.BidirDirection {
+	return model.BidirDirection{
+		SenderBitsPerSecond:   tr.SenderBitsPerSecond,
+		ReceiverBitsPerSecond: tr.ReceiverBitsPerSecond,
+		Retransmissions:       tr.Retransmissions,
+	}
+}
+
 // tcpFromIperf maps a parsed one-way iperf3 TCP run onto the report model.
 func tcpFromIperf(p parser.Iperf3Result, dur time.Duration, streams int) model.TCPResult {
 	out := model.TCPResult{

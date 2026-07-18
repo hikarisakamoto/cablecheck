@@ -8,16 +8,18 @@ import (
 )
 
 // scriptHealthyQuick composes the complete healthy-run FakeRunner script set
-// one side of the TCP-only quick plan consumes, from the shared testdata
-// fixtures: the preflight probes (tool identities, iperf3 version+help
-// capability detection, ip -j addr interface discovery), the ethtool link
-// settings read (preflight and plan/op), exactly two counter snapshots
-// (ethtool -S and ip -j -s -s, before/after — Times-limited so a third
-// snapshot fails loudly), one stability ping (each side pings the other),
-// and one iperf3 one-off server Start plus one client Run (each side hosts
-// the server of its receiving direction and the client of its sending one).
-// side must be "pc1" or "pc2"; both sides currently share the same healthy
-// fixture set, the parameter pins the call sites for per-side divergence.
+// one side of the quick plan consumes, from the shared testdata fixtures:
+// the preflight probes (tool identities, iperf3 version+help capability
+// detection, ip -j addr interface discovery), the ethtool link settings read
+// (preflight and plan/op), exactly two counter snapshots (ethtool -S and
+// ip -j -s -s, before/after — Times-limited so a third snapshot fails
+// loudly), one stability ping plus one full-size -M do ping (each side pings
+// the other), the iperf3 one-off servers (each side hosts the receiving side
+// of its phases: TCP, bidir on pc2, UDP), one TCP client run per side, the
+// native --bidir client (pc1 only; the script is harmless on pc2), and one
+// UDP client run per side. side must be "pc1" or "pc2"; both sides currently
+// share the same healthy fixture set, the parameter pins the call sites for
+// per-side divergence.
 func scriptHealthyQuick(t *testing.T, fr *runnertest.FakeRunner, side string) {
 	t.Helper()
 	if side != "pc1" && side != "pc2" {
@@ -51,15 +53,26 @@ func scriptHealthyQuick(t *testing.T, fr *runnertest.FakeRunner, side string) {
 	fr.Script(runnertest.Script{Name: "ip", Match: runnertest.ArgsPrefix("-j", "-s", "-s"),
 		StdoutFile: fixture("ip", "linkstats_clean.json"), Times: 2})
 
-	// Ping stability toward the peer (ping both: one run per side).
+	// Ping stability toward the peer (ping both: one run per side), plus the
+	// full-size -M do variant. Both matchers rank equally (Contain), so the
+	// later-added -M do script wins for full-size calls and the plain one
+	// serves the quick ping.
 	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-c"),
 		StdoutFile: fixture("ping", "quick_clean_100.txt")})
+	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-M", "do"),
+		StdoutFile: fixture("ping", "fullsize_ok.txt")})
 
-	// iperf3 per direction: one one-off server (receiving phase, launched
-	// via Runner.Start, readiness from the banner fixture) and one client
-	// run (sending phase).
+	// iperf3: one-off servers for every receiving phase (launched via
+	// Runner.Start, readiness from the banner fixture), one TCP client run,
+	// the native --bidir client and the UDP client. The --bidir and -u
+	// scripts are added after the generic -c one so they win the
+	// equal-specificity tie for their phases.
 	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-s"),
 		StdoutFile: fixture("iperf", "server_listening.txt")})
 	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
 		StdoutFile: fixture("iperf", "tcp_316_fwd.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("--bidir"),
+		StdoutFile: fixture("iperf", "bidir_314.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-u"),
+		StdoutFile: fixture("iperf", "udp_316.json")})
 }
