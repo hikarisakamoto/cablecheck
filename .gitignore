@@ -4,3 +4,5 @@ cablecheck-report-*/
 *.test
 *.out
 .claude/
+/genexamples
+/tools/genexamples/genexamples
