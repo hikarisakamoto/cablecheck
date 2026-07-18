@@ -36,7 +36,7 @@ func dispatch(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	case "run":
 		return cmdRun(ctx, args[1:], stdin, stdout, stderr, build)
 	case "doctor":
-		return cmdDoctor(ctx, args[1:], stdout, stderr)
+		return cmdDoctor(ctx, args[1:], stdout, stderr, build)
 	case "report":
 		return cmdReport(ctx, args[1:], stdout, stderr)
 	case "version":
@@ -93,8 +93,8 @@ Usage:
 
 Commands:
   run      Run a coordinated cable test (start on both PCs, pc1 first)
-  doctor   Check local dependencies and configuration (not implemented yet)
-  report   Re-render report.md/summary.txt from a report.json (not implemented yet)
+  doctor   Check local dependencies and configuration
+  report   Re-render report.md/summary.txt from a report.json
   version  Print version, protocol and schema information
 
 Run "cablecheck run -h" for the full flag reference.

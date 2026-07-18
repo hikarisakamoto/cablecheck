@@ -6,6 +6,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"cablecheck/internal/app"
 	"cablecheck/internal/config"
 	"cablecheck/internal/model"
+	"cablecheck/internal/reporting"
 )
 
 // testBuild is the injected build identity used across the cli tests.
@@ -117,17 +120,91 @@ func TestCLIDispatch(t *testing.T) {
 		}
 	})
 
-	t.Run("doctor and report stubs exit 7", func(t *testing.T) {
-		for _, cmd := range []string{"doctor", "report"} {
-			code, _, errOut := runCLI(t, cmd)
-			if code != 7 {
-				t.Errorf("%s: code = %d, want 7", cmd, code)
-			}
-			if !strings.Contains(errOut, "not implemented yet") {
-				t.Errorf("%s: stderr misses the stub message:\n%s", cmd, errOut)
+	t.Run("report without a path exits 4 with usage", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "report")
+		if code != 4 {
+			t.Errorf("code = %d, want 4", code)
+		}
+		if !strings.Contains(errOut, "report.json") {
+			t.Errorf("stderr misses the missing-path hint:\n%s", errOut)
+		}
+	})
+
+	t.Run("report -h exits 0", func(t *testing.T) {
+		code, _, _ := runCLI(t, "report", "-h")
+		if code != 0 {
+			t.Errorf("code = %d, want 0", code)
+		}
+	})
+
+	t.Run("report on a missing file exits 4", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "report", filepath.Join(t.TempDir(), "nope.json"))
+		if code != 4 {
+			t.Errorf("code = %d, want 4", code)
+		}
+		if errOut == "" {
+			t.Errorf("stderr is empty, want a read error")
+		}
+	})
+
+	t.Run("report regenerates from a valid report.json exits 0", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "report.json")
+		if err := os.WriteFile(path, cliValidReportJSON(t), 0o600); err != nil {
+			t.Fatalf("write report.json: %v", err)
+		}
+		code, out, errOut := runCLI(t, "report", path)
+		if code != 0 {
+			t.Errorf("code = %d, want 0 (stderr: %s)", code, errOut)
+		}
+		if !strings.Contains(out, "report.md") {
+			t.Errorf("stdout misses the wrote-file confirmation:\n%s", out)
+		}
+		for _, name := range []string{"report.md", "summary.txt"} {
+			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+				t.Errorf("%s was not regenerated: %v", name, err)
 			}
 		}
 	})
+
+	t.Run("doctor -h exits 0", func(t *testing.T) {
+		code, _, _ := runCLI(t, "doctor", "-h")
+		if code != 0 {
+			t.Errorf("code = %d, want 0", code)
+		}
+	})
+
+	t.Run("doctor rejects positional arguments", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "doctor", "positional")
+		if code != 4 {
+			t.Errorf("code = %d, want 4", code)
+		}
+		if !strings.Contains(errOut, "positional") {
+			t.Errorf("stderr misses the positional diagnosis:\n%s", errOut)
+		}
+	})
+}
+
+// cliValidReportJSON renders a minimal valid report.json via the reporting
+// layer, so the CLI report test drives the real Regenerate engine end to end.
+func cliValidReportJSON(t *testing.T) []byte {
+	t.Helper()
+	score := 96
+	rep := &model.Report{
+		SchemaVersion:         model.SchemaVersion,
+		ToolVersion:           "1.0.0",
+		ProtocolVersion:       "1",
+		TestID:                "cli-report-test",
+		Configuration:         model.ConfigEcho{Role: "pc1", Mode: "quick"},
+		Classification:        model.HealthExcellent,
+		Score:                 &score,
+		ClassificationReasons: []string{"all measured tests passed"},
+	}
+	data, err := reporting.RenderJSON(rep)
+	if err != nil {
+		t.Fatalf("RenderJSON: %v", err)
+	}
+	return data
 }
 
 // TestExitCodeMapping pins the Run error-unwrap policy: ExitError wins, then

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
+	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
 	"cablecheck/internal/testutil"
 )
@@ -99,6 +101,13 @@ type intSpec struct {
 	// mangleReportChunk, on pc1, corrupts outbound report chunks at the
 	// sender boundary (the report-transfer corruption scenario).
 	mangleReportChunk func([]byte) []byte
+	// noBidirCaps makes this side's iperf3 report no --bidir support (its
+	// `iperf3 --help` fixture lacks the flag), driving the two-phase
+	// bidirectional fallback.
+	noBidirCaps bool
+	// stalePidfile, on the worker, is a live-looking iperf3 pidfile seeded
+	// into StateDir before the run so the stale-process preflight fails.
+	stalePidfile bool
 }
 
 // newIntSide builds one side: healthy fixture scripts, real clock, short
@@ -108,6 +117,13 @@ func newIntSide(t *testing.T, spec intSpec) *intSide {
 	t.Helper()
 	fr := runnertest.New(t)
 	scriptHealthyQuick(t, fr, string(spec.role))
+	if spec.noBidirCaps {
+		// Override the healthy `iperf3 --help` fixture (most-recent wins) so
+		// this side reports no --bidir support; the effective capability is
+		// the AND of both peers, driving the two-phase fallback.
+		fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsExact("--help"),
+			StdoutFile: fixture("iperf", "help_no_bidir.txt")})
+	}
 	if spec.planGate != nil {
 		// Times-limited scripts are consumed before the unlimited fixture
 		// script and FIFO among themselves: the first serves preflight
@@ -143,12 +159,16 @@ func newIntSide(t *testing.T, spec intSpec) *intSide {
 	}
 	out := &runOutput{}
 	states := make(chan peer.State, 32) // > the longest transition sequence
+	stateDir := t.TempDir()
+	if spec.stalePidfile {
+		seedStalePidfile(t, stateDir)
+	}
 	a, err := New(cfg, Deps{
 		Runner:   fr,
 		Stdin:    spec.stdin,
 		Stdout:   &out.stdout,
 		Stderr:   &out.stderr,
-		StateDir: t.TempDir(),
+		StateDir: stateDir,
 		Build:    BuildInfo{Version: "test"},
 		hooks: testHooks{
 			onState: func(st peer.State) {
@@ -353,6 +373,9 @@ func TestIntegration(t *testing.T) {
 	t.Run("MalformedFrameInjection", testMalformedFrameInjection)
 	t.Run("ReportTransferCorruption", testReportTransferCorruption)
 	t.Run("NoReportTransferFlag", testNoReportTransferFlag)
+	t.Run("NoBidirFallback", testNoBidirFallback)
+	t.Run("StaleIperf3Detection", testStaleIperf3Detection)
+	t.Run("PeerDisconnectMidTest", testPeerDisconnectMidTest)
 }
 
 // testHappyPathQuickTCPOnly runs the full quick plan to double success, in
@@ -735,5 +758,224 @@ func testNoReportTransferFlag(t *testing.T) {
 	}
 	if !strings.Contains(string(sum), "worker") {
 		t.Errorf("PC2 summary.txt is not the local worker fallback:\n%s", sum)
+	}
+}
+
+// testNoBidirFallback drives the two-phase bidirectional fallback: the worker
+// reports no iperf3 --bidir support, so the effective (ANDed) capability lacks
+// --bidir and the coordinator runs two coordinated one-way phases on distinct
+// ports instead of one native --bidir run. Both sides therefore record no
+// --bidir client, the coordinator's fallback used IperfPort+1 for the reverse
+// phase, and the report carries the limitation note plus TwoPhaseFallback.
+func testNoBidirFallback(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx := context.Background()
+	gate := make(chan struct{})
+	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45671, planGate: gate})
+	pc2 := startWorker(t, ctx, intSpec{iperfPort: 45673, noBidirCaps: true}, port)
+
+	waitForState(t, pc2.states, peer.StateTesting)
+	close(gate)
+
+	code2, err2 := pc2.app.Wait()
+	code1, err1 := pc1.app.Wait()
+	if code1 != ExitOK || err1 != nil {
+		t.Fatalf("pc1 = (%d, %v), want (0, nil)\npc1 %s\npc2 %s", code1, err1, pc1.out.dump(), pc2.out.dump())
+	}
+	if code2 != ExitOK || err2 != nil {
+		t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
+	}
+
+	// Neither side ran a --bidir client: the fallback is two one-way phases.
+	assertNoBidirClient(t, pc1)
+	assertNoBidirClient(t, pc2)
+
+	// The coordinator's fallback ran the reverse phase on IperfPort+1 (a
+	// distinct port), proving the two phases were coordinated on separate
+	// ports rather than a single simultaneous --bidir session.
+	if !usedIperfPort(pc1, 45672) {
+		t.Errorf("coordinator did not use the fallback reverse port %d", 45672)
+	}
+
+	rep, _ := readReport(t, pc1.cfg.OutputDir)
+	if rep.Tests.Bidirectional == nil {
+		t.Fatalf("report carries no bidirectional result")
+	}
+	if !rep.Tests.Bidirectional.TwoPhaseFallback {
+		t.Errorf("bidirectional result TwoPhaseFallback = false, want true")
+	}
+	if !warningsMention(rep, "one-way") {
+		t.Errorf("report warnings lack the two-phase limitation note: %v", rep.Warnings)
+	}
+}
+
+// assertNoBidirClient fails if the side ran any iperf3 client with --bidir.
+func assertNoBidirClient(t *testing.T, side *intSide) {
+	t.Helper()
+	for _, c := range side.fr.Calls() {
+		if c.Name == "iperf3" && slices.Contains(c.Args, "-c") && slices.Contains(c.Args, "--bidir") {
+			t.Errorf("iperf3 --bidir client recorded despite the fallback: %q", c.Args)
+		}
+	}
+}
+
+// usedIperfPort reports whether the side ran any iperf3 command against the
+// given port (via -p).
+func usedIperfPort(side *intSide, port int) bool {
+	want := strconv.Itoa(port)
+	for _, c := range side.fr.Calls() {
+		if c.Name != "iperf3" {
+			continue
+		}
+		for i := 0; i+1 < len(c.Args); i++ {
+			if c.Args[i] == "-p" && c.Args[i+1] == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// warningsMention reports whether any report warning contains sub.
+func warningsMention(rep *model.Report, sub string) bool {
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// seedStalePidfile writes a live-looking, ownership-verified iperf3 pidfile
+// (the running test binary itself, which passes VerifyOwnership) into a fake
+// prior-session directory under stateDir. There is no session marker, so
+// ScanStale does not treat the directory as owned by a live session and does
+// examine the pidfile — which then verifies as a live stale survivor.
+func seedStalePidfile(t *testing.T, stateDir string) {
+	t.Helper()
+	sessionDir := filepath.Join(stateDir, "stale-prior-session")
+	if err := os.Mkdir(sessionDir, 0o700); err != nil {
+		t.Fatalf("mkdir stale session dir: %v", err)
+	}
+	info, err := runner.NewProcessInfo(os.Getpid(), "iperf3-server", "stale-prior-session")
+	if err != nil {
+		t.Fatalf("NewProcessInfo(self): %v", err)
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal pidfile: %v", err)
+	}
+	path := filepath.Join(sessionDir, strconv.Itoa(info.PID)+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write stale pidfile: %v", err)
+	}
+}
+
+// testStaleIperf3Detection pre-seeds a live-looking iperf3 pidfile in the
+// worker's StateDir. The worker's stale-process preflight must fail with
+// remediation text and exit 4 without ever dialing the coordinator. The
+// coordinator, whose worker never connects, blocks on Accept; the operator
+// then cancels it (Ctrl+C — cancelling the coordinator's context is the
+// SIGINT path since signal.NotifyContext lives only in main), and it must
+// shut its listener down gracefully rather than deadlock. Cancellation is
+// applied only after the worker has provably failed, so the assertion that
+// the worker never connected is race-free.
+func testStaleIperf3Detection(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	pc1, port := startCoordinator(t, ctx1, intSpec{iperfPort: 45681})
+	pc2 := startWorker(t, context.Background(), intSpec{iperfPort: 45683, stalePidfile: true}, port)
+
+	code2, err2 := pc2.app.Wait()
+	if code2 != ExitConfig {
+		t.Errorf("pc2 = (%d, %v), want exit 4 for a stale iperf3 pidfile\n%s", code2, err2, pc2.out.dump())
+	}
+	// The preflight diagnostic must reach the operator with remediation text.
+	msg := pc2.out.stderr.String() + errString(err2)
+	if !strings.Contains(strings.ToLower(msg), "stale") {
+		t.Errorf("pc2 diagnostics do not mention the stale process:\n%s", msg)
+	}
+	if !strings.Contains(strings.ToLower(msg), "kill") {
+		t.Errorf("pc2 diagnostics lack remediation text (how to kill the survivor):\n%s", msg)
+	}
+	// The failing worker never opened the control connection.
+	if pc2.app.watch.TestID() != "" {
+		t.Errorf("worker completed a handshake despite failing preflight")
+	}
+
+	// The coordinator was still waiting for a peer that never dialed; the
+	// operator cancels it. The one thing that must NOT happen is a hang: Wait
+	// has to return promptly (bounded below by a watchdog) with a
+	// non-success code — whether the cancellation landed during preflight
+	// (config, 4), while blocked on Accept (interrupt, 6), or as an
+	// orchestration failure (5) does not matter for "shuts down gracefully".
+	cancel1()
+	done := make(chan struct{})
+	var code1 ExitCode
+	go func() {
+		code1, _ = pc1.app.Wait()
+		close(done)
+	}()
+	testutil.WaitFor(t, done, "coordinator deadlocked instead of shutting down after cancellation")
+	if code1 == ExitOK {
+		t.Errorf("pc1 = %d, want a non-success shutdown code after the worker never connected\n%s",
+			code1, pc1.out.dump())
+	}
+}
+
+// errString renders err for diagnostics, "" for nil.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// testPeerDisconnectMidTest hard-cancels the worker's context mid-TCP-test
+// (gated on the worker's fake iperf3 client Started channel, simulating a hard
+// death). The coordinator must write a partial report (partial:true) and exit
+// 5; the worker, killed mid-op, exits 5 too.
+func testPeerDisconnectMidTest(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx1 := context.Background()
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+
+	gate := make(chan struct{})
+	pc1, port := startCoordinator(t, ctx1, intSpec{iperfPort: 45691, planGate: gate})
+
+	// The reverse-direction TCP phase runs the worker's iperf3 client; hang it
+	// on Delay and use Started as the mid-test synchronization point.
+	workerClientStarted := make(chan struct{})
+	workerClientHang := make(chan struct{})
+	pc2 := startWorker(t, ctx2, intSpec{iperfPort: 45693}, port)
+	pc2.fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixture("iperf", "tcp_316_fwd.json"), Times: 1,
+		Delay: workerClientHang, Started: workerClientStarted})
+
+	waitForState(t, pc2.states, peer.StateTesting)
+	close(gate)
+
+	// Wait until the worker is provably mid-client, then hard-cancel it.
+	testutil.WaitFor(t, workerClientStarted, "pc2 iperf3 client to start")
+	cancel2()
+
+	code2, err2 := pc2.app.Wait()
+	code1, err1 := pc1.app.Wait()
+	if code2 != ExitInterrupt && code2 != ExitPeer {
+		t.Errorf("pc2 = (%d, %v), want exit 5 or 6 after a hard cancel\n%s", code2, err2, pc2.out.dump())
+	}
+	if code1 != ExitPeer {
+		t.Errorf("pc1 = (%d, %v), want exit 5 (peer disconnected)\n%s", code1, err1, pc1.out.dump())
+	}
+
+	// The coordinator preserved a partial report.
+	rep, _ := readReport(t, pc1.cfg.OutputDir)
+	if !rep.Partial {
+		t.Errorf("coordinator partial report has Partial = false, want true")
+	}
+	if rep.Failure == nil || rep.Failure.Error == "" {
+		t.Errorf("partial report misses FailureDetails: %+v", rep.Failure)
 	}
 }
