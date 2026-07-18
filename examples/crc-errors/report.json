@@ -1,0 +1,584 @@
+{
+  "schemaVersion": "1.0.0",
+  "toolVersion": "1.0.0",
+  "protocolVersion": "1",
+  "testId": "example-crc-errors",
+  "startedAt": "2026-01-02T15:04:05Z",
+  "finishedAt": "2026-01-02T15:05:35Z",
+  "duration": {
+    "ms": 90000,
+    "text": "1m30s"
+  },
+  "configuration": {
+    "role": "pc1",
+    "localIp": "192.168.100.1",
+    "peerIp": "192.168.100.2",
+    "interface": "enp3s0",
+    "mode": "quick",
+    "controlPort": 44300,
+    "iperfPort": 44301,
+    "tcpDuration": {
+      "ms": 30000,
+      "text": "30s"
+    },
+    "udpDuration": {
+      "ms": 20000,
+      "text": "20s"
+    },
+    "udpRate": {
+      "bps": 800000000,
+      "text": "800M"
+    },
+    "parallelStreams": 4,
+    "pingCount": 500,
+    "pingInterval": {
+      "ms": 20,
+      "text": "20ms"
+    },
+    "tcpRepeats": 1,
+    "monitorInterval": {
+      "ms": 1000,
+      "text": "1s"
+    },
+    "cableTest": false,
+    "cableTestTdr": false,
+    "output": ".",
+    "verbose": false,
+    "nonInteractive": false,
+    "noSudo": false,
+    "noReportTransfer": false,
+    "allowVirtualInterface": false,
+    "tokenGenerated": true
+  },
+  "pc1": {
+    "hostname": "alpha",
+    "kernel": "6.9.1-generic",
+    "os": "linux/amd64",
+    "nic": {
+      "name": "enp3s0",
+      "driver": "e1000e",
+      "speedMbps": 1000,
+      "duplex": "full",
+      "mtu": 1500,
+      "mac": "aa:bb:cc:00:11:22",
+      "usb": false
+    },
+    "toolVersions": {
+      "ethtool": "6.7",
+      "iperf3": "3.16",
+      "ping": "iputils-20240117"
+    }
+  },
+  "pc2": {
+    "hostname": "bravo",
+    "kernel": "6.9.1-generic",
+    "os": "linux/amd64",
+    "nic": {
+      "name": "enp4s0",
+      "driver": "e1000e",
+      "speedMbps": 1000,
+      "duplex": "full",
+      "mtu": 1500,
+      "mac": "aa:bb:cc:00:33:44",
+      "usb": false
+    },
+    "toolVersions": {
+      "ethtool": "6.7",
+      "iperf3": "3.16",
+      "ping": "iputils-20240117"
+    }
+  },
+  "tests": {
+    "ping": [
+      {
+        "direction": "pc1_to_pc2",
+        "target": "192.168.100.2",
+        "transmitted": 500,
+        "received": 500,
+        "duplicates": 0,
+        "sendErrors": 0,
+        "icmpErrors": 0,
+        "lossPercent": 0,
+        "rttMinMs": 0.18,
+        "rttAvgMs": 0.21,
+        "rttMaxMs": 0.35,
+        "rttMdevMs": 0.02,
+        "percentiles": {
+          "50": 0.21,
+          "90": 0.24,
+          "95": 0.26,
+          "99": 0.31
+        },
+        "longestSeqGap": 0,
+        "longestGapMs": 0,
+        "intervalUsedSec": 0.02,
+        "exitCode": 0,
+        "unparsedLines": 0
+      },
+      {
+        "direction": "pc2_to_pc1",
+        "target": "192.168.100.1",
+        "transmitted": 500,
+        "received": 500,
+        "duplicates": 0,
+        "sendErrors": 0,
+        "icmpErrors": 0,
+        "lossPercent": 0,
+        "rttMinMs": 0.18,
+        "rttAvgMs": 0.21,
+        "rttMaxMs": 0.35,
+        "rttMdevMs": 0.02,
+        "percentiles": {
+          "50": 0.21,
+          "90": 0.24,
+          "95": 0.26,
+          "99": 0.31
+        },
+        "longestSeqGap": 0,
+        "longestGapMs": 0,
+        "intervalUsedSec": 0.02,
+        "exitCode": 0,
+        "unparsedLines": 0
+      }
+    ],
+    "tcp": [
+      {
+        "direction": "pc1_to_pc2",
+        "duration": {
+          "ms": 30000,
+          "text": "30s"
+        },
+        "parallelStreams": 4,
+        "senderBitsPerSecond": 930400000,
+        "receiverBitsPerSecond": 930100000,
+        "retransmissions": 0,
+        "throughputVariation": 0.012,
+        "minimumIntervalBps": 927100000,
+        "maximumIntervalBps": 932100000,
+        "cpuUtilization": {
+          "hostTotal": 12.5,
+          "hostUser": 3.1,
+          "hostSystem": 9.4,
+          "remoteTotal": 9.8,
+          "remoteUser": 2.2,
+          "remoteSystem": 7.6
+        }
+      },
+      {
+        "direction": "pc2_to_pc1",
+        "duration": {
+          "ms": 30000,
+          "text": "30s"
+        },
+        "parallelStreams": 4,
+        "senderBitsPerSecond": 928900000,
+        "receiverBitsPerSecond": 928500000,
+        "retransmissions": 0,
+        "throughputVariation": 0.012,
+        "minimumIntervalBps": 925500000,
+        "maximumIntervalBps": 930500000,
+        "cpuUtilization": {
+          "hostTotal": 12.5,
+          "hostUser": 3.1,
+          "hostSystem": 9.4,
+          "remoteTotal": 9.8,
+          "remoteUser": 2.2,
+          "remoteSystem": 7.6
+        }
+      }
+    ],
+    "udp": [
+      {
+        "direction": "pc1_to_pc2",
+        "targetBps": 800000000,
+        "actualSenderBps": 799600000,
+        "actualReceiverBps": 799600000,
+        "lostPackets": 0,
+        "totalPackets": 67930,
+        "lossPercent": 0,
+        "jitterMs": 0.11,
+        "outOfOrder": 0,
+        "cpu": {
+          "hostTotal": 12.5,
+          "hostUser": 3.1,
+          "hostSystem": 9.4,
+          "remoteTotal": 9.8,
+          "remoteUser": 2.2,
+          "remoteSystem": 7.6
+        }
+      },
+      {
+        "direction": "pc2_to_pc1",
+        "targetBps": 800000000,
+        "actualSenderBps": 799300000,
+        "actualReceiverBps": 799300000,
+        "lostPackets": 0,
+        "totalPackets": 67928,
+        "lossPercent": 0,
+        "jitterMs": 0.11,
+        "outOfOrder": 0,
+        "cpu": {
+          "hostTotal": 12.5,
+          "hostUser": 3.1,
+          "hostSystem": 9.4,
+          "remoteTotal": 9.8,
+          "remoteUser": 2.2,
+          "remoteSystem": 7.6
+        }
+      }
+    ]
+  },
+  "initialCounters": {
+    "pc1": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 0,
+        "rx_align": 0,
+        "rx_crc": 0,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 0,
+        "rx_crc_errors": 0,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 0,
+          "frame_errors": 0,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 0
+        }
+      }
+    },
+    "pc2": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 0,
+        "rx_align": 0,
+        "rx_crc": 0,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 0,
+        "rx_crc_errors": 0,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 0,
+          "frame_errors": 0,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 0
+        }
+      }
+    }
+  },
+  "finalCounters": {
+    "pc1": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 0,
+        "rx_align": 12,
+        "rx_crc": 1543,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 12,
+        "rx_crc_errors": 1543,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 1543,
+          "frame_errors": 12,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 0
+        }
+      }
+    },
+    "pc2": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 0,
+        "rx_align": 0,
+        "rx_crc": 0,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 0,
+        "rx_crc_errors": 0,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 0,
+          "frame_errors": 0,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 0
+        }
+      }
+    }
+  },
+  "counterDeltas": {
+    "pc1": {
+      "link_resets": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_align": {
+        "delta": 12,
+        "ok": true
+      },
+      "rx_crc": {
+        "delta": 1543,
+        "ok": true
+      },
+      "rx_fifo": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_frame": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_missed": {
+        "delta": 0,
+        "ok": true
+      }
+    },
+    "pc2": {
+      "link_resets": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_align": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_crc": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_fifo": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_frame": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_missed": {
+        "delta": 0,
+        "ok": true
+      }
+    }
+  },
+  "monitoringEvents": null,
+  "warnings": null,
+  "skippedTests": null,
+  "classification": "FAILED",
+  "score": 25,
+  "classificationReasons": [
+    "CRC-class receive errors incremented by 1555 during the test."
+  ],
+  "recommendations": [
+    "Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun.",
+    "Isolation test: same machines with a different cable, then the same cable between different machines."
+  ],
+  "partial": false,
+  "findings": [
+    {
+      "ruleId": "PHY-02",
+      "category": "physical",
+      "severity": "failed",
+      "text": "CRC-class receive errors incremented by 1555 during the test.",
+      "evidence": [
+        "pc1: CRC-class error counters +1555 during the test"
+      ],
+      "hostSensitive": false
+    }
+  ],
+  "link": {
+    "pc1": {
+      "before": {
+        "speedMbps": 1000,
+        "duplex": "full",
+        "linkDetected": true,
+        "autoNeg": "on",
+        "port": "Twisted Pair",
+        "supportedModes": [
+          "10baseT/Half",
+          "100baseT/Full",
+          "1000baseT/Full"
+        ],
+        "advertisedModes": [
+          "1000baseT/Full"
+        ],
+        "partnerModes": [
+          "1000baseT/Full"
+        ],
+        "mdix": "on (auto)"
+      },
+      "after": {
+        "speedMbps": 1000,
+        "duplex": "full",
+        "linkDetected": true,
+        "autoNeg": "on",
+        "port": "Twisted Pair",
+        "supportedModes": [
+          "10baseT/Half",
+          "100baseT/Full",
+          "1000baseT/Full"
+        ],
+        "advertisedModes": [
+          "1000baseT/Full"
+        ],
+        "partnerModes": [
+          "1000baseT/Full"
+        ],
+        "mdix": "on (auto)"
+      }
+    },
+    "pc2": {
+      "before": {
+        "speedMbps": 1000,
+        "duplex": "full",
+        "linkDetected": true,
+        "autoNeg": "on",
+        "port": "Twisted Pair",
+        "supportedModes": [
+          "10baseT/Half",
+          "100baseT/Full",
+          "1000baseT/Full"
+        ],
+        "advertisedModes": [
+          "1000baseT/Full"
+        ],
+        "partnerModes": [
+          "1000baseT/Full"
+        ],
+        "mdix": "on (auto)"
+      },
+      "after": {
+        "speedMbps": 1000,
+        "duplex": "full",
+        "linkDetected": true,
+        "autoNeg": "on",
+        "port": "Twisted Pair",
+        "supportedModes": [
+          "10baseT/Half",
+          "100baseT/Full",
+          "1000baseT/Full"
+        ],
+        "advertisedModes": [
+          "1000baseT/Full"
+        ],
+        "partnerModes": [
+          "1000baseT/Full"
+        ],
+        "mdix": "on (auto)"
+      }
+    }
+  }
+}

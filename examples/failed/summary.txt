@@ -1,0 +1,22 @@
+CableCheck summary
+==================
+Test:     example-failed  (mode quick)
+Started:  2026-01-02T15:04:05Z   Duration: 1m30s
+Result:   FAILED   Score: 25/100   (PARTIAL RUN)
+Link:     1000 Mb/s full duplex  (pc1 enp3s0, pc2 enp4s0)
+
+Ping loss:        not run
+TCP throughput:   not run
+TCP retransmits:  not run
+UDP loss:         not run
+
+Findings (top 3 of 4):
+  [failed] PHY-01: The link was down when testing ended.
+  [failed] PHY-03: The link bounced 4 time(s) during the test.
+  [marker] LIM-01: Critical evidence is missing - a clean-looking result would not be trustworthy.
+Recommendations (top 3 of 3):
+  - Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops.
+  - Install the missing tools (iperf3/ethtool) and rerun for a conclusive result.
+  - Isolation test: same machines with a different cable, then the same cable between different machines.
+
+Full report: report.md and report.json in the report directory.

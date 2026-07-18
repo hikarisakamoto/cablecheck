@@ -1,0 +1,480 @@
+{
+  "schemaVersion": "1.0.0",
+  "toolVersion": "1.0.0",
+  "protocolVersion": "1",
+  "testId": "example-failed",
+  "startedAt": "2026-01-02T15:04:05Z",
+  "finishedAt": "2026-01-02T15:05:35Z",
+  "duration": {
+    "ms": 90000,
+    "text": "1m30s"
+  },
+  "configuration": {
+    "role": "pc1",
+    "localIp": "192.168.100.1",
+    "peerIp": "192.168.100.2",
+    "interface": "enp3s0",
+    "mode": "quick",
+    "controlPort": 44300,
+    "iperfPort": 44301,
+    "tcpDuration": {
+      "ms": 30000,
+      "text": "30s"
+    },
+    "udpDuration": {
+      "ms": 20000,
+      "text": "20s"
+    },
+    "udpRate": {
+      "bps": 800000000,
+      "text": "800M"
+    },
+    "parallelStreams": 4,
+    "pingCount": 500,
+    "pingInterval": {
+      "ms": 20,
+      "text": "20ms"
+    },
+    "tcpRepeats": 1,
+    "monitorInterval": {
+      "ms": 1000,
+      "text": "1s"
+    },
+    "cableTest": false,
+    "cableTestTdr": false,
+    "output": ".",
+    "verbose": false,
+    "nonInteractive": false,
+    "noSudo": false,
+    "noReportTransfer": false,
+    "allowVirtualInterface": false,
+    "tokenGenerated": true
+  },
+  "pc1": {
+    "hostname": "alpha",
+    "kernel": "6.9.1-generic",
+    "os": "linux/amd64",
+    "nic": {
+      "name": "enp3s0",
+      "driver": "e1000e",
+      "speedMbps": 1000,
+      "duplex": "full",
+      "mtu": 1500,
+      "mac": "aa:bb:cc:00:11:22",
+      "usb": false
+    },
+    "toolVersions": {
+      "ethtool": "6.7",
+      "iperf3": "3.16",
+      "ping": "iputils-20240117"
+    }
+  },
+  "pc2": {
+    "hostname": "bravo",
+    "kernel": "6.9.1-generic",
+    "os": "linux/amd64",
+    "nic": {
+      "name": "enp4s0",
+      "driver": "e1000e",
+      "speedMbps": 1000,
+      "duplex": "full",
+      "mtu": 1500,
+      "mac": "aa:bb:cc:00:33:44",
+      "usb": false
+    },
+    "toolVersions": {
+      "ethtool": "6.7",
+      "iperf3": "3.16",
+      "ping": "iputils-20240117"
+    }
+  },
+  "tests": {},
+  "initialCounters": {
+    "pc1": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 0,
+        "rx_align": 0,
+        "rx_crc": 0,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 0,
+        "rx_crc_errors": 0,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 0,
+          "frame_errors": 0,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 0
+        }
+      }
+    },
+    "pc2": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 0,
+        "rx_align": 0,
+        "rx_crc": 0,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 0,
+        "rx_crc_errors": 0,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 0,
+          "frame_errors": 0,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 0
+        }
+      }
+    }
+  },
+  "finalCounters": {
+    "pc1": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 4,
+        "rx_align": 0,
+        "rx_crc": 0,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 0,
+        "rx_crc_errors": 0,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 0,
+          "frame_errors": 0,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 4
+        }
+      }
+    },
+    "pc2": {
+      "capturedAt": "2026-01-02T15:04:05Z",
+      "standard": {
+        "link_resets": 4,
+        "rx_align": 0,
+        "rx_crc": 0,
+        "rx_fifo": 0,
+        "rx_frame": 0,
+        "rx_missed": 0
+      },
+      "driver": {
+        "rx_align_errors": 0,
+        "rx_crc_errors": 0,
+        "rx_packets": 48291733,
+        "tx_packets": 21837410
+      },
+      "raw": "",
+      "ipStats": {
+        "rx": {
+          "bytes": 61250873344,
+          "packets": 48291733,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0,
+          "length_errors": 0,
+          "crc_errors": 0,
+          "frame_errors": 0,
+          "fifo_errors": 0,
+          "missed_errors": 0,
+          "nohandler": 0
+        },
+        "tx": {
+          "bytes": 3021459287,
+          "packets": 21837410,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "aborted_errors": 0,
+          "fifo_errors": 0,
+          "window_errors": 0,
+          "heartbeat_errors": 0,
+          "carrier_changes": 4
+        }
+      }
+    }
+  },
+  "counterDeltas": {
+    "pc1": {
+      "link_resets": {
+        "delta": 4,
+        "ok": true
+      },
+      "rx_align": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_crc": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_fifo": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_frame": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_missed": {
+        "delta": 0,
+        "ok": true
+      }
+    },
+    "pc2": {
+      "link_resets": {
+        "delta": 4,
+        "ok": true
+      },
+      "rx_align": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_crc": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_fifo": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_frame": {
+        "delta": 0,
+        "ok": true
+      },
+      "rx_missed": {
+        "delta": 0,
+        "ok": true
+      }
+    }
+  },
+  "monitoringEvents": [
+    {
+      "at": "2026-01-02T15:04:15Z",
+      "type": "carrier_lost",
+      "detail": "carrier lost on pc1 enp3s0"
+    },
+    {
+      "at": "2026-01-02T15:04:17Z",
+      "type": "carrier_restored",
+      "detail": "carrier restored on pc1 enp3s0"
+    },
+    {
+      "at": "2026-01-02T15:04:45Z",
+      "type": "carrier_lost",
+      "detail": "carrier lost on pc1 enp3s0"
+    }
+  ],
+  "warnings": null,
+  "skippedTests": [
+    {
+      "name": "tcp_throughput",
+      "reason": "link went down before the TCP phase completed"
+    },
+    {
+      "name": "udp_loss",
+      "reason": "link went down before the UDP phase"
+    }
+  ],
+  "classification": "FAILED",
+  "score": 25,
+  "classificationReasons": [
+    "The link was down when testing ended.",
+    "The link bounced 4 time(s) during the test.",
+    "Critical evidence is missing — a clean-looking result would not be trustworthy.",
+    "The run was interrupted — the report covers only the tests that completed."
+  ],
+  "recommendations": [
+    "Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops.",
+    "Install the missing tools (iperf3/ethtool) and rerun for a conclusive result.",
+    "Isolation test: same machines with a different cable, then the same cable between different machines."
+  ],
+  "partial": true,
+  "findings": [
+    {
+      "ruleId": "PHY-01",
+      "category": "physical",
+      "severity": "failed",
+      "text": "The link was down when testing ended.",
+      "evidence": [
+        "post-test link state reports no carrier on at least one side"
+      ],
+      "hostSensitive": false
+    },
+    {
+      "ruleId": "PHY-03",
+      "category": "physical",
+      "severity": "failed",
+      "text": "The link bounced 4 time(s) during the test.",
+      "evidence": [
+        "carrier change counter advanced by 4 on the worse side"
+      ],
+      "hostSensitive": false
+    },
+    {
+      "ruleId": "LIM-01",
+      "category": "limitation",
+      "severity": "marker",
+      "text": "Critical evidence is missing — a clean-looking result would not be trustworthy.",
+      "evidence": [
+        "no TCP throughput result in either direction"
+      ],
+      "hostSensitive": false
+    },
+    {
+      "ruleId": "LIM-03",
+      "category": "limitation",
+      "severity": "marker",
+      "text": "The run was interrupted — the report covers only the tests that completed.",
+      "evidence": [
+        "partial run (interrupt or abort)"
+      ],
+      "hostSensitive": false
+    }
+  ],
+  "link": {
+    "pc1": {
+      "before": {
+        "speedMbps": 1000,
+        "duplex": "full",
+        "linkDetected": true,
+        "autoNeg": "on",
+        "port": "Twisted Pair",
+        "supportedModes": [
+          "10baseT/Half",
+          "100baseT/Full",
+          "1000baseT/Full"
+        ],
+        "advertisedModes": [
+          "1000baseT/Full"
+        ],
+        "partnerModes": [
+          "1000baseT/Full"
+        ],
+        "mdix": "on (auto)"
+      },
+      "after": {
+        "speedMbps": -1,
+        "duplex": "unknown",
+        "linkDetected": false,
+        "autoNeg": "on",
+        "port": "Twisted Pair"
+      }
+    },
+    "pc2": {
+      "before": {
+        "speedMbps": 1000,
+        "duplex": "full",
+        "linkDetected": true,
+        "autoNeg": "on",
+        "port": "Twisted Pair",
+        "supportedModes": [
+          "10baseT/Half",
+          "100baseT/Full",
+          "1000baseT/Full"
+        ],
+        "advertisedModes": [
+          "1000baseT/Full"
+        ],
+        "partnerModes": [
+          "1000baseT/Full"
+        ],
+        "mdix": "on (auto)"
+      },
+      "after": {
+        "speedMbps": -1,
+        "duplex": "unknown",
+        "linkDetected": false,
+        "autoNeg": "on",
+        "port": "Twisted Pair"
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+CableCheck summary
+==================
+Test:     example-healthy  (mode quick)
+Started:  2026-01-02T15:04:05Z   Duration: 1m30s
+Result:   EXCELLENT   Score: 100/100
+Link:     1000 Mb/s full duplex  (pc1 enp3s0, pc2 enp4s0)
+
+Ping loss:        pc1->pc2 0.00%  |  pc2->pc1 0.00%
+TCP throughput:   pc1->pc2 941.0 Mbit/s  |  pc2->pc1 939.1 Mbit/s
+TCP retransmits:  pc1->pc2 0  |  pc2->pc1 0
+UDP loss:         pc1->pc2 0.00%  |  pc2->pc1 0.00%
+
+Findings: none
+Recommendations: none
+
+Full report: report.md and report.json in the report directory.

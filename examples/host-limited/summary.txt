@@ -1,0 +1,20 @@
+CableCheck summary
+==================
+Test:     example-host-limited  (mode quick)
+Started:  2026-01-02T15:04:05Z   Duration: 1m30s
+Result:   INCONCLUSIVE
+Link:     1000 Mb/s full duplex  (pc1 enp3s0, pc2 enp4s0)
+
+Ping loss:        pc1->pc2 0.00%  |  pc2->pc1 0.00%
+TCP throughput:   pc1->pc2 250.0 Mbit/s  |  pc2->pc1 248.0 Mbit/s
+TCP retransmits:  pc1->pc2 0  |  pc2->pc1 0
+UDP loss:         pc1->pc2 0.00%  |  pc2->pc1 0.00%
+
+Findings (top 2 of 2):
+  [poor] PERF-01: TCP throughput is below the negotiated link speed.
+  [marker] HOST-01: CPU was saturated during throughput testing - performance results may be host-limited.
+Recommendations (top 2 of 2):
+  - Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.
+  - Isolation test: same machines with a different cable, then the same cable between different machines.
+
+Full report: report.md and report.json in the report directory.
