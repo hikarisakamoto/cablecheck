@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -274,6 +277,118 @@ func TestInvalidStateStrikes(t *testing.T) {
 		t.Errorf("outcome = %s/%q, want aborted/protocol_error", out.out.FinalState, out.out.AbortReason)
 	}
 	containsAll(t, logs.String(), "frame invalid in current state")
+}
+
+// TestMintOrderMatchesWireOrder pins the write-path invariant behind the
+// message-ID ordering fix: the receive path drops any frame whose per-role
+// sequence is non-increasing, so an ID minted first MUST reach the wire
+// first. Two goroutines race through the session's send helper with an
+// injected stall between mint and write on the first frame; without one lock
+// held across mint+write the second send overtakes the first on the wire —
+// the peer then silently drops the overtaken frame (e.g. a test_request
+// beaten by a heartbeat tick, expiring the Call into request_timeout).
+func TestMintOrderMatchesWireOrder(t *testing.T) {
+	testutil.LeakCheck(t)
+	client, server := net.Pipe()
+	defer server.Close()
+
+	s := newSession(Config{Role: RolePC1}, nil, nil)
+	s.ids = protocol.NewMessageIDMaker("pc1")
+	s.testID = "ct-mint-order"
+	s.sm = NewStateMachine(StateTesting, nil)
+	s.conn = protocol.NewConn(client)
+	defer s.conn.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	s.ctx, s.cancel = ctx, cancel
+	defer cancel()
+
+	// The far end drains frames in wire order (net.Pipe is synchronous, so
+	// wire order is exactly read order).
+	type recv struct {
+		env *protocol.Envelope
+		err error
+	}
+	rconn := protocol.NewConn(server)
+	got := make(chan recv, 4)
+	go func() {
+		for {
+			env, err := rconn.ReadEnvelope()
+			got <- recv{env: env, err: err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// The first sender stalls between mint and write until the racing send
+	// finished — or until the fallback timeout, which is the only exit once
+	// the write lock keeps the racer from even minting during the stall.
+	entered := make(chan struct{})
+	raced := make(chan struct{})
+	var writes atomic.Int32
+	s.cfg.hooks.beforeWrite = func(*protocol.Envelope) {
+		if writes.Add(1) != 1 {
+			return
+		}
+		close(entered)
+		select {
+		case <-raced:
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+
+	errs := make(chan error, 2)
+	go func() {
+		_, err := s.send(protocol.TypeHeartbeat, "", protocol.Heartbeat{Seq: 1})
+		errs <- err
+	}()
+	testutil.WaitFor(t, entered, "first send never reached the write path")
+	go func() {
+		_, err := s.send(protocol.TypeHeartbeat, "", protocol.Heartbeat{Seq: 2})
+		errs <- err
+		close(raced)
+	}()
+
+	for range 2 {
+		select {
+		case err := <-errs:
+			if err != nil {
+				t.Fatalf("send: %v", err)
+			}
+		case <-time.After(testutil.TestTimeout(t)):
+			t.Fatal("timed out waiting for the racing sends")
+		}
+	}
+
+	var seqs []uint64
+	for range 2 {
+		select {
+		case r := <-got:
+			if r.err != nil {
+				t.Fatalf("read frame: %v", r.err)
+			}
+			seqs = append(seqs, messageSeq(t, r.env.MessageID))
+		case <-time.After(testutil.TestTimeout(t)):
+			t.Fatal("timed out waiting for the frames")
+		}
+	}
+	if seqs[0] >= seqs[1] {
+		t.Errorf("wire order = seq %d before seq %d; a receiver drops the overtaken frame as non-increasing", seqs[0], seqs[1])
+	}
+}
+
+// messageSeq extracts the numeric sequence from a "<role>-<seq>" message ID.
+func messageSeq(t *testing.T, id string) uint64 {
+	t.Helper()
+	i := strings.LastIndexByte(id, '-')
+	if i < 0 {
+		t.Fatalf("message ID %q has no sequence", id)
+	}
+	n, err := strconv.ParseUint(id[i+1:], 10, 64)
+	if err != nil {
+		t.Fatalf("message ID %q: parse sequence: %v", id, err)
+	}
+	return n
 }
 
 // decodeWarning decodes a warning frame's payload.

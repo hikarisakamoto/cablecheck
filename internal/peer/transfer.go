@@ -35,12 +35,8 @@ func (r *ReportChannel) Send(typ protocol.MessageType, inReplyTo string, payload
 	default:
 		return fmt.Errorf("peer: ReportChannel.Send: type %s is not a report-transfer frame", typ)
 	}
-	env, err := protocol.NewEnvelope(typ, r.s.testID, r.s.ids.Next(), payload)
-	if err != nil {
-		return err
-	}
-	env.InReplyTo = inReplyTo
-	return r.s.write(env)
+	_, err := r.s.send(typ, inReplyTo, payload)
+	return err
 }
 
 // Receive returns the next routed report-transfer frame, or an error when
@@ -63,6 +59,7 @@ func (s *session) startTransfer(cb func(context.Context, *ReportChannel) error) 
 		return
 	}
 	s.transferOn = true
+	s.transferRan = true
 	s.transfer = make(chan *protocol.Envelope, transferBufferSize)
 	rt := &ReportChannel{s: s}
 	s.wg.Add(1)
@@ -73,16 +70,25 @@ func (s *session) startTransfer(cb func(context.Context, *ReportChannel) error) 
 	}()
 }
 
-// routeTransferFrame hands a report-transfer frame to the active callback;
-// without one the frame is state-invalid. The send is non-blocking: routing
-// runs on the event loop itself, and a callback that stopped draining (say,
-// it failed mid-file while the peer keeps streaming chunks) must not wedge
-// the loop — its evTransferDone would be queued behind the routed frames and
-// could never be processed. On a full buffer the frame is dropped with a
-// warning; transfer errors are warnings by contract, so the callback's own
+// routeTransferFrame hands a report-transfer frame to the active callback.
+// Without one the frame is state-invalid — unless a transfer already ran:
+// stragglers still in flight when the callback ended are an expected
+// consequence of per-file acking (a receiver failing mid-file leaves the
+// sender streaming), and transfer failures are warnings by contract, so they
+// are dropped with a debug log rather than fed to the invalid-state strike
+// counter, which would escalate them into a protocol_error abort. The send
+// is non-blocking: routing runs on the event loop itself, and a callback
+// that stopped draining must not wedge the loop — its evTransferDone would
+// be queued behind the routed frames and could never be processed. On a full
+// buffer the frame is dropped with a warning; the callback's own
 // ack/verification logic surfaces the loss.
 func (s *session) routeTransferFrame(env *protocol.Envelope) {
 	if !s.transferOn {
+		if s.transferRan {
+			s.log.Debug("late report-transfer frame dropped",
+				"type", string(env.Type), "messageId", env.MessageID)
+			return
+		}
 		s.warnInvalidState(env)
 		return
 	}
@@ -117,15 +123,11 @@ func (s *session) handleReportManifest(env *protocol.Envelope) {
 	}
 	if s.cfg.ReceiveReports == nil || s.cfg.NoReportTransfer {
 		s.log.Info("declining report transfer: no receiver configured")
-		ack, err := protocol.NewEnvelope(protocol.TypeReportAck, s.testID, s.ids.Next(), protocol.ReportAck{
+		if _, err := s.send(protocol.TypeReportAck, env.MessageID, protocol.ReportAck{
 			Declined: true,
 			Error:    "report transfer not accepted",
-		})
-		if err == nil {
-			ack.InReplyTo = env.MessageID
-			if werr := s.write(ack); werr != nil {
-				s.log.Warn("send manifest decline failed", "err", werr)
-			}
+		}); err != nil {
+			s.log.Warn("send manifest decline failed", "err", err)
 		}
 		return
 	}
@@ -143,15 +145,12 @@ func (s *session) handleTransferDone(err error) {
 	s.transferOn = false
 	if err != nil {
 		s.log.Warn("report transfer failed", "err", err)
-		warn, werr := protocol.NewEnvelope(protocol.TypeWarning, s.testID, s.ids.Next(), protocol.Warning{
+		if _, serr := s.send(protocol.TypeWarning, "", protocol.Warning{
 			Code:  "report_transfer_failed",
 			Text:  err.Error(),
 			Stage: string(s.sm.Current()),
-		})
-		if werr == nil {
-			if serr := s.write(warn); serr != nil {
-				s.log.Debug("send transfer warning failed", "err", serr)
-			}
+		}); serr != nil {
+			s.log.Debug("send transfer warning failed", "err", serr)
 		}
 	}
 	if s.cfg.Role == RolePC1 && !s.sentComplete {

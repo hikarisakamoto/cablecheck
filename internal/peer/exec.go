@@ -136,27 +136,15 @@ func (s *session) handleOpDone(ev evOpDone) {
 
 // handleOpProgress forwards one throttled executor progress update.
 func (s *session) handleOpProgress(ev evOpProgress) {
-	env, err := protocol.NewEnvelope(protocol.TypeTestProgress, s.testID, s.ids.Next(), ev.p)
-	if err != nil {
-		s.log.Warn("build test_progress failed", "err", err)
-		return
-	}
-	env.InReplyTo = ev.reqID
-	if werr := s.write(env); werr != nil {
-		s.log.Debug("send test_progress failed", "err", werr)
+	if _, err := s.send(protocol.TypeTestProgress, ev.reqID, ev.p); err != nil {
+		s.log.Debug("send test_progress failed", "err", err)
 	}
 }
 
 // writeTestResult sends a test_result correlated to reqID.
 func (s *session) writeTestResult(reqID string, res protocol.TestResult) {
-	env, err := protocol.NewEnvelope(protocol.TypeTestResult, s.testID, s.ids.Next(), res)
-	if err != nil {
-		s.log.Warn("build test_result failed", "err", err)
-		return
-	}
-	env.InReplyTo = reqID
-	if werr := s.write(env); werr != nil {
-		s.log.Warn("send test_result failed", "err", werr)
+	if _, err := s.send(protocol.TypeTestResult, reqID, res); err != nil {
+		s.log.Warn("send test_result failed", "err", err)
 	}
 }
 
@@ -229,14 +217,8 @@ func (s *session) writeComplete(inReplyTo string) {
 	if s.cfg.Complete != nil {
 		payload = s.cfg.Complete()
 	}
-	env, err := protocol.NewEnvelope(protocol.TypeComplete, s.testID, s.ids.Next(), payload)
-	if err != nil {
-		s.log.Warn("build complete failed", "err", err)
-		return
-	}
-	env.InReplyTo = inReplyTo
-	if werr := s.write(env); werr != nil {
-		s.log.Warn("send complete failed", "err", werr)
+	if _, err := s.send(protocol.TypeComplete, inReplyTo, payload); err != nil {
+		s.log.Warn("send complete failed", "err", err)
 	}
 }
 

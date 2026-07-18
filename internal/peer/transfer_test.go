@@ -3,6 +3,7 @@ package peer
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,6 +171,84 @@ func TestTransferRouteFullBufferDoesNotBlock(t *testing.T) {
 		t.Errorf("routed frames buffered = %d, want still %d (overflow dropped)", got, transferBufferSize)
 	}
 	containsAll(t, logBuf.String(), "report-transfer buffer full")
+}
+
+// TestTransferStragglersAfterCallbackDoNotAbort pins the warnings-only
+// contract for report transfer (events.go evTransferDone): frames still in
+// flight when the transfer callback ends must be dropped quietly, NOT fed to
+// the invalid-state strike counter — acking is per-file, so a receiver that
+// stops mid-file easily has more than maxInvalidState chunks in flight, and
+// striking them would escalate a warning-grade transfer failure into a
+// protocol_error abort on both sides. After a completed transfer the peer
+// streams four straggler chunks; the session must still complete normally.
+func TestTransferStragglersAfterCallbackDoNotAbort(t *testing.T) {
+	testutil.LeakCheck(t)
+	cfg1, cfg2 := testConfigs(t)
+	tr := newPipeTransport()
+	cfg1.Transport, cfg2.Transport = tr, tr
+	cfg2.NonInteractive = true
+	logger, logs := newTestLogger()
+	cfg2.Logger = logger
+	states := newStateRecorder(&cfg2)
+
+	// The receiver consumes the manifest, acks it and returns: the transfer
+	// is over from the callback's point of view.
+	cfg2.ReceiveReports = func(ctx context.Context, rt *ReportChannel) error {
+		env, err := rt.Receive(ctx)
+		if err != nil {
+			return err
+		}
+		return rt.Send(protocol.TypeReportAck, env.MessageID, protocol.ReportAck{OK: true})
+	}
+	// The stragglers must arrive after the loop processed evTransferDone,
+	// or they would still be routed to the (already gone) callback.
+	transferDone := make(chan struct{})
+	cfg2.hooks.afterEvent = func(ev event) {
+		if _, ok := ev.(evTransferDone); ok {
+			close(transferDone)
+		}
+	}
+
+	ctx := t.Context()
+	resCh := startSession(ctx, cfg2, nil, opFunc(nopOp))
+	h := startCoordinatorHarness(t, ctx, tr, cfg1)
+
+	h.await(protocol.TypeReady)
+	h.send(protocol.TypeReady, "", protocol.Ready{})
+	h.send(protocol.TypeStartConfirm, "", protocol.StartConfirmation{StartInMs: 0})
+	states.wait(t, StateTesting)
+
+	h.send(protocol.TypeReport, "", protocol.ReportManifest{
+		Files:     []protocol.ReportFile{{Name: "report.json", Size: 3, SHA256: "abc"}},
+		TotalSize: 3,
+	})
+	h.await(protocol.TypeReportAck)
+	testutil.WaitFor(t, transferDone, "transfer callback outcome never reached the loop")
+
+	// More straggler chunks than the strike budget tolerates.
+	for seq := range maxInvalidState + 1 {
+		h.send(protocol.TypeReportChunk, "", protocol.ReportChunk{Name: "report.json", Seq: seq})
+	}
+
+	// The session must still be alive and finish the complete exchange.
+	h.send(protocol.TypeComplete, "", protocol.Complete{Classification: "GOOD"})
+	h.await(protocol.TypeComplete)
+	out := awaitResult(t, resCh)
+	if out.err != nil {
+		t.Fatalf("Run: %v", out.err)
+	}
+	if out.out.FinalState != StateCompleted {
+		t.Errorf("FinalState = %s, want completed", out.out.FinalState)
+	}
+	for _, typ := range h.remainingTypes() {
+		if typ == protocol.TypeWarning || typ == protocol.TypeAbort {
+			t.Errorf("straggler chunks drew a %s frame; want them dropped quietly", typ)
+		}
+	}
+	containsAll(t, logs.String(), "late report-transfer frame dropped")
+	if got := logs.String(); strings.Contains(got, "invalid_state") {
+		t.Errorf("straggler chunks counted as invalid-state strikes; logs:\n%s", got)
+	}
 }
 
 // TestCoordinatorAuthThreeStrikes lets a wrong-token worker try three times:

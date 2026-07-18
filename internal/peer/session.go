@@ -108,6 +108,12 @@ type session struct {
 	events chan event
 	wg     sync.WaitGroup
 
+	// writeMu makes minting a message ID and writing the frame one atomic
+	// step (mintAndWrite): concurrent writers may otherwise reach the wire
+	// in the opposite order of their IDs, and the receiver silently drops
+	// non-increasing sequences.
+	writeMu sync.Mutex
+
 	// lastSend is the clk-timebase unix-nano timestamp of the last
 	// successful frame write through s.write; the heartbeater's skip check.
 	lastSend atomic.Int64
@@ -140,6 +146,7 @@ type session struct {
 	countdownC   <-chan time.Time
 	transfer     chan *protocol.Envelope
 	transferOn   bool
+	transferRan  bool
 	fin          *finishSpec
 }
 
@@ -355,6 +362,41 @@ func (s *session) establishCoordinator(ctx context.Context) (*handshakeResult, *
 	}
 }
 
+// mintAndWrite runs build with a freshly minted message ID and writes the
+// returned envelope. Mint and write MUST form one atomic step: the receiver
+// drops any frame whose per-role sequence is non-increasing, so an ID minted
+// first has to reach the wire first. Every post-handshake writer (event
+// loop, heartbeater, plan goroutine, transfer callback, farewell) sends
+// through here. The minted ID is returned even when build or the write
+// fails.
+func (s *session) mintAndWrite(build func(msgID string) (*protocol.Envelope, error)) (string, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	msgID := s.ids.Next()
+	env, err := build(msgID)
+	if err != nil {
+		return msgID, err
+	}
+	if h := s.cfg.hooks.beforeWrite; h != nil {
+		h(env)
+	}
+	return msgID, s.write(env)
+}
+
+// send mints a message ID, builds one envelope of type typ carrying payload
+// (correlated via inReplyTo when non-empty) and writes it through
+// mintAndWrite, returning the minted message ID.
+func (s *session) send(typ protocol.MessageType, inReplyTo string, payload any) (string, error) {
+	return s.mintAndWrite(func(msgID string) (*protocol.Envelope, error) {
+		env, err := protocol.NewEnvelope(typ, s.testID, msgID, payload)
+		if err != nil {
+			return nil, err
+		}
+		env.InReplyTo = inReplyTo
+		return env, nil
+	})
+}
+
 // write sends one frame and records the send time in the session clock's
 // timebase so the heartbeater can compare ages consistently even under a
 // fake clock. All session frame writes go through here.
@@ -427,14 +469,11 @@ func (s *session) heartbeatLoop() {
 			last := s.lastSendTime()
 			if last.IsZero() || s.clk.Now().Sub(last) >= threshold {
 				seq++
-				env, err := protocol.NewEnvelope(protocol.TypeHeartbeat, s.testID, s.ids.Next(), protocol.Heartbeat{
+				_, err := s.send(protocol.TypeHeartbeat, "", protocol.Heartbeat{
 					Seq:      seq,
 					State:    string(s.sm.Current()),
 					ActiveOp: s.activeOpName(),
 				})
-				if err == nil {
-					err = s.write(env)
-				}
 				if err != nil {
 					// The reader surfaces connection death; just note it.
 					s.log.Debug("heartbeat send failed", "err", err)
@@ -533,20 +572,19 @@ func (s *session) shutdown(spec finishSpec) (Outcome, error) {
 // sendFarewell writes the best-effort abort frame bounded by
 // farewellWriteTimeout: the write runs in a helper goroutine and the
 // connection is closed either after the write finished or after the deadline
-// — closing unblocks a stalled write, so the helper always exits promptly
-// and shutdown is never delayed by a dead peer (proto.md pitfall 10).
+// — closing unblocks a stalled write (including one still holding the write
+// lock ahead of the helper), so the helper always exits promptly and
+// shutdown is never delayed by a dead peer (proto.md pitfall 10).
 func (s *session) sendFarewell(reason, stage string) {
-	env, err := protocol.NewEnvelope(protocol.TypeAbort, s.testID, s.ids.Next(), protocol.Abort{
-		Reason:    reason,
-		Stage:     stage,
-		Initiator: string(s.cfg.Role),
-	})
-	if err != nil {
-		s.log.Warn("build farewell abort failed", "err", err)
-		return
-	}
 	done := make(chan error, 1)
-	go func() { done <- s.write(env) }()
+	go func() {
+		_, err := s.send(protocol.TypeAbort, "", protocol.Abort{
+			Reason:    reason,
+			Stage:     stage,
+			Initiator: string(s.cfg.Role),
+		})
+		done <- err
+	}()
 	timedOut := false
 	select {
 	case werr := <-done:

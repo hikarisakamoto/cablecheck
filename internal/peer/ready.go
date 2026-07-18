@@ -16,15 +16,10 @@ func (s *session) sendLocalReady() {
 	if s.localReady {
 		return
 	}
-	env, err := protocol.NewEnvelope(protocol.TypeReady, s.testID, s.ids.Next(), protocol.Ready{
+	if _, err := s.send(protocol.TypeReady, "", protocol.Ready{
 		NonInteractive: s.cfg.NonInteractive,
-	})
-	if err != nil {
-		s.log.Warn("build ready frame failed", "err", err)
-		return
-	}
-	if werr := s.write(env); werr != nil {
-		s.log.Warn("send ready failed", "err", werr)
+	}); err != nil {
+		s.log.Warn("send ready failed", "err", err)
 		return
 	}
 	s.localReady = true
@@ -74,18 +69,13 @@ func (s *session) onBothReady() {
 		return
 	}
 	startIn := startCountdownMs * time.Millisecond
-	env, err := protocol.NewEnvelope(protocol.TypeStartConfirm, s.testID, s.ids.Next(), protocol.StartConfirmation{
+	if _, err := s.send(protocol.TypeStartConfirm, "", protocol.StartConfirmation{
 		StartAt:   s.clk.Now().Add(startIn).UTC(),
 		StartInMs: startCountdownMs,
 		Mode:      s.cfg.Mode,
 		Steps:     s.cfg.Steps,
-	})
-	if err != nil {
-		s.log.Warn("build start_confirmation failed", "err", err)
-		return
-	}
-	if werr := s.write(env); werr != nil {
-		s.log.Warn("send start_confirmation failed", "err", werr)
+	}); err != nil {
+		s.log.Warn("send start_confirmation failed", "err", err)
 		return
 	}
 	s.startCountdown(startIn)

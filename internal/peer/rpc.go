@@ -103,22 +103,28 @@ func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout
 	if err != nil {
 		return nil, fmt.Errorf("peer: marshal params for op %q: %w", op, err)
 	}
-	msgID := s.ids.Next()
 	pc := &pendingCall{done: make(chan *protocol.TestResult, 1), onProgress: onProgress, op: op}
-	if !s.registerCall(msgID, pc) {
-		return nil, ErrSessionClosed
-	}
-	defer s.unregisterCall(msgID)
-
-	env, err := protocol.NewEnvelope(protocol.TypeTestRequest, s.testID, msgID, protocol.TestRequest{
-		Op:        op,
-		Params:    raw,
-		TimeoutMs: int(timeout / time.Millisecond),
+	registered := false
+	msgID, err := s.mintAndWrite(func(msgID string) (*protocol.Envelope, error) {
+		// Registration must precede the write (a fast result would find no
+		// pending call), and mint+write must be atomic (mintAndWrite doc).
+		if !s.registerCall(msgID, pc) {
+			return nil, ErrSessionClosed
+		}
+		registered = true
+		return protocol.NewEnvelope(protocol.TypeTestRequest, s.testID, msgID, protocol.TestRequest{
+			Op:        op,
+			Params:    raw,
+			TimeoutMs: int(timeout / time.Millisecond),
+		})
 	})
-	if err != nil {
-		return nil, fmt.Errorf("peer: build test_request for op %q: %w", op, err)
+	if registered {
+		defer s.unregisterCall(msgID)
 	}
-	if err := s.write(env); err != nil {
+	if err != nil {
+		if errors.Is(err, ErrSessionClosed) {
+			return nil, ErrSessionClosed
+		}
 		return nil, fmt.Errorf("peer: send test_request for op %q: %w", op, err)
 	}
 
@@ -143,16 +149,11 @@ func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout
 // peer; a failed send is logged and otherwise ignored.
 func (rc *remoteCaller) Warn(code, text string) {
 	s := rc.s
-	env, err := protocol.NewEnvelope(protocol.TypeWarning, s.testID, s.ids.Next(), protocol.Warning{
+	if _, err := s.send(protocol.TypeWarning, "", protocol.Warning{
 		Code:  code,
 		Text:  text,
 		Stage: string(s.sm.Current()),
-	})
-	if err != nil {
-		s.log.Warn("build warning frame failed", "code", code, "err", err)
-		return
-	}
-	if err := s.write(env); err != nil {
+	}); err != nil {
 		s.log.Warn("send warning frame failed", "code", code, "err", err)
 	}
 }

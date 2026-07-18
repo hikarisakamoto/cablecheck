@@ -107,6 +107,9 @@ type sessionHooks struct {
 	// afterHeartbeatTick runs after each heartbeat tick evaluation with
 	// whether a heartbeat frame was written.
 	afterHeartbeatTick func(sent bool)
+	// beforeWrite runs inside the session write path between minting a
+	// message ID and writing the frame, under the write lock.
+	beforeWrite func(env *protocol.Envelope)
 }
 
 // defaultCallGrace is how long the coordinator keeps waiting for a

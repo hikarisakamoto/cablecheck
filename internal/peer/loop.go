@@ -168,15 +168,12 @@ func (s *session) handleFrame(env *protocol.Envelope) {
 func (s *session) warnInvalidState(env *protocol.Envelope) {
 	s.log.Warn("frame invalid in current state", "type", string(env.Type),
 		"messageId", env.MessageID, "state", string(s.sm.Current()))
-	warn, err := protocol.NewEnvelope(protocol.TypeWarning, s.testID, s.ids.Next(), protocol.Warning{
+	if _, err := s.send(protocol.TypeWarning, "", protocol.Warning{
 		Code:  "invalid_state",
 		Text:  fmt.Sprintf("%s not valid in state %s", env.Type, s.sm.Current()),
 		Stage: string(s.sm.Current()),
-	})
-	if err == nil {
-		if werr := s.write(warn); werr != nil {
-			s.log.Debug("invalid_state warning send failed", "err", werr)
-		}
+	}); err != nil {
+		s.log.Debug("invalid_state warning send failed", "err", err)
 	}
 	s.invalidState++
 	if s.invalidState >= maxInvalidState {
