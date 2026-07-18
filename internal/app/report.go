@@ -33,13 +33,18 @@ type verdict struct {
 	res     evaluate.Result
 	summary string
 	code    ExitCode
+	// finishedAt is captured on the first render so every later re-render
+	// (the pre-transfer enrichment, the post-run enrichment) produces
+	// byte-identical report files: PC2's transferred copy must SHA-256-equal
+	// PC1's final copy, which a fresh clock read on each render would break.
+	finishedAt time.Time
 }
 
-// store records the evaluated verdict.
-func (v *verdict) store(res evaluate.Result, summary string, code ExitCode) {
+// store records the evaluated verdict and the render's finish timestamp.
+func (v *verdict) store(res evaluate.Result, summary string, code ExitCode, finishedAt time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.set, v.res, v.summary, v.code = true, res, summary, code
+	v.set, v.res, v.summary, v.code, v.finishedAt = true, res, summary, code, finishedAt
 }
 
 // get returns the stored verdict and whether one was stored.
@@ -47,6 +52,13 @@ func (v *verdict) get() (evaluate.Result, string, ExitCode, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.res, v.summary, v.code, v.set
+}
+
+// finishTime returns the captured finish timestamp and whether one was stored.
+func (v *verdict) finishTime() (time.Time, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.finishedAt, v.set
 }
 
 // complete builds the complete-frame payload; zero before a verdict exists.
@@ -74,8 +86,14 @@ func (v *verdict) complete() protocol.Complete {
 func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite.SessionResults,
 	v *verdict, startedAt time.Time, failure *model.FailureDetails, outcome *peer.Outcome,
 	log *slog.Logger) error {
-	rep := a.assembleReport(pf, results, startedAt, failure, outcome)
-	res, _, _, stored := v.get()
+	// Reuse the finish timestamp captured on the first render so re-renders are
+	// byte-stable; the first render stamps it from the clock.
+	finishedAt, stored := v.finishTime()
+	if !stored {
+		finishedAt = a.deps.Clock.Now()
+	}
+	rep := a.assembleReport(pf, results, startedAt, finishedAt, failure, outcome)
+	res, _, _, _ := v.get()
 	if !stored {
 		res = evaluate.Evaluate(evaluate.FactsFromReport(rep))
 	}
@@ -95,7 +113,7 @@ func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite
 		if len(res.Findings) > 0 {
 			summary += " — " + res.Findings[0].Text
 		}
-		v.store(res, summary, ExitCodeFor(res.Class))
+		v.store(res, summary, ExitCodeFor(res.Class), finishedAt)
 	}
 	log.Info("report rendered", "dir", dir, "classification", string(res.Class))
 	return nil
@@ -105,10 +123,7 @@ func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite
 // accumulated session results and (when available) the session outcome.
 // It only ever runs on PC1, so the local side is pc1 and the peer pc2.
 func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResults,
-	startedAt time.Time, failure *model.FailureDetails, outcome *peer.Outcome) *model.Report {
-	clk := a.deps.Clock
-	finishedAt := clk.Now()
-
+	startedAt, finishedAt time.Time, failure *model.FailureDetails, outcome *peer.Outcome) *model.Report {
 	testID := a.watch.TestID()
 	var peerCaps protocol.Capabilities
 	if outcome != nil {

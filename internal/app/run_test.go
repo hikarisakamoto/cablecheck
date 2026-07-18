@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -339,15 +340,39 @@ func TestRunQuickHappyPath(t *testing.T) {
 		t.Errorf("token leaked into the debug log")
 	}
 
-	// PC2 wrote its local summary from the complete payload.
+	// PC2 received PC1's verified report set via the transfer: report.json,
+	// report.md and summary.txt, each byte-identical (SHA-256-equal) to PC1's
+	// final copy, with no .part scratch files left behind.
 	dir2 := findReportDir(t, pc2.cfg.OutputDir)
-	sum, err := os.ReadFile(filepath.Join(dir2, "summary.txt"))
+	for _, name := range []string{"report.json", "report.md", "summary.txt"} {
+		a, err := os.ReadFile(filepath.Join(dir1, name))
+		if err != nil {
+			t.Fatalf("read pc1 %s: %v", name, err)
+		}
+		b, err := os.ReadFile(filepath.Join(dir2, name))
+		if err != nil {
+			t.Errorf("pc2 is missing transferred %s: %v", name, err)
+			continue
+		}
+		if sha256.Sum256(a) != sha256.Sum256(b) {
+			t.Errorf("pc2 %s SHA-256 differs from pc1's copy", name)
+		}
+	}
+	for _, e := range mustReadDir(t, dir2) {
+		if strings.HasSuffix(e.Name(), ".part") {
+			t.Errorf("pc2 left a partial file %q", e.Name())
+		}
+	}
+}
+
+// mustReadDir reads dir or fails the test.
+func mustReadDir(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read pc2 summary.txt: %v", err)
+		t.Fatalf("read dir %s: %v", dir, err)
 	}
-	if !strings.Contains(string(sum), "verdict from PC1") {
-		t.Errorf("pc2 summary misses the PC1 verdict:\n%s", sum)
-	}
+	return entries
 }
 
 // TestRunInterruptProducesPartialReport cancels PC1's context mid-TCP-test

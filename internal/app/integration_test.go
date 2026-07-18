@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -93,6 +94,11 @@ type intSpec struct {
 	// GO ticks cannot be ordered any other way, and an early first RPC
 	// would draw the worker's invalid-state strike.
 	planGate <-chan struct{}
+	// noReportTransfer sets --no-report-transfer on this side.
+	noReportTransfer bool
+	// mangleReportChunk, on pc1, corrupts outbound report chunks at the
+	// sender boundary (the report-transfer corruption scenario).
+	mangleReportChunk func([]byte) []byte
 }
 
 // newIntSide builds one side: healthy fixture scripts, real clock, short
@@ -118,21 +124,22 @@ func newIntSide(t *testing.T, spec intSpec) *intSide {
 		token = intToken
 	}
 	cfg := &config.RunConfig{
-		Role:            spec.role,
-		LocalIP:         netip.MustParseAddr("127.0.0.1"),
-		PeerIP:          netip.MustParseAddr("127.0.0.1"),
-		Mode:            config.ModeQuick,
-		ControlPort:     spec.controlPort,
-		IperfPort:       spec.iperfPort,
-		Token:           token,
-		TCPDuration:     30 * time.Second,
-		UDPDuration:     20 * time.Second,
-		ParallelStreams: 4,
-		PingCount:       100,
-		TCPRepeats:      1,
-		OutputDir:       t.TempDir(),
-		NonInteractive:  !spec.interactive,
-		NoSudo:          true,
+		Role:             spec.role,
+		LocalIP:          netip.MustParseAddr("127.0.0.1"),
+		PeerIP:           netip.MustParseAddr("127.0.0.1"),
+		Mode:             config.ModeQuick,
+		ControlPort:      spec.controlPort,
+		IperfPort:        spec.iperfPort,
+		Token:            token,
+		TCPDuration:      30 * time.Second,
+		UDPDuration:      20 * time.Second,
+		ParallelStreams:  4,
+		PingCount:        100,
+		TCPRepeats:       1,
+		OutputDir:        t.TempDir(),
+		NonInteractive:   !spec.interactive,
+		NoSudo:           true,
+		NoReportTransfer: spec.noReportTransfer,
 	}
 	out := &runOutput{}
 	states := make(chan peer.State, 32) // > the longest transition sequence
@@ -143,15 +150,18 @@ func newIntSide(t *testing.T, spec intSpec) *intSide {
 		Stderr:   &out.stderr,
 		StateDir: t.TempDir(),
 		Build:    BuildInfo{Version: "test"},
-		hooks: testHooks{onState: func(st peer.State) {
-			// Never block the session's event loop; Errorf only — this
-			// runs on session goroutines.
-			select {
-			case states <- st:
-			default:
-				t.Errorf("onState channel overflow: dropped %q", st)
-			}
-		}},
+		hooks: testHooks{
+			onState: func(st peer.State) {
+				// Never block the session's event loop; Errorf only — this
+				// runs on session goroutines.
+				select {
+				case states <- st:
+				default:
+					t.Errorf("onState channel overflow: dropped %q", st)
+				}
+			},
+			mangleReportChunk: spec.mangleReportChunk,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New(%s): %v", spec.role, err)
@@ -294,6 +304,44 @@ func assertHealthyArtifacts(t *testing.T, pc1 *intSide) {
 	}
 }
 
+// assertTransferredReportsMatch asserts PC2's report directory contains the
+// three allowlisted files and that each is byte-identical (SHA-256-equal) to
+// PC1's copy — the end-to-end proof of the verified report transfer.
+func assertTransferredReportsMatch(t *testing.T, pc1, pc2 *intSide) {
+	t.Helper()
+	dir1 := findReportDir(t, pc1.cfg.OutputDir)
+	dir2 := findReportDir(t, pc2.cfg.OutputDir)
+	for _, name := range []string{"report.json", "report.md", "summary.txt"} {
+		a, err := os.ReadFile(filepath.Join(dir1, name))
+		if err != nil {
+			t.Fatalf("read PC1 %s: %v", name, err)
+		}
+		b, err := os.ReadFile(filepath.Join(dir2, name))
+		if err != nil {
+			t.Errorf("PC2 is missing transferred %s: %v", name, err)
+			continue
+		}
+		if sha256.Sum256(a) != sha256.Sum256(b) {
+			t.Errorf("PC2 %s SHA-256 differs from PC1's copy", name)
+		}
+	}
+	assertNoPartFilesLeft(t, dir2)
+}
+
+// assertNoPartFilesLeft fails if any *.part scratch file survived in dir.
+func assertNoPartFilesLeft(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".part") {
+			t.Errorf("leftover partial file %q in %s", e.Name(), dir)
+		}
+	}
+}
+
 // TestIntegration runs the in-process two-peer scenarios over a real TCP
 // loopback control connection with a real clock and per-side FakeRunners
 // (docs/design/testing.md §3). Synchronization is exclusively Script
@@ -303,6 +351,8 @@ func TestIntegration(t *testing.T) {
 	t.Run("SIGINTSimulation", testSIGINTSimulation)
 	t.Run("TokenMismatch", testTokenMismatch)
 	t.Run("MalformedFrameInjection", testMalformedFrameInjection)
+	t.Run("ReportTransferCorruption", testReportTransferCorruption)
+	t.Run("NoReportTransferFlag", testNoReportTransferFlag)
 }
 
 // testHappyPathQuickTCPOnly runs the full quick plan to double success, in
@@ -340,6 +390,8 @@ func testHappyPathQuickTCPOnly(t *testing.T) {
 		// native --bidir client only on the coordinator.
 		assertQuickTrafficCalls(t, pc1, true)
 		assertQuickTrafficCalls(t, pc2, false)
+		// PC2 received PC1's verified report set (SHA-256-equal, no partials).
+		assertTransferredReportsMatch(t, pc1, pc2)
 	})
 
 	t.Run("Interactive", func(t *testing.T) {
@@ -381,6 +433,7 @@ func testHappyPathQuickTCPOnly(t *testing.T) {
 		assertHealthyArtifacts(t, pc1)
 		assertQuickTrafficCalls(t, pc1, true)
 		assertQuickTrafficCalls(t, pc2, false)
+		assertTransferredReportsMatch(t, pc1, pc2)
 	})
 }
 
@@ -581,4 +634,106 @@ func testMalformedFrameInjection(t *testing.T) {
 		t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
 	}
 	assertHealthyArtifacts(t, pc1)
+}
+
+// testReportTransferCorruption flips a byte in every report chunk PC1 sends
+// via the mangleReportChunk hook. The transfer therefore fails every SHA-256
+// check and both retries; by contract that is a warning, never an
+// orchestration failure — so both sides still exit 0 (health-driven), PC1's
+// report is intact, and PC2 keeps NOTHING corrupt: no verified files, and no
+// leftover .part scratch files.
+func testReportTransferCorruption(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx := context.Background()
+	gate := make(chan struct{})
+	// Corrupt every chunk so no file ever verifies and PC2 abandons them all.
+	mangle := func(data []byte) []byte {
+		out := append([]byte(nil), data...)
+		if len(out) > 0 {
+			out[0] ^= 0xFF
+		}
+		return out
+	}
+	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45651, planGate: gate,
+		mangleReportChunk: mangle})
+	pc2 := startWorker(t, ctx, intSpec{iperfPort: 45653}, port)
+
+	waitForState(t, pc2.states, peer.StateTesting)
+	close(gate)
+
+	code2, err2 := pc2.app.Wait()
+	code1, err1 := pc1.app.Wait()
+	// Transfer failure is a warning: the run completes, exit is health-driven.
+	if code1 != ExitOK || err1 != nil {
+		t.Fatalf("pc1 = (%d, %v), want (0, nil) — transfer failure must not fail the run\npc1 %s\npc2 %s",
+			code1, err1, pc1.out.dump(), pc2.out.dump())
+	}
+	if code2 != ExitOK || err2 != nil {
+		t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
+	}
+	// PC1's own report is intact and complete regardless of the transfer.
+	assertHealthyArtifacts(t, pc1)
+
+	// PC2 kept nothing corrupt: no .part scratch files, and every corrupt file
+	// was abandoned rather than committed. The one file PC2 legitimately has
+	// is its own locally-written fallback summary.txt.
+	dir2 := findReportDir(t, pc2.cfg.OutputDir)
+	assertNoPartFilesLeft(t, dir2)
+	if _, err := os.Stat(filepath.Join(dir2, "report.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("PC2 has a report.json after every chunk was corrupted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir2, "report.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("PC2 has a report.md after every chunk was corrupted: %v", err)
+	}
+	// The fallback summary must be PC2's own (not PC1's transferred one), since
+	// no transfer landed.
+	sum, err := os.ReadFile(filepath.Join(dir2, "summary.txt"))
+	if err != nil {
+		t.Fatalf("read PC2 fallback summary.txt: %v", err)
+	}
+	if !strings.Contains(string(sum), "worker") {
+		t.Errorf("PC2 summary.txt is not the local worker fallback:\n%s", sum)
+	}
+}
+
+// testNoReportTransferFlag sets --no-report-transfer on the coordinator: the
+// transfer is gated off, so PC1 sends no manifest and PC2 receives no files,
+// yet both sides still complete the run and exit 0. PC2 falls back to its
+// locally-written worker summary.
+func testNoReportTransferFlag(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx := context.Background()
+	gate := make(chan struct{})
+	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45661, planGate: gate,
+		noReportTransfer: true})
+	pc2 := startWorker(t, ctx, intSpec{iperfPort: 45663}, port)
+
+	waitForState(t, pc2.states, peer.StateTesting)
+	close(gate)
+
+	code2, err2 := pc2.app.Wait()
+	code1, err1 := pc1.app.Wait()
+	if code1 != ExitOK || err1 != nil {
+		t.Fatalf("pc1 = (%d, %v), want (0, nil)\npc1 %s\npc2 %s", code1, err1, pc1.out.dump(), pc2.out.dump())
+	}
+	if code2 != ExitOK || err2 != nil {
+		t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
+	}
+	assertHealthyArtifacts(t, pc1)
+
+	// No transfer: PC2 has no report.json/report.md, only its own fallback.
+	dir2 := findReportDir(t, pc2.cfg.OutputDir)
+	assertNoPartFilesLeft(t, dir2)
+	for _, name := range []string{"report.json", "report.md"} {
+		if _, err := os.Stat(filepath.Join(dir2, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("PC2 has %s despite --no-report-transfer: %v", name, err)
+		}
+	}
+	sum, err := os.ReadFile(filepath.Join(dir2, "summary.txt"))
+	if err != nil {
+		t.Fatalf("read PC2 summary.txt: %v", err)
+	}
+	if !strings.Contains(string(sum), "worker") {
+		t.Errorf("PC2 summary.txt is not the local worker fallback:\n%s", sum)
+	}
 }

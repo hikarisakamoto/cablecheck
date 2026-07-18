@@ -90,6 +90,24 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		HeartbeatInterval: a.heartbeatInterval,
 		IdleTimeout:       a.idleTimeout,
 	}
+	// Report transfer is gated inside the peer session by NoReportTransfer and
+	// the peer's AcceptReportTransfer capability; the app just supplies the two
+	// direction callbacks. PC1 streams its rendered report set to PC2; PC2
+	// receives the verified files into its own report directory.
+	if a.cfg.Role == config.RolePC1 {
+		// prepare re-renders the report enriched with the peer machine
+		// description before the transfer, so PC2 receives exactly the bytes
+		// PC1 keeps as its final report. It reuses the verdict the plan
+		// wrapper already stored (and that was exchanged in the complete
+		// frame), so the classification never changes.
+		prepare := func(peerCaps protocol.Capabilities) error {
+			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
+				&peer.Outcome{PeerCaps: peerCaps, TestID: a.watch.TestID()}, log)
+		}
+		pcfg.SendReports = a.sendReportsCallback(dir, prepare, log)
+	} else {
+		pcfg.ReceiveReports = a.receiveReportsCallback(dir)
+	}
 	var plan peer.PlanFunc
 	if a.cfg.Role == config.RolePC1 {
 		pcfg.Transport = &preboundListener{ln: a.ln}
@@ -99,7 +117,8 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 			}
 			// Assemble, evaluate and render before returning: the session
 			// sends the complete frame (whose payload v.complete supplies)
-			// as soon as the plan reports success.
+			// as soon as the plan reports success. The report files must
+			// exist here because SendReports streams them right after.
 			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil, nil, log)
 		}
 	}
