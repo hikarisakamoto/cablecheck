@@ -96,3 +96,18 @@ func exitCodeForRunError(err error) ExitCode {
 		return ExitPeer
 	}
 }
+
+// exitCodeForCoordinatorRunError is PC1's variant of the mapping: a
+// handshake that never succeeded — the peer kept presenting a wrong token,
+// violated the protocol, or timed out through all allowed retries — is a
+// peer/orchestration failure (5) from the coordinator's perspective. The
+// misconfiguration sits on the connecting side; PC1's own configuration
+// already survived preflight and the bind. Everything else maps as for the
+// worker (local aborts stay 6: they are checked before the handshake class).
+func exitCodeForCoordinatorRunError(err error) ExitCode {
+	code := exitCodeForRunError(err)
+	if code == ExitConfig && errors.Is(err, peer.ErrHandshakeFailed) {
+		return ExitPeer
+	}
+	return code
+}

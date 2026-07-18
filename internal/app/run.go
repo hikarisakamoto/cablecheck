@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/logging"
 	"cablecheck/internal/peer"
+	"cablecheck/internal/protocol"
 	"cablecheck/internal/reporting"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/testsuite"
@@ -102,7 +104,7 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		}
 	}
 
-	outcome, runErr := peer.Run(ctx, pcfg, plan, s.ops)
+	outcome, runErr := peer.Run(ctx, pcfg, plan, serverOpDetacher{ops: s.ops})
 	// An aborted run must leave no one-off iperf3 server behind, whatever
 	// the session managed to clean up itself.
 	s.ops.StopAllServers(context.WithoutCancel(ctx))
@@ -117,6 +119,32 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		return a.finishWorker(dir, &outcome, runErr, log)
 	}
 	return a.finishCoordinator(dir, rawDir, pf, s.results, v, startedAt, &outcome, runErr, log)
+}
+
+// serverOpDetacher adapts the worker op handler for the session: the
+// iperf3_server_start op runs with its cancellation detached. The op
+// executor cancels the op context the moment the op's result is sent, while
+// Runner.Start ties the child's process group to the context it was started
+// under — so a server started under the raw op context would be SIGTERMed
+// right after the "ok" result, before the coordinator's client ever
+// connects. The one-off server's lifecycle is owned explicitly instead: the
+// iperf3_server_stop op, StopAllServers at session teardown, and the pidfile
+// registry as the crash backstop.
+type serverOpDetacher struct {
+	// ops is the wrapped worker-side op handler.
+	ops *testsuite.Ops
+}
+
+// HandleOp implements peer.OpHandler, detaching only iperf3_server_start
+// from the per-op cancellation; every other op keeps its timeout and abort
+// semantics. The detached start stays bounded by the server-readiness
+// fallback inside the testsuite.
+func (d serverOpDetacher) HandleOp(ctx context.Context, op string, params json.RawMessage,
+	progress func(protocol.TestProgress)) (any, string, error) {
+	if op == testsuite.OpIperfServerStart {
+		ctx = context.WithoutCancel(ctx)
+	}
+	return d.ops.HandleOp(ctx, op, params, progress)
 }
 
 // closeListener releases PC1's control listener; harmless when the peer

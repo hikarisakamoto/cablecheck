@@ -77,3 +77,27 @@ func TestExitCodeForRunError(t *testing.T) {
 		}
 	}
 }
+
+// TestExitCodeForCoordinatorRunError pins PC1's variant of the mapping: a
+// failed handshake is a peer failure (5) on the coordinator — the connecting
+// side holds the misconfiguration — while local aborts stay 6 and everything
+// else follows the shared policy.
+func TestExitCodeForCoordinatorRunError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want ExitCode
+	}{
+		{"auth strikes exhausted", fmt.Errorf("%w: giving up after 3 auth failures", peer.ErrHandshakeFailed), ExitPeer},
+		{"handshake protocol failure", fmt.Errorf("%w: malformed hello", peer.ErrHandshakeFailed), ExitPeer},
+		{"local abort", fmt.Errorf("%w: ctrl-c", peer.ErrLocalAbort), ExitInterrupt},
+		{"context canceled", context.Canceled, ExitInterrupt},
+		{"peer aborted", fmt.Errorf("%w: peer_lost", peer.ErrPeerAborted), ExitPeer},
+		{"report write", fmt.Errorf("%w: disk full", errReportWrite), ExitInternal},
+	}
+	for _, c := range cases {
+		if got := exitCodeForCoordinatorRunError(c.err); got != c.want {
+			t.Errorf("%s: exitCodeForCoordinatorRunError(%v) = %d, want %d", c.name, c.err, got, c.want)
+		}
+	}
+}

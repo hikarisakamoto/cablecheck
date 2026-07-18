@@ -1,0 +1,526 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"cablecheck/internal/config"
+	"cablecheck/internal/model"
+	"cablecheck/internal/peer"
+	"cablecheck/internal/protocol"
+	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
+)
+
+// Integration-harness tunables (docs/design/testing.md §3): real clock, so
+// the session timers are configured short via the App's test seams.
+const (
+	// intHeartbeat keeps liveness frames flowing every 100ms so the short
+	// idle timeout below never fires on a healthy session.
+	intHeartbeat = 100 * time.Millisecond
+	// intIdleTimeout bounds every post-handshake frame read; 2s is 20
+	// heartbeat intervals, far above any healthy gap, far below the test
+	// budget when a side silently dies.
+	intIdleTimeout = 2 * time.Second
+	// intToken is the shared session token of the matched-token scenarios.
+	intToken = "integration-token-1"
+)
+
+// markdownSectionHeaders are the 23 fixed report.md section headers
+// (docs/design/clieval.md; pinned structurally in internal/reporting too).
+var markdownSectionHeaders = []string{
+	"## 1. Overall Result",
+	"## 2. Score & Rule Evidence",
+	"## 3. Session Info",
+	"## 4. Machines & Environment",
+	"## 5. Interface & Link Negotiation",
+	"## 6. Link Events Timeline",
+	"## 7. Counter Baseline",
+	"## 8. Counter Deltas",
+	"## 9. Ping Stability",
+	"## 10. Full-Size Ping",
+	"## 11. TCP Throughput PC1→PC2",
+	"## 12. TCP Throughput PC2→PC1",
+	"## 13. Bidirectional Stress",
+	"## 14. UDP Loss & Jitter",
+	"## 15. CPU Utilization",
+	"## 16. Cable Diagnostics",
+	"## 17. Monitoring Timeline",
+	"## 18. Findings Detail",
+	"## 19. Recommendations",
+	"## 20. Limitations & Unavailable Tests",
+	"## 21. Configuration Used",
+	"## 22. Tool Versions",
+	"## 23. Raw Artifact Index",
+}
+
+// intSide bundles one in-process peer of an integration scenario.
+type intSide struct {
+	app    *App
+	fr     *runnertest.FakeRunner
+	out    *runOutput
+	states chan peer.State
+	cfg    *config.RunConfig
+}
+
+// intSpec configures one side of the harness.
+type intSpec struct {
+	// role selects pc1 (coordinator) or pc2 (worker).
+	role config.Role
+	// controlPort is the control-channel port: 0 on pc1 (the bound port is
+	// read back via ControlAddr), the coordinator's real port on pc2.
+	controlPort uint16
+	// iperfPort is this side's configured data port (probed by preflight).
+	iperfPort uint16
+	// token overrides the shared intToken (the mismatch scenario).
+	token string
+	// interactive enables the stdin prompt; stdin supplies the reader.
+	interactive bool
+	stdin       io.Reader
+	// planGate, on pc1, parks the plan's opening local link inspection
+	// until the channel closes. The harness closes it only after observing
+	// the worker in state testing via onState: with a real clock the two
+	// GO ticks cannot be ordered any other way, and an early first RPC
+	// would draw the worker's invalid-state strike.
+	planGate <-chan struct{}
+}
+
+// newIntSide builds one side: healthy fixture scripts, real clock, short
+// session timers, fake sysfs, an onState observation channel, and t.TempDir
+// report/state dirs (docs/design/testing.md §3).
+func newIntSide(t *testing.T, spec intSpec) *intSide {
+	t.Helper()
+	fr := runnertest.New(t)
+	scriptHealthyQuick(t, fr, string(spec.role))
+	if spec.planGate != nil {
+		// Times-limited scripts are consumed before the unlimited fixture
+		// script and FIFO among themselves: the first serves preflight
+		// ungated, the second blocks the plan's first local command — and
+		// with it the coordinator's first RPC — on the gate.
+		fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
+			StdoutFile: fixture("ethtool", "settings_e1000e_1g.txt"), Times: 1})
+		fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
+			StdoutFile: fixture("ethtool", "settings_e1000e_1g.txt"), Times: 1,
+			Delay: spec.planGate})
+	}
+	token := spec.token
+	if token == "" {
+		token = intToken
+	}
+	cfg := &config.RunConfig{
+		Role:            spec.role,
+		LocalIP:         netip.MustParseAddr("127.0.0.1"),
+		PeerIP:          netip.MustParseAddr("127.0.0.1"),
+		Mode:            config.ModeQuick,
+		ControlPort:     spec.controlPort,
+		IperfPort:       spec.iperfPort,
+		Token:           token,
+		TCPDuration:     30 * time.Second,
+		UDPDuration:     20 * time.Second,
+		ParallelStreams: 4,
+		PingCount:       100,
+		TCPRepeats:      1,
+		OutputDir:       t.TempDir(),
+		NonInteractive:  !spec.interactive,
+		NoSudo:          true,
+	}
+	out := &runOutput{}
+	states := make(chan peer.State, 32) // > the longest transition sequence
+	a, err := New(cfg, Deps{
+		Runner:   fr,
+		Stdin:    spec.stdin,
+		Stdout:   &out.stdout,
+		Stderr:   &out.stderr,
+		StateDir: t.TempDir(),
+		Build:    BuildInfo{Version: "test"},
+		hooks: testHooks{onState: func(st peer.State) {
+			// Never block the session's event loop; Errorf only — this
+			// runs on session goroutines.
+			select {
+			case states <- st:
+			default:
+				t.Errorf("onState channel overflow: dropped %q", st)
+			}
+		}},
+	})
+	if err != nil {
+		t.Fatalf("New(%s): %v", spec.role, err)
+	}
+	root := fakeSysfs(t, "e1000e")
+	if err := os.WriteFile(filepath.Join(root, "eth0", "carrier_changes"), []byte("1\n"), 0o644); err != nil {
+		t.Fatalf("write carrier_changes: %v", err)
+	}
+	a.sysfsRoot = root
+	a.heartbeatInterval = intHeartbeat
+	a.idleTimeout = intIdleTimeout
+	return &intSide{app: a, fr: fr, out: out, states: states, cfg: cfg}
+}
+
+// startCoordinator builds and starts PC1 on --control-port 0 and returns it
+// together with the actually bound control port.
+func startCoordinator(t *testing.T, ctx context.Context, spec intSpec) (*intSide, uint16) {
+	t.Helper()
+	spec.role = config.RolePC1
+	spec.controlPort = 0
+	s := newIntSide(t, spec)
+	if err := s.app.Start(ctx); err != nil {
+		t.Fatalf("pc1 Start: %v", err)
+	}
+	addr, ok := s.app.ControlAddr().(*net.TCPAddr)
+	if !ok || addr.Port == 0 {
+		t.Fatalf("pc1 ControlAddr = %v, want a bound *net.TCPAddr", s.app.ControlAddr())
+	}
+	return s, uint16(addr.Port)
+}
+
+// startWorker builds and starts PC2 against the coordinator's control port.
+func startWorker(t *testing.T, ctx context.Context, spec intSpec, controlPort uint16) *intSide {
+	t.Helper()
+	spec.role = config.RolePC2
+	spec.controlPort = controlPort
+	s := newIntSide(t, spec)
+	if err := s.app.Start(ctx); err != nil {
+		t.Fatalf("pc2 Start: %v", err)
+	}
+	return s
+}
+
+// readReport loads PC1's report.json from the single report directory under
+// outputDir, returning the parsed report and the directory.
+func readReport(t *testing.T, outputDir string) (*model.Report, string) {
+	t.Helper()
+	dir := findReportDir(t, outputDir)
+	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	if err != nil {
+		t.Fatalf("read report.json: %v", err)
+	}
+	var rep model.Report
+	if err := json.Unmarshal(data, &rep); err != nil {
+		t.Fatalf("unmarshal report.json: %v", err)
+	}
+	return &rep, dir
+}
+
+// assertHealthyArtifacts asserts PC1's complete happy-path artifact set:
+// report.json parses with a passing classification, report.md carries all 23
+// section headers, summary.txt exists, and raw/ is non-empty.
+func assertHealthyArtifacts(t *testing.T, pc1 *intSide) {
+	t.Helper()
+	rep, dir := readReport(t, pc1.cfg.OutputDir)
+	if rep.Partial {
+		t.Errorf("report.Partial = true, want false")
+	}
+	if rep.Classification != model.HealthGood && rep.Classification != model.HealthExcellent {
+		t.Errorf("classification = %s, want GOOD or EXCELLENT (reasons: %v)",
+			rep.Classification, rep.ClassificationReasons)
+	}
+	md, err := os.ReadFile(filepath.Join(dir, "report.md"))
+	if err != nil {
+		t.Fatalf("read report.md: %v", err)
+	}
+	for _, h := range markdownSectionHeaders {
+		if !strings.Contains(string(md), h) {
+			t.Errorf("report.md misses section header %q", h)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "summary.txt")); err != nil {
+		t.Errorf("summary.txt: %v", err)
+	}
+	raw, err := os.ReadDir(filepath.Join(dir, "raw"))
+	if err != nil {
+		t.Fatalf("read raw/: %v", err)
+	} else if len(raw) == 0 {
+		t.Errorf("raw/ is empty, want at least the debug log")
+	}
+}
+
+// TestIntegration runs the in-process two-peer scenarios over a real TCP
+// loopback control connection with a real clock and per-side FakeRunners
+// (docs/design/testing.md §3). Synchronization is exclusively Script
+// Started/Delay channels and the onState hook channel — never time.Sleep.
+func TestIntegration(t *testing.T) {
+	t.Run("HappyPathQuickTCPOnly", testHappyPathQuickTCPOnly)
+	t.Run("SIGINTSimulation", testSIGINTSimulation)
+	t.Run("TokenMismatch", testTokenMismatch)
+	t.Run("MalformedFrameInjection", testMalformedFrameInjection)
+}
+
+// testHappyPathQuickTCPOnly runs the full quick plan to double success, in
+// the default non-interactive mode and in an interactive variant whose
+// "start" lines are typed only after each side was observed waiting for them.
+func testHappyPathQuickTCPOnly(t *testing.T) {
+	t.Run("NonInteractive", func(t *testing.T) {
+		testutil.LeakCheck(t)
+		ctx := context.Background()
+		gate := make(chan struct{})
+		pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45601, planGate: gate})
+		pc2 := startWorker(t, ctx, intSpec{iperfPort: 45603}, port)
+
+		// The coordinator's plan stays parked on the gate until the worker
+		// provably reached testing; only then may the first RPC leave.
+		waitForState(t, pc2.states, peer.StateTesting)
+		close(gate)
+
+		code2, err2 := pc2.app.Wait()
+		code1, err1 := pc1.app.Wait()
+		if code1 != ExitOK || err1 != nil {
+			t.Fatalf("pc1 = (%d, %v), want (0, nil)\npc1 %s\npc2 %s", code1, err1, pc1.out.dump(), pc2.out.dump())
+		}
+		if code2 != ExitOK || err2 != nil {
+			t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
+		}
+		for side, states := range map[string]chan peer.State{"pc1": pc1.states, "pc2": pc2.states} {
+			if sts := drainStates(states); len(sts) == 0 || sts[len(sts)-1] != peer.StateCompleted {
+				t.Errorf("%s onState observed %v, want a tail ending in %q", side, sts, peer.StateCompleted)
+			}
+		}
+		assertHealthyArtifacts(t, pc1)
+	})
+
+	t.Run("Interactive", func(t *testing.T) {
+		testutil.LeakCheck(t)
+		ctx := context.Background()
+		gate := make(chan struct{})
+		stdin1r, stdin1w := io.Pipe()
+		stdin2r, stdin2w := io.Pipe()
+		// Closing the write ends EOFs the session stdin pumps so they exit
+		// before LeakCheck's poll; defers run ahead of all cleanups.
+		defer stdin1w.Close()
+		defer stdin2w.Close()
+
+		pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45611, planGate: gate,
+			interactive: true, stdin: stdin1r})
+		pc2 := startWorker(t, ctx, intSpec{iperfPort: 45613, interactive: true, stdin: stdin2r}, port)
+
+		// Type "start" on each side only after that side was observed in
+		// waiting_for_local_start — the onState channel is the sync point.
+		waitForState(t, pc1.states, peer.StateWaitingForLocalStart)
+		if _, err := io.WriteString(stdin1w, "start\n"); err != nil {
+			t.Fatalf("write start to pc1 stdin: %v", err)
+		}
+		waitForState(t, pc2.states, peer.StateWaitingForLocalStart)
+		if _, err := io.WriteString(stdin2w, "start\n"); err != nil {
+			t.Fatalf("write start to pc2 stdin: %v", err)
+		}
+		waitForState(t, pc2.states, peer.StateTesting)
+		close(gate)
+
+		code2, err2 := pc2.app.Wait()
+		code1, err1 := pc1.app.Wait()
+		if code1 != ExitOK || err1 != nil {
+			t.Fatalf("pc1 = (%d, %v), want (0, nil)\npc1 %s\npc2 %s", code1, err1, pc1.out.dump(), pc2.out.dump())
+		}
+		if code2 != ExitOK || err2 != nil {
+			t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
+		}
+		assertHealthyArtifacts(t, pc1)
+	})
+}
+
+// testSIGINTSimulation cancels the coordinator's context mid-TCP-test (gated
+// on the fake iperf3 client's Started channel — signal.NotifyContext lives
+// only in main, so ctx cancellation IS the SIGINT path) and asserts the
+// interrupt contract: coordinator exit 6 with a Partial=true report, worker
+// observes the abort (aborted via onState) and exits 5, and the receiving
+// side's one-off iperf3 server FakeProcess was terminated or killed.
+func testSIGINTSimulation(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	gate := make(chan struct{})
+	pc1, port := startCoordinator(t, ctx1, intSpec{iperfPort: 45621, planGate: gate})
+
+	// The forward-direction client on pc1 hangs on Delay (never closed);
+	// Started is the mid-TCP synchronization point.
+	clientStarted := make(chan struct{})
+	clientHang := make(chan struct{})
+	pc1.fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixture("iperf", "tcp_316_fwd.json"), Times: 1,
+		Delay: clientHang, Started: clientStarted})
+
+	pc2 := startWorker(t, context.Background(), intSpec{iperfPort: 45623}, port)
+	waitForState(t, pc2.states, peer.StateTesting)
+	close(gate)
+
+	testutil.WaitFor(t, clientStarted, "pc1 iperf3 client to start")
+	cancel1()
+
+	code1, err1 := pc1.app.Wait()
+	code2, err2 := pc2.app.Wait()
+	if code1 != ExitInterrupt {
+		t.Errorf("pc1 = (%d, %v), want exit 6\n%s", code1, err1, pc1.out.dump())
+	}
+	if code2 != ExitPeer {
+		t.Errorf("pc2 = (%d, %v), want exit 5\n%s", code2, err2, pc2.out.dump())
+	}
+
+	// The worker observed the abort: its state stream ends in aborted.
+	if sts := drainStates(pc2.states); len(sts) == 0 || sts[len(sts)-1] != peer.StateAborted {
+		t.Errorf("pc2 onState observed %v, want a tail ending in %q", sts, peer.StateAborted)
+	}
+
+	// The interrupted phase was PC1→PC2, so the receiving side is PC2: its
+	// one-off iperf3 server must have been shut down (SIGTERM or SIGKILL),
+	// not left behind. The worker only ever Starts the server (clients go
+	// through Run), so every started process is a server; the recorded
+	// calls double-check that.
+	var started int
+	for _, c := range pc2.fr.Calls() {
+		if c.Kind == "start" {
+			started++
+			if c.Name != "iperf3" || len(c.Args) == 0 || c.Args[0] != "-s" {
+				t.Errorf("pc2 started %s %q, want an iperf3 -s server", c.Name, c.Args)
+			}
+		}
+	}
+	procs := pc2.fr.Processes()
+	if started == 0 || len(procs) == 0 {
+		t.Fatalf("no iperf3 server was started on pc2 (starts: %d, processes: %d)", started, len(procs))
+	}
+	for _, p := range procs {
+		if !p.Terminated() && !p.Killed() {
+			t.Errorf("pc2 iperf3 server (pid %d) was neither terminated nor killed", p.PID())
+		}
+	}
+
+	// PC1 preserved its partial evidence.
+	rep, _ := readReport(t, pc1.cfg.OutputDir)
+	if !rep.Partial {
+		t.Errorf("partial report has Partial = false, want true")
+	}
+	if rep.Failure == nil || rep.Failure.Error == "" {
+		t.Errorf("partial report misses FailureDetails: %+v", rep.Failure)
+	}
+}
+
+// sendWrongTokenHello performs one raw wrong-token handshake attempt against
+// the coordinator and asserts it is answered with abort(auth_failed) — which
+// also proves the coordinator was still listening. Detail must be empty:
+// nothing that could help guess the token.
+func sendWrongTokenHello(t *testing.T, addr string) {
+	t.Helper()
+	nc, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial coordinator: %v", err)
+	}
+	defer nc.Close()
+	conn := protocol.NewConn(nc)
+	env, err := protocol.NewEnvelope(protocol.TypeHello, "", "pc2-00000001", protocol.Hello{
+		Token:             "still-the-wrong-token",
+		Role:              "pc2",
+		CablecheckVersion: "test",
+		LocalIP:           "127.0.0.1",
+		PeerIP:            "127.0.0.1",
+	})
+	if err != nil {
+		t.Fatalf("build hello: %v", err)
+	}
+	if err := conn.WriteEnvelope(env); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	reply, err := conn.ReadEnvelope()
+	if err != nil {
+		t.Fatalf("read handshake reply: %v", err)
+	}
+	if reply.Type != protocol.TypeAbort {
+		t.Fatalf("handshake reply type = %s, want abort", reply.Type)
+	}
+	ab, err := protocol.DecodePayload[protocol.Abort](reply)
+	if err != nil {
+		t.Fatalf("decode abort: %v", err)
+	}
+	if ab.Reason != "auth_failed" || ab.Detail != "" {
+		t.Errorf("abort = reason %q detail %q, want auth_failed with no detail", ab.Reason, ab.Detail)
+	}
+}
+
+// testTokenMismatch runs a worker with the wrong token: the worker exits 4
+// naming the token in its stderr logging; the coordinator rejects the
+// attempt, keeps listening, and exits 5 after its three wrong-token strikes
+// are used up (the implemented retry policy).
+func testTokenMismatch(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx := context.Background()
+	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45631})
+	pc2 := startWorker(t, ctx, intSpec{iperfPort: 45633, token: "totally-wrong-token"}, port)
+
+	code2, err2 := pc2.app.Wait()
+	if code2 != ExitConfig {
+		t.Errorf("pc2 = (%d, %v), want exit 4\n%s", code2, err2, pc2.out.dump())
+	}
+	if !errors.Is(err2, peer.ErrTokenRejected) {
+		t.Errorf("pc2 error = %v, want peer.ErrTokenRejected in the chain", err2)
+	}
+	// "token" must appear in stderr as the actual rejection diagnostic —
+	// the redacted `config.token=[REDACTED]` echo alone does not count.
+	if got := pc2.out.stderr.String(); !strings.Contains(got, "token rejected") {
+		t.Errorf("pc2 stderr does not mention the token rejection:\n%s", got)
+	}
+
+	// The coordinator survived strike one and is still listening: two more
+	// wrong-token attempts each draw an abort(auth_failed) answer, and the
+	// third strike makes it give up.
+	addr := pc1.app.ControlAddr().String()
+	sendWrongTokenHello(t, addr)
+	sendWrongTokenHello(t, addr)
+
+	code1, err1 := pc1.app.Wait()
+	if code1 != ExitPeer {
+		t.Errorf("pc1 = (%d, %v), want exit 5 after three auth strikes\n%s", code1, err1, pc1.out.dump())
+	}
+	if !errors.Is(err1, peer.ErrHandshakeFailed) {
+		t.Errorf("pc1 error = %v, want peer.ErrHandshakeFailed in the chain", err1)
+	}
+}
+
+// testMalformedFrameInjection dials the control port raw and writes an
+// oversized frame header (0xFFFFFFFF) plus garbage: the coordinator must
+// drop that connection without panicking, keep listening, and then complete
+// a subsequent legitimate handshake and full run.
+func testMalformedFrameInjection(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx := context.Background()
+	gate := make(chan struct{})
+	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45641, planGate: gate})
+
+	nc, err := net.Dial("tcp", pc1.app.ControlAddr().String())
+	if err != nil {
+		t.Fatalf("dial coordinator: %v", err)
+	}
+	if err := nc.SetDeadline(time.Now().Add(testutil.TestTimeout(t))); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if _, err := nc.Write([]byte{0xFF, 0xFF, 0xFF, 0xFF, 'g', 'a', 'r', 'b', 'a', 'g', 'e'}); err != nil {
+		t.Fatalf("write malformed frame: %v", err)
+	}
+	// Reading to EOF proves the coordinator processed and dropped the
+	// connection (a best-effort abort frame may arrive first) before the
+	// legitimate worker connects.
+	if _, err := io.Copy(io.Discard, nc); err != nil {
+		t.Fatalf("coordinator never closed the malformed connection: %v", err)
+	}
+	nc.Close()
+
+	pc2 := startWorker(t, ctx, intSpec{iperfPort: 45643}, port)
+	waitForState(t, pc2.states, peer.StateTesting)
+	close(gate)
+
+	code2, err2 := pc2.app.Wait()
+	code1, err1 := pc1.app.Wait()
+	if code1 != ExitOK || err1 != nil {
+		t.Fatalf("pc1 = (%d, %v), want (0, nil)\npc1 %s\npc2 %s", code1, err1, pc1.out.dump(), pc2.out.dump())
+	}
+	if code2 != ExitOK || err2 != nil {
+		t.Fatalf("pc2 = (%d, %v), want (0, nil)\npc2 %s", code2, err2, pc2.out.dump())
+	}
+	assertHealthyArtifacts(t, pc1)
+}

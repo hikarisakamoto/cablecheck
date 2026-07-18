@@ -38,7 +38,7 @@ func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
 		return code, nil
 	}
 
-	code := exitCodeForRunError(runErr)
+	code := exitCodeForCoordinatorRunError(runErr)
 	failure := &model.FailureDetails{
 		Stage: failureStage(outcome),
 		Error: runErr.Error(),
@@ -58,6 +58,10 @@ func (a *App) finishWorker(dir string, outcome *peer.Outcome, runErr error,
 	log *slog.Logger) (ExitCode, error) {
 	if runErr != nil {
 		code := exitCodeForRunError(runErr)
+		// The failure must reach stderr, not only the returned error: for a
+		// rejected token this line is the worker operator's one actionable
+		// diagnostic ("token rejected by coordinator").
+		log.Error("run did not complete", "err", runErr)
 		a.writeWorkerSummary(dir, outcome, fmt.Sprintf("run did not complete: %v", runErr), log)
 		return code, runErr
 	}
