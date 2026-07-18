@@ -24,12 +24,15 @@ const testToken = "sekrit-token-0001"
 
 // pipeTransport is a Transport backed by net.Pipe: Dial hands the server end
 // of a fresh pipe to the pending listener and returns the client end.
+// Accepted conns report remote as their address so the session's peer-IP
+// verification (which net.Pipe's "pipe" address would fail) passes.
 type pipeTransport struct {
 	pending chan net.Conn
+	remote  string
 }
 
 func newPipeTransport() *pipeTransport {
-	return &pipeTransport{pending: make(chan net.Conn, 4)}
+	return &pipeTransport{pending: make(chan net.Conn, 4), remote: "192.168.1.2:40000"}
 }
 
 // Listen implements Transport.
@@ -59,7 +62,7 @@ type pipeListener struct {
 func (l *pipeListener) Accept() (net.Conn, error) {
 	select {
 	case c := <-l.tr.pending:
-		return c, nil
+		return &addrConn{Conn: c, remote: l.tr.remote}, nil
 	case <-l.ctx.Done():
 		return nil, l.ctx.Err()
 	}

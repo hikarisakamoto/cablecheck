@@ -54,8 +54,33 @@ type Config struct {
 	Logger *slog.Logger
 	// Stdin feeds the interactive prompt; os.Stdin in production.
 	Stdin io.Reader
+	// Stdout receives operator-facing prompt output (countdown ticks,
+	// status lines); nil discards. This is user interaction, not logging.
+	Stdout io.Writer
 	// Transport establishes the control connection; nil means real TCP.
 	Transport Transport
+
+	// Mode is the test mode announced in start_confirmation (quick,
+	// standard or soak).
+	Mode string
+	// Steps lists display names of the planned steps, sent in
+	// start_confirmation to drive the worker's "[1/8]" numbering.
+	Steps []string
+
+	// SendReports, when set on the coordinator, is invoked in its own
+	// goroutine after the plan succeeds (state generating_report) to stream
+	// the report files to the peer over the given ReportChannel. A nil
+	// callback (or a peer without AcceptReportTransfer, or
+	// NoReportTransfer) skips the transfer. Its error is a warning only.
+	SendReports func(ctx context.Context, rt *ReportChannel) error
+	// ReceiveReports, when set on the worker, is invoked in its own
+	// goroutine when the report manifest arrives; it consumes the routed
+	// report/report_chunk frames from the ReportChannel and acknowledges
+	// them. A worker without the callback declines the manifest.
+	ReceiveReports func(ctx context.Context, rt *ReportChannel) error
+	// Complete optionally supplies the final-verdict payload for this
+	// side's complete frame; nil sends a zero Complete.
+	Complete func() protocol.Complete
 
 	// HeartbeatInterval overrides the 5s heartbeat ticker period; zero
 	// means protocol.HeartbeatInterval. Test-tunable.
@@ -67,6 +92,21 @@ type Config struct {
 	// beyond the request's own TimeoutMs budget; zero means
 	// defaultCallGrace. Test-tunable.
 	CallGrace time.Duration
+
+	// hooks are test-only observation points; the zero value installs none.
+	hooks sessionHooks
+}
+
+// sessionHooks bundles the unexported test hooks a session honors. Every
+// field may be nil; hooks must be fast and must not re-enter the session.
+type sessionHooks struct {
+	// onState observes every successful state transition.
+	onState func(from, to State)
+	// afterEvent runs after the event loop finished handling an event.
+	afterEvent func(ev event)
+	// afterHeartbeatTick runs after each heartbeat tick evaluation with
+	// whether a heartbeat frame was written.
+	afterHeartbeatTick func(sent bool)
 }
 
 // defaultCallGrace is how long the coordinator keeps waiting for a
@@ -91,6 +131,14 @@ func (c Config) logger() *slog.Logger {
 		return c.Logger
 	}
 	return slog.New(slog.DiscardHandler)
+}
+
+// stdout returns the configured Stdout, defaulting to a discard writer.
+func (c Config) stdout() io.Writer {
+	if c.Stdout != nil {
+		return c.Stdout
+	}
+	return io.Discard
 }
 
 // transport returns the configured Transport, defaulting to real TCP.
