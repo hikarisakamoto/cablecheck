@@ -365,11 +365,11 @@ func TestRunQuickHappyPath(t *testing.T) {
 	}
 }
 
-// TestRunNoReportTransferSendsPostCapsVerdict pins that PC1 merges the
-// worker's handshake capabilities and re-evaluates before complete even when
-// report transfer is disabled. A virtual PC2 must make both PC1's local
-// report and the complete payload received by PC2 INCONCLUSIVE.
-func TestRunNoReportTransferSendsPostCapsVerdict(t *testing.T) {
+// TestRunNoReportTransferFinalizesPostCapsReportOnce pins that PC1 merges the
+// worker's handshake capabilities and finalizes exactly once before complete,
+// even when report transfer is disabled. A virtual PC2 must make both PC1's
+// local report and the complete payload received by PC2 INCONCLUSIVE.
+func TestRunNoReportTransferFinalizesPostCapsReportOnce(t *testing.T) {
 	defer testutil.LeakCheck(t)
 	ctx := context.Background()
 
@@ -377,6 +377,13 @@ func TestRunNoReportTransferSendsPostCapsVerdict(t *testing.T) {
 	clk1, clk2 := clocktest.New(start), clocktest.New(start)
 	var out1, out2 runOutput
 	pc1, _, _ := newRunApp(t, config.RolePC1, 0, 45341, &out1, clk1, nil)
+	var finalizations, postCapabilitiesFinalizations int
+	pc1.deps.hooks.onFinalize = func(_, hasOutcome bool) {
+		finalizations++
+		if hasOutcome {
+			postCapabilitiesFinalizations++
+		}
+	}
 	pc1.cfg.NoReportTransfer = true
 	if err := pc1.Start(ctx); err != nil {
 		t.Fatalf("pc1 Start: %v", err)
@@ -413,6 +420,12 @@ func TestRunNoReportTransferSendsPostCapsVerdict(t *testing.T) {
 	}
 	if err2 != nil || code2 != ExitInconclusive {
 		t.Errorf("pc2 = (%d, %v), want (%d, nil); complete payload was not post-caps\npc1 %s\npc2 %s", code2, err2, ExitInconclusive, out1.dump(), out2.dump())
+	}
+	if postCapabilitiesFinalizations != 1 {
+		t.Errorf("post-capabilities finalizations = %d, want exactly 1", postCapabilitiesFinalizations)
+	}
+	if finalizations != 2 {
+		t.Errorf("report finalizations = %d, want 2 (provisional plus one post-capabilities finalization)", finalizations)
 	}
 
 	dir1 := findReportDir(t, pc1.cfg.OutputDir)
@@ -467,6 +480,13 @@ func TestRunInterruptProducesPartialReport(t *testing.T) {
 	clk1, clk2 := clocktest.New(start), clocktest.New(start)
 	var out1, out2 runOutput
 	pc1, fr1, states1 := newRunApp(t, config.RolePC1, 0, 45321, &out1, clk1, nil)
+	var finalizations, failureFinalizations int
+	pc1.deps.hooks.onFinalize = func(hasFailure, _ bool) {
+		finalizations++
+		if hasFailure {
+			failureFinalizations++
+		}
+	}
 	started := make(chan struct{})
 	delay := make(chan struct{}) // never closed: the client hangs until cancel
 	fr1.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
@@ -497,6 +517,9 @@ func TestRunInterruptProducesPartialReport(t *testing.T) {
 	}
 	if code2 != ExitPeer {
 		t.Errorf("pc2 = (%d, %v), want exit 5\n%s", code2, err2, out2.dump())
+	}
+	if finalizations != 1 || failureFinalizations != 1 {
+		t.Errorf("finalizations = %d (%d with failure), want one failure finalization", finalizations, failureFinalizations)
 	}
 
 	// The abort reached both onState hooks: PC1 aborts locally, the abort

@@ -14,12 +14,10 @@ import (
 )
 
 // finishCoordinator maps PC1's session outcome onto files and exit codes.
-// On success the report was already rendered by the plan wrapper; the files
-// are re-rendered and re-evaluated once more here so the peer's machine
-// description (known only after peer.Run returns) participates in the final
-// verdict. On failure a
-// partial report with Partial=true and FailureDetails is written from
-// whatever the plan accumulated.
+// On success PrepareComplete has already rendered the capability-enriched
+// report and stored its verdict. If that preparation failed, finish retries
+// the finalization as a fallback. On failure a partial report with Partial=true
+// and FailureDetails is always written from whatever the plan accumulated.
 func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
 	results *testsuite.SessionResults, v *verdict, startedAt time.Time,
 	outcome *peer.Outcome, runErr error, log *slog.Logger) (ExitCode, error) {
@@ -27,10 +25,12 @@ func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
 		if _, _, _, ok := v.get(); !ok {
 			return ExitInternal, errors.New("app: session completed without a verdict")
 		}
-		// Enrich with the peer capabilities and replace the provisional
-		// verdict with an evaluation over the complete report.
-		if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, outcome, log); err != nil {
-			log.Warn("re-rendering the final report failed; the pre-complete rendering stands", "err", err)
+		if !v.isFinalized() {
+			// PrepareComplete normally owns this final rendering. Retrying here
+			// preserves the previous fallback when that callback could not write.
+			if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, outcome, log); err != nil {
+				log.Warn("re-rendering the final report failed; the pre-complete rendering stands", "err", err)
+			}
 		}
 		_, summary, code, _ := v.get()
 		fmt.Fprintf(a.deps.Stdout, "\n%s\nReport: %s\n", summary, dir)

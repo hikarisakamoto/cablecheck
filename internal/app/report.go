@@ -27,16 +27,33 @@ import (
 // stored result after merging newly available peer capabilities, ensuring the
 // final report and coordinator exit code use the complete evidence set.
 type verdict struct {
-	mu      sync.Mutex
-	set     bool
-	res     evaluate.Result
-	summary string
-	code    ExitCode
+	mu        sync.Mutex
+	set       bool
+	finalized bool
+	res       evaluate.Result
+	summary   string
+	code      ExitCode
 	// finishedAt is captured on the first render so every later re-render
-	// (the pre-transfer enrichment, the post-run enrichment) produces
-	// byte-identical report files: PC2's transferred copy must SHA-256-equal
-	// PC1's final copy, which a fresh clock read on each render would break.
+	// (normally the PrepareComplete enrichment) produces byte-identical report
+	// timestamps: PC2's transferred copy must SHA-256-equal PC1's final copy,
+	// which a fresh clock read on each render would break.
 	finishedAt time.Time
+}
+
+// markFinalized records that PrepareComplete successfully rendered the
+// capability-enriched report. A provisional plan rendering does not set it.
+func (v *verdict) markFinalized() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.finalized = true
+}
+
+// isFinalized reports whether PrepareComplete successfully rendered the
+// capability-enriched report.
+func (v *verdict) isFinalized() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.finalized
 }
 
 // store records the evaluated verdict and the render's finish timestamp.
@@ -83,6 +100,9 @@ func (v *verdict) complete() protocol.Complete {
 func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite.SessionResults,
 	v *verdict, startedAt time.Time, failure *model.FailureDetails, outcome *peer.Outcome,
 	log *slog.Logger) error {
+	if h := a.deps.hooks.onFinalize; h != nil {
+		h(failure != nil, outcome != nil)
+	}
 	// Reuse the finish timestamp captured on the first render so re-renders are
 	// byte-stable; the first render stamps it from the clock.
 	finishedAt, stored := v.finishTime()

@@ -101,8 +101,12 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	// files into its own report directory.
 	if a.cfg.Role == config.RolePC1 {
 		pcfg.PrepareComplete = func(peerCaps protocol.Capabilities) error {
-			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
+			err := a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
 				&peer.Outcome{PeerCaps: peerCaps, TestID: a.sessionTestID()}, log)
+			if err == nil {
+				v.markFinalized()
+			}
+			return err
 		}
 		pcfg.SendReports = a.sendReportsCallback(dir)
 	} else {

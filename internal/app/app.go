@@ -67,6 +67,9 @@ type Deps struct {
 type testHooks struct {
 	// onState observes every peer session state transition.
 	onState func(peer.State)
+	// onFinalize observes report finalization attempts and whether they carry
+	// failure details or a peer outcome.
+	onFinalize func(hasFailure, hasOutcome bool)
 	// mangleReportChunk corrupts outbound report chunks (wired when the
 	// report transfer lands; stored now so the seam is stable).
 	mangleReportChunk func([]byte) []byte
