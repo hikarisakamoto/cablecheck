@@ -69,7 +69,7 @@ sudo ip link set dev enpXsY up
 
 Run `ip addr` again to confirm that PC1 owns `192.168.50.1` and PC2 owns `192.168.50.2`. CableCheck normally discovers the interface by an exact match on `--local-ip`; use `--interface enpXsY` only when you want to require a particular interface.
 
-The `ip addr add` assignments are temporary and disappear when removed or after reboot. To remove them manually, use `sudo ip addr del 192.168.50.1/24 dev enpXsY` on PC1 and the corresponding `.2` address on PC2.
+The `ip addr add` assignments are temporary: they disappear on reboot, or you can remove them once testing is done — see [Tear down the link](#tear-down-the-link) below.
 
 ## Check the machines first
 
@@ -227,6 +227,26 @@ cablecheck report --output /existing/output/dir path/to/report.json
 ```
 
 See [docs/report-schema.md](docs/report-schema.md) for the JSON contract and the committed [healthy example](examples/healthy/report.json).
+
+## Tear down the link
+
+CableCheck cleans up after **itself** automatically, on both a normal finish and Ctrl-C: it stops every `iperf3` server it started, terminates its own child processes (by tracked PID and process group, never with a blanket `pkill`), releases its control and `iperf3` ports, and removes its temporary run state under `$XDG_RUNTIME_DIR/cablecheck` (or `/tmp`). Report directories are deliverables and are kept.
+
+The only thing you undo by hand is the temporary network configuration you added in [Prepare the direct link](#prepare-the-direct-link). Reverse those two steps on **each** PC — remove the address, and (if you brought the interface up only for this test) set it back down:
+
+```bash
+# PC1
+sudo ip addr del 192.168.50.1/24 dev enpXsY
+sudo ip link set dev enpXsY down
+
+# PC2
+sudo ip addr del 192.168.50.2/24 dev enpXsY
+sudo ip link set dev enpXsY down
+```
+
+Substitute the real interface name for `enpXsY`. Skip the `ip link set ... down` step if the interface was already up and in use before testing. A reboot also clears the temporary address if you prefer not to remove it manually.
+
+If a run was killed uncleanly (for example `kill -9`) and left an `iperf3` server or stale run state behind, the next run's preflight detects the leftover — it verifies ownership against `/proc` before reporting it — and fails with guidance to clear it rather than touching an unrelated process.
 
 ## Compare with a known-good cable
 
