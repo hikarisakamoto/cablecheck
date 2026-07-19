@@ -138,7 +138,7 @@ func (h *harness) startDrain() {
 // the session side completes the handshake.
 func startWorkerHarness(t *testing.T, ctx context.Context, tr *pipeTransport, cfg Config) *harness {
 	t.Helper()
-	nc, err := tr.Dial(ctx, "192.168.1.1:8443")
+	nc, err := tr.Dial(ctx, cfg.LocalIP, "192.168.1.1:8443")
 	if err != nil {
 		t.Fatalf("harness dial: %v", err)
 	}

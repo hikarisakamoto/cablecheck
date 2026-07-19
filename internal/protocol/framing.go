@@ -92,7 +92,6 @@ type Conn struct {
 	maxFrame    uint32
 	writeTO     time.Duration
 	idleTimeout atomic.Int64 // nanoseconds; mutable for cable-test link-loss windows
-	lastSend    atomic.Int64 // unix nanos of last successful write
 	closeOnce   sync.Once
 	closeErr    error
 }
@@ -192,7 +191,6 @@ func (c *Conn) WriteEnvelope(env *Envelope) error {
 	if _, err := c.nc.Write(buf); err != nil {
 		return err
 	}
-	c.lastSend.Store(wallClock.Now().UnixNano())
 	return nil
 }
 
@@ -204,17 +202,6 @@ func (c *Conn) WriteEnvelope(env *Envelope) error {
 // is done (see ReadEnvelope); there is no timeout-and-retry pattern.
 func (c *Conn) SetIdleTimeout(d time.Duration) {
 	c.idleTimeout.Store(int64(d))
-}
-
-// LastSend returns the time of the last successful WriteEnvelope, or the
-// zero time if nothing has been sent. The heartbeater uses it to skip sends
-// while other traffic keeps the line demonstrably alive.
-func (c *Conn) LastSend() time.Time {
-	n := c.lastSend.Load()
-	if n == 0 {
-		return time.Time{}
-	}
-	return time.Unix(0, n)
 }
 
 // Close closes the underlying connection, unblocking any pending read. It

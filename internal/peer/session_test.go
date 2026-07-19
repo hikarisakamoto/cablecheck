@@ -15,6 +15,49 @@ import (
 	"cablecheck/internal/testutil"
 )
 
+func TestSessionCallbacks(t *testing.T) {
+	testutil.LeakCheck(t)
+	cfg1, cfg2 := testConfigs(t)
+	tr := newPipeTransport()
+	cfg1.Transport, cfg2.Transport = tr, tr
+	cfg1.Stdin = strings.NewReader("")
+
+	var handshakeID string
+	type transition struct{ from, to State }
+	var transitions []transition
+	cfg1.OnHandshake = func(testID string) { handshakeID = testID }
+	cfg1.OnState = func(from, to State) {
+		transitions = append(transitions, transition{from: from, to: to})
+	}
+
+	ctx := t.Context()
+	resCh := startSession(ctx, cfg1, func(context.Context, RemoteCaller) error { return nil }, nil)
+	h := startWorkerHarness(t, ctx, tr, cfg2)
+	h.await(protocol.TypeAbort)
+	out := awaitResult(t, resCh)
+	if !errors.Is(out.err, ErrLocalAbort) {
+		t.Errorf("Run error = %v, want ErrLocalAbort", out.err)
+	}
+	if handshakeID != h.hs.TestID || handshakeID != out.out.TestID {
+		t.Errorf("OnHandshake testID = %q, harness/outcome = %q/%q", handshakeID, h.hs.TestID, out.out.TestID)
+	}
+	want := []transition{
+		{StateInitializing, StatePreflight},
+		{StatePreflight, StateListening},
+		{StateListening, StateHandshake},
+		{StateHandshake, StateWaitingForLocalStart},
+		{StateWaitingForLocalStart, StateAborted},
+	}
+	if len(transitions) != len(want) {
+		t.Fatalf("OnState transitions = %v, want %v", transitions, want)
+	}
+	for i := range want {
+		if transitions[i] != want[i] {
+			t.Errorf("OnState transition %d = %+v, want %+v", i, transitions[i], want[i])
+		}
+	}
+}
+
 // TestStdinPromptCommands walks the interactive prompt: "start" sends ready
 // and transitions, a duplicate "start" is idempotent with an already-ready
 // message, "status" prints the local state plus the peer's heartbeat state,

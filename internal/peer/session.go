@@ -192,6 +192,9 @@ func (s *session) run(ctx context.Context) (Outcome, error) {
 	s.parent = ctx
 	s.sm = NewStateMachine(StateInitializing, func(from, to State) {
 		s.log.Info("state", "from", string(from), "to", string(to))
+		if h := s.cfg.OnState; h != nil {
+			h(from, to)
+		}
 		if h := s.cfg.hooks.onState; h != nil {
 			h(from, to)
 		}
@@ -216,6 +219,9 @@ func (s *session) run(ctx context.Context) (Outcome, error) {
 	s.peerCaps = hs.PeerCaps
 	s.ids = hs.IDs
 	s.dedup = hs.Dedup
+	if h := s.cfg.OnHandshake; h != nil {
+		h(s.testID)
+	}
 	if err := s.sm.Transition(StateWaitingForLocalStart); err != nil {
 		conn.Close()
 		return s.failEarly(err)
@@ -275,7 +281,7 @@ func (s *session) establish(ctx context.Context) (*handshakeResult, *protocol.Co
 // establishWorker dials the coordinator and runs the worker handshake; every
 // failure is fatal for the process (docs/design/proto.md §3).
 func (s *session) establishWorker(ctx context.Context) (*handshakeResult, *protocol.Conn, error) {
-	nc, err := s.cfg.transport().Dial(ctx, s.controlAddr())
+	nc, err := s.cfg.transport().Dial(ctx, s.cfg.LocalIP, s.controlAddr())
 	if err != nil {
 		return nil, nil, err
 	}

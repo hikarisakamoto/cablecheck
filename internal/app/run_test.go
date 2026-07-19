@@ -287,16 +287,15 @@ func TestRunQuickHappyPath(t *testing.T) {
 	if rep.TestID == "" {
 		t.Errorf("report.TestID is empty")
 	}
-	// The sessionWatch captured the test ID from the session's "handshake
-	// complete" log record on both sides: PC1's copy feeds partial reports
+	// The handshake callback captured the test ID on both sides: PC1's copy feeds partial reports
 	// (assembleReport falls back to it when no Outcome exists yet), PC2's
-	// the worker summary. rep.TestID alone cannot pin this — the happy-path
-	// re-render takes outcome.TestID — so the watch is asserted directly.
-	if got := pc1.watch.TestID(); got == "" || got != rep.TestID {
-		t.Errorf("pc1 watch.TestID() = %q, want the report's %q captured from the session log", got, rep.TestID)
+	// and the worker summary. rep.TestID alone cannot pin this — the happy-path
+	// re-render takes outcome.TestID — so the callback value is asserted directly.
+	if got := pc1.sessionTestID(); got == "" || got != rep.TestID {
+		t.Errorf("pc1 sessionTestID() = %q, want the report's %q captured by OnHandshake", got, rep.TestID)
 	}
-	if got := pc2.watch.TestID(); got == "" {
-		t.Errorf("pc2 watch.TestID() is empty; the log-watch seam captured nothing")
+	if got := pc2.sessionTestID(); got == "" {
+		t.Errorf("pc2 sessionTestID() is empty; OnHandshake captured nothing")
 	}
 	if len(rep.Tests.TCP) != 2 || len(rep.Tests.Ping) != 2 {
 		t.Errorf("tests = %d TCP / %d ping, want 2/2", len(rep.Tests.TCP), len(rep.Tests.Ping))

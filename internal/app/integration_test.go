@@ -900,7 +900,7 @@ func testStaleIperf3Detection(t *testing.T) {
 		t.Errorf("pc2 diagnostics lack remediation text (how to kill the survivor):\n%s", msg)
 	}
 	// The failing worker never opened the control connection.
-	if pc2.app.watch.TestID() != "" {
+	if pc2.app.sessionTestID() != "" {
 		t.Errorf("worker completed a handshake despite failing preflight")
 	}
 

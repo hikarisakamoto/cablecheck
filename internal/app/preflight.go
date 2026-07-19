@@ -194,6 +194,7 @@ func (a *App) preflight(ctx context.Context) (*preflightInfo, error) {
 			Duplex:    pf.Link.Duplex,
 			MTU:       iface.MTU,
 			MAC:       iface.MAC,
+			USB:       iface.Class.USB,
 		},
 		SudoAvailable:        sudoOK,
 		CableTestSupported:   false, // cable diagnostics land in a later version

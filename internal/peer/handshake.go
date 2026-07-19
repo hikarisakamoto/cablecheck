@@ -157,6 +157,13 @@ func helloPeerIPMatches(claim string, localIP netip.Addr) bool {
 	return err == nil && a.Unmap() == localIP.Unmap()
 }
 
+// helloLocalIPMatches validates the worker's claimed local interface address
+// against the coordinator's configured peer address.
+func helloLocalIPMatches(claim string, peerIP netip.Addr) bool {
+	a, err := netip.ParseAddr(claim)
+	return err == nil && a.Unmap() == peerIP.Unmap()
+}
+
 // coordinatorHandshake runs PC1's half of the handshake on an accepted (and
 // peer-IP-verified) connection: read hello, validate version/token/role/IP
 // claim, assign the test ID, answer hello_ack, read the worker's
@@ -220,6 +227,10 @@ func coordinatorHandshake(conn *protocol.Conn, cfg Config) (res *handshakeResult
 	if !helloPeerIPMatches(hello.PeerIP, cfg.LocalIP) {
 		_ = sendAbort(conn, ids, cfg, "", abortProtocolError, fmt.Sprintf("hello peerIp %q does not match our local IP", hello.PeerIP))
 		return nil, fmt.Errorf("%w: hello peerIp %q does not match local IP %s", errProtocol, hello.PeerIP, cfg.LocalIP)
+	}
+	if !helloLocalIPMatches(hello.LocalIP, cfg.PeerIP) {
+		_ = sendAbort(conn, ids, cfg, "", abortProtocolError, fmt.Sprintf("hello localIp %q does not match expected peer IP", hello.LocalIP))
+		return nil, fmt.Errorf("%w: hello localIp %q does not match expected peer IP %s", errProtocol, hello.LocalIP, cfg.PeerIP)
 	}
 
 	testID, err := newTestID(clk)

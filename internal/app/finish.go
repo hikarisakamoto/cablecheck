@@ -123,7 +123,7 @@ func reportTransferred(dir string) bool {
 // report transfer did not deliver PC1's own summary.txt (declined, corrupted,
 // or --no-report-transfer).
 func (a *App) writeWorkerSummary(dir string, outcome *peer.Outcome, verdictLine string, log *slog.Logger) {
-	testID := a.watch.TestID()
+	testID := a.sessionTestID()
 	if outcome != nil && outcome.TestID != "" {
 		testID = outcome.TestID
 	}

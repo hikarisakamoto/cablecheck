@@ -134,9 +134,52 @@ func runHelper(mode string, args []string) int {
 			time.Sleep(time.Hour)
 		}
 
+	case "spawn-term-ignoring-grandchild":
+		// Spawn a same-process-group grandchild whose inherited descriptors
+		// are redirected, so our SIGTERM death lets the runner's cmd.Wait
+		// return even though the grandchild remains alive. The grandchild
+		// ignores SIGTERM; only the delayed process-group SIGKILL can stop it.
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "os.Executable: %v\n", err)
+			return 125
+		}
+		devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "open %s: %v\n", os.DevNull, err)
+			return 125
+		}
+		defer devNull.Close()
+		cmd := exec.Command(exe, args[0])
+		cmd.Env = append(os.Environ(), "GO_HELPER_MODE=heartbeat-writer-ignore-sigterm")
+		cmd.Stdin = devNull
+		cmd.Stdout = devNull
+		cmd.Stderr = devNull
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "spawn TERM-ignoring grandchild: %v\n", err)
+			return 125
+		}
+		fmt.Println("spawned")
+		for {
+			time.Sleep(time.Hour)
+		}
+
 	case "heartbeat-writer":
 		// Append one line every 10ms. Bounded at ~30s so a broken
 		// group-kill implementation cannot orphan a writer forever.
+		for i := 0; i < 3000; i++ {
+			f, err := os.OpenFile(args[0], os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			if err != nil {
+				return 125
+			}
+			fmt.Fprintln(f, "beat")
+			f.Close()
+			time.Sleep(10 * time.Millisecond)
+		}
+		return 0
+
+	case "heartbeat-writer-ignore-sigterm":
+		signal.Ignore(syscall.SIGTERM)
 		for i := 0; i < 3000; i++ {
 			f, err := os.OpenFile(args[0], os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
@@ -607,6 +650,56 @@ func TestProcessGroupKill(t *testing.T) {
 			prev = cur
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCancelEscalationKillsOrphanedGrandchild(t *testing.T) {
+	testutil.LeakCheck(t)
+	fc := clocktest.New(time.Unix(1_700_000_000, 0))
+	r := New(fc)
+	hb := filepath.Join(t.TempDir(), "heartbeats")
+	ctx, cancel := context.WithCancel(t.Context())
+	spec := helperSpec(t, "spawn-term-ignoring-grandchild", hb)
+	spec.GracePeriod = 30 * time.Second
+	p := startHelperReady(t, r, ctx, spec, "spawned\n")
+	// Always reap a survivor even when the assertion exposes a broken
+	// escalation. The grandchild anchors this process group until killed.
+	t.Cleanup(func() { _ = syscall.Kill(-p.PID(), syscall.SIGKILL) })
+	pollUntil(t, func() bool { return fileSize(hb) >= 10 }, "TERM-ignoring grandchild heartbeats")
+
+	cancel()
+	fc.BlockUntilWaiters(1)
+	// Observe that the direct child has already been reaped before grace
+	// expires. Its death must not disarm the pending process-group kill.
+	pollUntil(t, func() bool {
+		return errors.Is(syscall.Kill(p.PID(), 0), syscall.ESRCH)
+	}, "direct child reap after SIGTERM")
+	fc.Advance(spec.GracePeriod)
+	res, err := p.Wait(t.Context())
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Wait error = %v, want context.Canceled", err)
+	}
+	if res == nil || res.Signal != "SIGTERM" {
+		t.Errorf("Wait result = %+v, want direct child killed by SIGTERM", res)
+	}
+
+	// The process group was not empty when cmd.Wait returned. The delayed
+	// SIGKILL must stop the orphaned writer.
+	deadline := time.Now().Add(2 * time.Second)
+	prev := fileSize(hb)
+	stable := 0
+	for stable < 20 {
+		if !time.Now().Before(deadline) {
+			t.Fatal("heartbeat file still growing after cancellation escalation")
+		}
+		time.Sleep(10 * time.Millisecond)
+		cur := fileSize(hb)
+		if cur == prev {
+			stable++
+		} else {
+			stable = 0
+			prev = cur
+		}
 	}
 }
 

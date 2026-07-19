@@ -67,26 +67,30 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 
 	s := a.buildSuite(pf, rawDir, clkNowID(clk), log)
 	v := &verdict{}
-	a.watch.onState = a.deps.hooks.onState
-	sessionLog := slog.New(watchHandler{Handler: log.Handler(), w: &a.watch})
 
 	pcfg := peer.Config{
-		Role:              peer.Role(a.cfg.Role),
-		LocalIP:           a.cfg.LocalIP,
-		PeerIP:            a.cfg.PeerIP,
-		ControlPort:       a.controlPort,
-		Token:             a.cfg.Token,
-		NonInteractive:    a.cfg.NonInteractive,
-		NoReportTransfer:  a.cfg.NoReportTransfer,
-		Version:           a.deps.Build.Version,
-		Caps:              pf.Caps,
-		Clock:             clk,
-		Logger:            sessionLog,
-		Stdin:             a.deps.Stdin,
-		Stdout:            a.deps.Stdout,
-		Mode:              string(a.cfg.Mode),
-		Steps:             testsuite.QuickPlanSteps(),
-		Complete:          v.complete,
+		Role:             peer.Role(a.cfg.Role),
+		LocalIP:          a.cfg.LocalIP,
+		PeerIP:           a.cfg.PeerIP,
+		ControlPort:      a.controlPort,
+		Token:            a.cfg.Token,
+		NonInteractive:   a.cfg.NonInteractive,
+		NoReportTransfer: a.cfg.NoReportTransfer,
+		Version:          a.deps.Build.Version,
+		Caps:             pf.Caps,
+		Clock:            clk,
+		Logger:           log,
+		Stdin:            a.deps.Stdin,
+		Stdout:           a.deps.Stdout,
+		Mode:             string(a.cfg.Mode),
+		Steps:            testsuite.QuickPlanSteps(),
+		Complete:         v.complete,
+		OnHandshake:      a.setSessionTestID,
+		OnState: func(_, to peer.State) {
+			if h := a.deps.hooks.onState; h != nil {
+				h(to)
+			}
+		},
 		HeartbeatInterval: a.heartbeatInterval,
 		IdleTimeout:       a.idleTimeout,
 	}
@@ -102,7 +106,7 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		// frame), so the classification never changes.
 		prepare := func(peerCaps protocol.Capabilities) error {
 			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
-				&peer.Outcome{PeerCaps: peerCaps, TestID: a.watch.TestID()}, log)
+				&peer.Outcome{PeerCaps: peerCaps, TestID: a.sessionTestID()}, log)
 		}
 		pcfg.SendReports = a.sendReportsCallback(dir, prepare, log)
 	} else {

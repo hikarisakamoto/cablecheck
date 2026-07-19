@@ -106,6 +106,8 @@ type NICInfo struct {
 	MTU int `json:"mtu"`
 	// MAC is the hardware address.
 	MAC string `json:"mac"`
+	// USB is true when the interface is attached through a USB bus.
+	USB bool `json:"usb"`
 }
 
 // Capabilities is exchanged in both directions after hello_ack (PC2 first).

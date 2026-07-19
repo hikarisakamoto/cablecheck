@@ -81,6 +81,12 @@ type Config struct {
 	// Complete optionally supplies the final-verdict payload for this
 	// side's complete frame; nil sends a zero Complete.
 	Complete func() protocol.Complete
+	// OnHandshake, when set, is invoked once after a successful handshake
+	// with the coordinator-assigned test ID.
+	OnHandshake func(testID string)
+	// OnState, when set, observes every successful session state transition.
+	// It must be fast and must not re-enter the session.
+	OnState func(from, to State)
 
 	// HeartbeatInterval overrides the 5s heartbeat ticker period; zero
 	// means protocol.HeartbeatInterval. Test-tunable.

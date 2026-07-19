@@ -25,6 +25,44 @@ type addrConn struct {
 // RemoteAddr returns the configured fake remote address.
 func (a *addrConn) RemoteAddr() net.Addr { return fakeAddr(a.remote) }
 
+type recordingDialTransport struct {
+	localIP netip.Addr
+	remote  string
+}
+
+func (t *recordingDialTransport) Listen(context.Context, string) (net.Listener, error) {
+	return nil, errors.New("unexpected Listen")
+}
+
+func (t *recordingDialTransport) Dial(_ context.Context, localIP netip.Addr, remote string) (net.Conn, error) {
+	t.localIP = localIP
+	t.remote = remote
+	return nil, syscall.ECONNREFUSED
+}
+
+func TestWorkerDialUsesConfiguredLocalIP(t *testing.T) {
+	tr := &recordingDialTransport{}
+	cfg := Config{
+		Role:        RolePC2,
+		LocalIP:     netip.MustParseAddr("192.168.50.20"),
+		PeerIP:      netip.MustParseAddr("192.168.50.10"),
+		ControlPort: 8443,
+		Transport:   tr,
+	}
+	s := newSession(cfg, nil, nil)
+	s.sm = NewStateMachine(StateConnecting, nil)
+	_, _, err := s.establishWorker(t.Context())
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		t.Errorf("establishWorker error = %v, want ECONNREFUSED", err)
+	}
+	if tr.localIP != cfg.LocalIP {
+		t.Errorf("Dial local IP = %s, want configured %s", tr.localIP, cfg.LocalIP)
+	}
+	if tr.remote != "192.168.50.10:8443" {
+		t.Errorf("Dial remote = %q, want 192.168.50.10:8443", tr.remote)
+	}
+}
+
 // TestHandshakeWrongPeerIP asserts verifyPeerIP closes a connection from an
 // unexpected IP without sending anything, and leaves a matching connection
 // open (including the IPv4-in-IPv6 mapped form).
@@ -199,7 +237,7 @@ func TestTCPTransportDialRetryThenSuccess(t *testing.T) {
 
 	res := make(chan dialOut, 1)
 	go func() {
-		c, err := tr.Dial(ctx, addr)
+		c, err := tr.Dial(ctx, netip.MustParseAddr("127.0.0.1"), addr)
 		res <- dialOut{conn: c, err: err}
 	}()
 
@@ -251,7 +289,7 @@ func TestTCPTransportDialGivesUpAfterBudget(t *testing.T) {
 
 	res := make(chan dialOut, 1)
 	go func() {
-		c, err := tr.Dial(t.Context(), addr)
+		c, err := tr.Dial(t.Context(), netip.MustParseAddr("127.0.0.1"), addr)
 		res <- dialOut{conn: c, err: err}
 	}()
 
@@ -289,7 +327,7 @@ func TestTCPTransportDialContextCanceled(t *testing.T) {
 
 		res := make(chan dialOut, 1)
 		go func() {
-			c, err := tr.Dial(ctx, addr)
+			c, err := tr.Dial(ctx, netip.MustParseAddr("127.0.0.1"), addr)
 			res <- dialOut{conn: c, err: err}
 		}()
 		fc.BlockUntilWaiters(1) // parked on the retry timer
@@ -315,7 +353,7 @@ func TestTCPTransportDialContextCanceled(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // the very first attempt sees a dead context
 
-		conn, err := tr.Dial(ctx, addr)
+		conn, err := tr.Dial(ctx, netip.MustParseAddr("127.0.0.1"), addr)
 		if conn != nil {
 			conn.Close()
 			t.Fatal("Dial returned a conn, want cancellation failure")

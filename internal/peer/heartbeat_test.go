@@ -62,7 +62,7 @@ func TestHeartbeatScheduling(t *testing.T) {
 	fc := clocktest.New(time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC))
 	s, far, ticks := newHeartbeatSession(t, fc)
 
-	// A frame is written now: LastSend = t0.
+	// A frame is written now: the session's last-send timestamp is t0.
 	warn, err := protocol.NewEnvelope(protocol.TypeWarning, s.testID, s.ids.Next(), protocol.Warning{Code: "traffic"})
 	if err != nil {
 		t.Fatalf("NewEnvelope: %v", err)

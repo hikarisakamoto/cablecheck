@@ -19,9 +19,10 @@ type Transport interface {
 	// Listen opens a listener on addr ("ip:port"); the coordinator binds
 	// only its --local-ip, never the wildcard address.
 	Listen(ctx context.Context, addr string) (net.Listener, error)
-	// Dial connects to addr; the worker implementation retries within its
-	// dial budget, so a coordinator started second is still reached.
-	Dial(ctx context.Context, addr string) (net.Conn, error)
+	// Dial connects to addr with its source bound to localIP; the worker
+	// implementation retries within its dial budget, so a coordinator
+	// started second is still reached.
+	Dial(ctx context.Context, localIP netip.Addr, addr string) (net.Conn, error)
 }
 
 // Dial policy of the real transport (docs/design/proto.md §3): 5s per
@@ -78,9 +79,12 @@ func (l *keepAliveListener) Accept() (net.Conn, error) {
 // Dial implements Transport: 5s per attempt, retrying every 2s for up to 60s
 // total (the peer may simply not be started yet), honoring ctx cancellation
 // between and during attempts. TCP keepalive is applied before returning.
-func (t *tcpTransport) Dial(ctx context.Context, addr string) (net.Conn, error) {
+func (t *tcpTransport) Dial(ctx context.Context, localIP netip.Addr, addr string) (net.Conn, error) {
 	deadline := t.clk.Now().Add(dialTotalBudget)
-	d := net.Dialer{Timeout: dialAttemptTimeout}
+	d := net.Dialer{
+		Timeout:   dialAttemptTimeout,
+		LocalAddr: &net.TCPAddr{IP: net.IP(localIP.Unmap().AsSlice())},
+	}
 	var lastErr error
 	for {
 		nc, err := d.DialContext(ctx, "tcp", addr)

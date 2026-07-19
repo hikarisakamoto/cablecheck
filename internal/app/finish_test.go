@@ -100,6 +100,37 @@ func TestFinishCoordinatorKeepsExchangedVerdict(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesExchangePropagatesPeerUSB(t *testing.T) {
+	cfg := &config.RunConfig{Role: config.RolePC1}
+	a, err := New(cfg, Deps{StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pf := &preflightInfo{}
+	results := &testsuite.SessionResults{}
+	when := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	workerCaps := protocol.Capabilities{
+		NIC: protocol.NICInfo{Name: "enx001122334455", Driver: "r8152", USB: true},
+	}
+	wire, err := json.Marshal(workerCaps)
+	if err != nil {
+		t.Fatalf("marshal worker capabilities: %v", err)
+	}
+	var exchanged protocol.Capabilities
+	if err := json.Unmarshal(wire, &exchanged); err != nil {
+		t.Fatalf("unmarshal exchanged capabilities: %v", err)
+	}
+	outcome := &peer.Outcome{PeerCaps: exchanged}
+
+	rep := a.assembleReport(pf, results, when, when, nil, outcome)
+	if !rep.PC2.NIC.USB {
+		t.Errorf("PC2.NIC.USB = false, want true from worker capabilities")
+	}
+	if rep.Machines == nil || !rep.Machines.PC2.NIC.USB {
+		t.Errorf("Machines.PC2.NIC.USB was not propagated: %+v", rep.Machines)
+	}
+}
+
 // newWorkerApp builds a minimal PC2 App for finishWorker tests.
 func newWorkerApp(t *testing.T, out *bytes.Buffer) *App {
 	t.Helper()

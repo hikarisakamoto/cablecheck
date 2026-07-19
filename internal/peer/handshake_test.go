@@ -41,7 +41,7 @@ func (p *pipeTransport) Listen(ctx context.Context, addr string) (net.Listener, 
 }
 
 // Dial implements Transport.
-func (p *pipeTransport) Dial(ctx context.Context, addr string) (net.Conn, error) {
+func (p *pipeTransport) Dial(ctx context.Context, _ netip.Addr, addr string) (net.Conn, error) {
 	client, server := net.Pipe()
 	select {
 	case p.pending <- server:
@@ -108,7 +108,7 @@ func testConfigs(t *testing.T) (cfg1, cfg2 Config) {
 			CablecheckVersion: "0.1.0-pc2",
 			OS:                "linux/arm64",
 			Iperf3:            protocol.Iperf3Caps{Version: "3.9", JSON: true, Reverse: true, UDP: true, OneOff: true},
-			NIC:               protocol.NICInfo{Name: "enp2s0", Driver: "r8169", SpeedMbps: 1000, Duplex: "full", MTU: 1500},
+			NIC:               protocol.NICInfo{Name: "enp2s0", Driver: "r8152", SpeedMbps: 1000, Duplex: "full", MTU: 1500, USB: true},
 		},
 		Clock: fc,
 	}
@@ -151,7 +151,7 @@ func TestHandshakeHappyPath(t *testing.T) {
 		coord <- hsOut{res: res, err: err}
 	}()
 
-	nc, err := tr.Dial(ctx, "192.168.1.1:8443")
+	nc, err := tr.Dial(ctx, cfg2.LocalIP, "192.168.1.1:8443")
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -175,6 +175,9 @@ func TestHandshakeHappyPath(t *testing.T) {
 	}
 	if res1.PeerCaps != cfg2.Caps {
 		t.Errorf("coordinator PeerCaps = %+v, want worker caps %+v", res1.PeerCaps, cfg2.Caps)
+	}
+	if !res1.PeerCaps.NIC.USB {
+		t.Error("coordinator received PC2 NIC.USB = false, want true")
 	}
 	if res2.PeerCaps != cfg1.Caps {
 		t.Errorf("worker PeerCaps = %+v, want coordinator caps %+v", res2.PeerCaps, cfg1.Caps)
@@ -650,6 +653,15 @@ func TestHandshakeProtocolErrors(t *testing.T) {
 			name: "coordinator-hello-peer-ip-claim-mismatch",
 			frames: func(t *testing.T) []*protocol.Envelope {
 				return []*protocol.Envelope{helloFrame(t, func(h *protocol.Hello) { h.PeerIP = "192.168.1.99" })}
+			},
+			wantErr:         errProtocol,
+			retryable:       true,
+			wantAbortReason: abortProtocolError,
+		},
+		{
+			name: "coordinator-hello-local-ip-claim-mismatch",
+			frames: func(t *testing.T) []*protocol.Envelope {
+				return []*protocol.Envelope{helloFrame(t, func(h *protocol.Hello) { h.LocalIP = "192.168.1.99" })}
 			},
 			wantErr:         errProtocol,
 			retryable:       true,

@@ -119,7 +119,7 @@ func (e *Exec) start(ctx context.Context, spec CommandSpec, live bool) (*proc, e
 	// ctx.Err() alone after the fact), SIGTERMs the group, and arms the
 	// SIGKILL escalation timer.
 	var timedOut, canceled atomic.Bool
-	waitDone := make(chan struct{}) // closed once cmd.Wait has returned
+	escalationDone := make(chan struct{})
 	cmd.Cancel = func() error {
 		if spec.Timeout > 0 && ctx.Err() == nil {
 			timedOut.Store(true)
@@ -128,6 +128,7 @@ func (e *Exec) start(ctx context.Context, spec CommandSpec, live bool) (*proc, e
 		}
 		pgid := cmd.Process.Pid
 		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+			close(escalationDone)
 			if errors.Is(err, syscall.ESRCH) {
 				return os.ErrProcessDone
 			}
@@ -136,13 +137,13 @@ func (e *Exec) start(ctx context.Context, spec CommandSpec, live bool) (*proc, e
 		grace := spec.GracePeriod
 		afterGrace := e.clk.After(grace)
 		go func() {
-			select {
-			case <-waitDone:
-			case <-afterGrace:
-				// ESRCH deliberately ignored: the group may have
-				// exited between the check and the signal.
-				_ = syscall.Kill(-pgid, syscall.SIGKILL)
-			}
+			defer close(escalationDone)
+			<-afterGrace
+			// The direct child's exit does not prove its process group is
+			// empty: a grandchild may have redirected inherited descriptors
+			// and survived SIGTERM. Always signal the group after grace.
+			// ESRCH is deliberately ignored when the group is already empty.
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		}()
 		return nil
 	}
@@ -168,7 +169,11 @@ func (e *Exec) start(ctx context.Context, spec CommandSpec, live bool) (*proc, e
 	// CommandResult and the contract error, then closes done.
 	go func() {
 		waitErr := cmd.Wait()
-		close(waitDone)
+		if timedOut.Load() || canceled.Load() {
+			// cmd.Wait only reaps the direct child. Do not publish process
+			// completion until the delayed group kill has run as well.
+			<-escalationDone
+		}
 		cancelTimeout()
 		closeTees()
 		if liveBuf != nil {

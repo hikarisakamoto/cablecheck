@@ -335,7 +335,7 @@ func TestCoordinatorAuthThreeStrikes(t *testing.T) {
 	resCh := startSession(ctx, cfg1, func(ctx context.Context, rc RemoteCaller) error { return nil }, nil)
 
 	for i := range 3 {
-		nc, err := tr.Dial(ctx, "192.168.1.1:8443")
+		nc, err := tr.Dial(ctx, cfg1.PeerIP, "192.168.1.1:8443")
 		if err != nil {
 			t.Fatalf("dial %d: %v", i, err)
 		}

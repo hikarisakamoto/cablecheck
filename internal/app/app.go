@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -96,8 +96,24 @@ type App struct {
 	code    ExitCode
 	err     error
 
-	// watch captures data the peer session exposes through its logger.
-	watch sessionWatch
+	// sessionMu guards the test ID supplied by peer.Config.OnHandshake.
+	sessionMu sync.Mutex
+	testID    string
+}
+
+// sessionTestID returns the coordinator-assigned ID, or "" before the
+// handshake callback fires.
+func (a *App) sessionTestID() string {
+	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
+	return a.testID
+}
+
+// setSessionTestID records the coordinator-assigned ID from the peer session.
+func (a *App) setSessionTestID(testID string) {
+	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
+	a.testID = testID
 }
 
 // New validates cfg and assembles an App with production defaults for every
@@ -203,7 +219,7 @@ func (t *preboundListener) Listen(context.Context, string) (net.Listener, error)
 }
 
 // Dial implements peer.Transport; the coordinator never dials.
-func (t *preboundListener) Dial(context.Context, string) (net.Conn, error) {
+func (t *preboundListener) Dial(context.Context, netip.Addr, string) (net.Conn, error) {
 	return nil, errors.New("app: coordinator transport cannot dial")
 }
 
@@ -223,74 +239,4 @@ func (l keepAliveListener) Accept() (net.Conn, error) {
 		return nil, fmt.Errorf("app: configure keepalive: %w", kerr)
 	}
 	return nc, nil
-}
-
-// sessionWatch collects facts the peer session publishes through structured
-// log records — the session's logger is its sanctioned observation seam for
-// the app layer (peer/session.go logs "state" on every transition and
-// handshake.go logs "handshake complete" with the assigned testId; those
-// record shapes are load-bearing here). TestRunQuickHappyPath pins both
-// captures end-to-end: the testId feeding partial reports and the worker
-// summary, and the state stream feeding the hooks.onState sync primitive
-// (docs/design/testing.md §3).
-type sessionWatch struct {
-	mu      sync.Mutex
-	testID  string
-	onState func(peer.State)
-}
-
-// TestID returns the captured session test ID, "" before the handshake.
-func (w *sessionWatch) TestID() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.testID
-}
-
-// setTestID stores the captured test ID.
-func (w *sessionWatch) setTestID(id string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.testID = id
-}
-
-// watchHandler wraps the session logger's handler and feeds sessionWatch.
-type watchHandler struct {
-	slog.Handler
-	w *sessionWatch
-}
-
-// Handle inspects the record before delegating: "state" records drive the
-// onState test hook, "handshake complete" records carry the testId.
-func (h watchHandler) Handle(ctx context.Context, r slog.Record) error {
-	switch r.Message {
-	case "state":
-		if h.w.onState != nil {
-			r.Attrs(func(a slog.Attr) bool {
-				if a.Key == "to" {
-					h.w.onState(peer.State(a.Value.String()))
-					return false
-				}
-				return true
-			})
-		}
-	case "handshake complete":
-		r.Attrs(func(a slog.Attr) bool {
-			if a.Key == "testId" {
-				h.w.setTestID(a.Value.String())
-				return false
-			}
-			return true
-		})
-	}
-	return h.Handler.Handle(ctx, r)
-}
-
-// WithAttrs keeps the watcher wrapped around the derived handler.
-func (h watchHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return watchHandler{Handler: h.Handler.WithAttrs(attrs), w: h.w}
-}
-
-// WithGroup keeps the watcher wrapped around the derived handler.
-func (h watchHandler) WithGroup(name string) slog.Handler {
-	return watchHandler{Handler: h.Handler.WithGroup(name), w: h.w}
 }

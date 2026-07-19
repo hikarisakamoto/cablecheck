@@ -124,7 +124,7 @@ func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite
 // It only ever runs on PC1, so the local side is pc1 and the peer pc2.
 func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResults,
 	startedAt, finishedAt time.Time, failure *model.FailureDetails, outcome *peer.Outcome) *model.Report {
-	testID := a.watch.TestID()
+	testID := a.sessionTestID()
 	var peerCaps protocol.Capabilities
 	if outcome != nil {
 		if outcome.TestID != "" {
@@ -262,6 +262,7 @@ func peerReportFromCaps(caps protocol.Capabilities) model.PeerReport {
 			Duplex:    caps.NIC.Duplex,
 			MTU:       caps.NIC.MTU,
 			MAC:       caps.NIC.MAC,
+			USB:       caps.NIC.USB,
 		},
 		ToolVersions: tools,
 	}
