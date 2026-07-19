@@ -123,6 +123,14 @@ func (s *session) handleReportManifest(env *protocol.Envelope) {
 	}
 	if s.cfg.ReceiveReports == nil || s.cfg.NoReportTransfer {
 		s.log.Info("declining report transfer: no receiver configured")
+		// Mark the transfer as having run so the report_chunk frames the sender
+		// streams before it reads this decline (it streams a whole file — >= 3
+		// chunks for a >= 512 KiB file — before reading any ack) take the
+		// late-frame drop path in routeTransferFrame instead of the
+		// invalid-state strike counter. Without this the third such chunk would
+		// trip maxInvalidState and abort the whole session with protocol_error,
+		// forcing PC1 to exit 5 instead of its true health code.
+		s.transferRan = true
 		if _, err := s.send(protocol.TypeReportAck, env.MessageID, protocol.ReportAck{
 			Declined: true,
 			Error:    "report transfer not accepted",

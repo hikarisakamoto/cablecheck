@@ -29,11 +29,16 @@ type ReceiverChannel interface {
 // returns nil (a declined transfer is not a receive error). It then writes
 // each file to <name>.part while folding an incremental SHA-256, verifies the
 // digest against the manifest on the last chunk, renames the .part to its
-// final name on a match, and acks per file. A digest mismatch, offset gap or
-// bad chunk name deletes the .part, acks !OK, and lets the sender retry — the
-// receiver keeps NOTHING partial. Returns an error only for a channel or
-// filesystem failure that prevents further progress, never for a per-file
-// rejection.
+// final name on a match, and acks per file. A digest mismatch or offset gap
+// deletes the .part, acks !OK, and lets the sender retry — the receiver keeps
+// NOTHING partial. An unexpected/allowlist-violating chunk name, or a chunk
+// that would push the file past its manifest-declared (cap-validated) size,
+// is instead a FATAL manifest-level decline: those cannot come from a
+// well-behaved sender, and acking them as retryable would let a hostile sender
+// either park the sender forever (retrying into a returned receiver) or stream
+// unlimited bytes to fill the receiver's disk. Returns an error only for a
+// channel or filesystem failure — or such a fatal protocol fault — that
+// prevents further progress, never for a retryable per-file rejection.
 func ReceiveReports(ctx context.Context, dir string, ch ReceiverChannel) error {
 	m, _, isManifest, err := ch.RecvFrame(ctx)
 	if err != nil {
@@ -82,6 +87,13 @@ func ReceiveReports(ctx context.Context, dir string, ch ReceiverChannel) error {
 // ErrSessionClosed. Other packages build on this exact cross-side contract, so
 // it must be described as it actually behaves. Nothing partial is kept for a
 // file that never verified.
+//
+// A retryable reject (offset gap, digest mismatch) is distinct from a FATAL
+// decline (unexpected/allowlist-violating chunk name, or a chunk that would
+// exceed the manifest-declared size): a fatal decline sends a Declined ack —
+// which SendReports treats as a clean, non-retryable end of the whole transfer
+// — and returns an error, so a buggy/hostile sender can neither retry into a
+// returned receiver nor stream unbounded bytes past the declared size.
 func receiveOneFile(ctx context.Context, dir string, f TransferFile, ch ReceiverChannel) error {
 	var w *partWriter
 	cleanup := func() {
@@ -112,11 +124,20 @@ func receiveOneFile(ctx context.Context, dir string, f TransferFile, ch Receiver
 			continue // straggler of the already-rejected attempt: swallow it
 		}
 		if c.Name != f.Name || !SafeReportName(c.Name) {
-			// A chunk for a file this iteration is not expecting (or a rejected
-			// name) is a protocol fault, not a per-file rejection.
+			// A chunk for a file this iteration is not expecting (or an
+			// allowlist-violating name) is a FATAL protocol fault, not a
+			// retryable per-file rejection: a plain !OK ack would let the sender
+			// treat it as attempt one and retransmit into a receiver that has
+			// already returned, parking it forever in RecvAck (heartbeats keep
+			// the idle timeout from ever firing). Declining the whole manifest
+			// makes SendReports short-circuit (errManifestDeclined) so the
+			// sender stops rather than retrying into the void.
 			cleanup()
-			if aerr := ch.SendAck(ctx, AckFrame{Name: c.Name, Error: "unexpected or rejected file name"}); aerr != nil {
-				return fmt.Errorf("send reject ack: %w", aerr)
+			if aerr := ch.SendAck(ctx, AckFrame{
+				Declined: true,
+				Error:    fmt.Sprintf("unexpected or rejected chunk name %q, expected %s", c.Name, f.Name),
+			}); aerr != nil {
+				return fmt.Errorf("send fatal decline: %w", aerr)
 			}
 			return fmt.Errorf("reporting: expected chunks for %s, got %q", f.Name, c.Name)
 		}
@@ -149,6 +170,25 @@ func receiveOneFile(ctx context.Context, dir string, f TransferFile, ch Receiver
 				return nil
 			}
 			continue
+		}
+		// Size fences enforced BEFORE writing, on every chunk — not only on the
+		// Last one — so a token-authed but buggy/hostile sender cannot declare a
+		// tiny file and then stream unlimited contiguous non-Last chunks to fill
+		// the receiver's disk while heartbeats keep the session alive. A single
+		// chunk over ChunkSize, or a running total that would exceed the
+		// manifest-declared (already cap-validated) size, can never come from a
+		// well-behaved sender, so it is a FATAL decline of the whole manifest
+		// rather than a retryable per-file reject: retrying would just let the
+		// sender loop the same oversize stream forever. Received bytes can never
+		// exceed the declared size before the digest step.
+		if int64(len(c.Data)) > ChunkSize || w.written+int64(len(c.Data)) > f.Size {
+			reason := fmt.Sprintf("oversize chunk for %s: %d written + %d bytes exceeds declared %d (chunk cap %d)",
+				f.Name, w.written, len(c.Data), f.Size, ChunkSize)
+			cleanup()
+			if aerr := ch.SendAck(ctx, AckFrame{Declined: true, Error: reason}); aerr != nil {
+				return fmt.Errorf("send oversize decline: %w", aerr)
+			}
+			return fmt.Errorf("reporting: %s", reason)
 		}
 		if werr := w.write(c.Data); werr != nil {
 			cleanup()

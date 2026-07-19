@@ -118,6 +118,76 @@ func TestReportTransferSeam(t *testing.T) {
 	})
 }
 
+// TestDeclinedManifestChunksDoNotAbort pins T1c: when a worker declines a
+// report manifest (no ReceiveReports hook / NoReportTransfer), the sender still
+// streams the whole first file before reading the decline ack, so several
+// report_chunk frames arrive AFTER the decline. Those late frames must take the
+// late-frame drop path — not the invalid-state strike counter — or the third
+// one would abort the whole session with protocol_error (PC1 would exit 5
+// instead of its health code). The decline branch must therefore mark the
+// transfer as having run. Here the harness delivers more chunks than the strike
+// budget tolerates; the session must still complete normally.
+func TestDeclinedManifestChunksDoNotAbort(t *testing.T) {
+	testutil.LeakCheck(t)
+	cfg1, cfg2 := testConfigs(t)
+	tr := newPipeTransport()
+	cfg1.Transport, cfg2.Transport = tr, tr
+	cfg2.NonInteractive = true
+	// No ReceiveReports hook: the worker declines the manifest.
+	logger, logs := newTestLogger()
+	cfg2.Logger = logger
+	states := newStateRecorder(&cfg2)
+
+	ctx := t.Context()
+	resCh := startSession(ctx, cfg2, nil, opFunc(nopOp))
+	h := startCoordinatorHarness(t, ctx, tr, cfg1)
+
+	h.await(protocol.TypeReady)
+	h.send(protocol.TypeReady, "", protocol.Ready{})
+	h.send(protocol.TypeStartConfirm, "", protocol.StartConfirmation{StartInMs: 0})
+	states.wait(t, StateTesting)
+
+	// Manifest is declined (no receiver configured).
+	h.send(protocol.TypeReport, "", protocol.ReportManifest{
+		Files:     []protocol.ReportFile{{Name: "report.json", Size: 3, SHA256: "abc"}},
+		TotalSize: 3,
+	})
+	ackEnv := h.await(protocol.TypeReportAck)
+	ack, err := protocol.DecodePayload[protocol.ReportAck](ackEnv)
+	if err != nil {
+		t.Fatalf("decode report_ack: %v", err)
+	}
+	if !ack.Declined {
+		t.Fatalf("report_ack = %+v, want a manifest-level decline", ack)
+	}
+
+	// The sender streamed the whole first file before reading the decline:
+	// more straggler chunks than the strike budget tolerates now arrive.
+	for seq := range maxInvalidState + 1 {
+		h.send(protocol.TypeReportChunk, "", protocol.ReportChunk{Name: "report.json", Seq: seq})
+	}
+
+	// The session must still be alive and finish the complete exchange.
+	h.send(protocol.TypeComplete, "", protocol.Complete{Classification: "GOOD"})
+	h.await(protocol.TypeComplete)
+	out := awaitResult(t, resCh)
+	if out.err != nil {
+		t.Fatalf("Run: %v", out.err)
+	}
+	if out.out.FinalState != StateCompleted {
+		t.Errorf("FinalState = %s, want completed", out.out.FinalState)
+	}
+	for _, typ := range h.remainingTypes() {
+		if typ == protocol.TypeAbort {
+			t.Errorf("declined-manifest chunks drew an abort; want them dropped quietly")
+		}
+	}
+	containsAll(t, logs.String(), "late report-transfer frame dropped")
+	if got := logs.String(); strings.Contains(got, "invalid_state") {
+		t.Errorf("declined-manifest chunks counted as invalid-state strikes; logs:\n%s", got)
+	}
+}
+
 // TestTransferRouteFullBufferDoesNotBlock pins the guard against a wedged
 // event loop: when the active transfer callback stops draining (e.g. it
 // failed mid-file while the peer keeps streaming chunks), routing one more

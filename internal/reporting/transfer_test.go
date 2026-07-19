@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"cablecheck/internal/testutil"
 )
 
 // pipeChannel is an in-memory sender<->receiver seam for the transfer tests.
@@ -27,6 +29,10 @@ type pipeChannel struct {
 	// still advances) — it models a routed-frame loss or dedup that opens an
 	// offset gap mid-file. The offset lets a test target a specific chunk.
 	drop func(seq int, offset int64) bool
+	// rewrite, when set, may replace a chunk on its way to the receiver: a
+	// buggy/hostile sender that renames a chunk or inflates its Data past the
+	// manifest-declared size. Returning the chunk unchanged is a no-op.
+	rewrite func(c ChunkFrame) ChunkFrame
 }
 
 // transferFrame is one manifest-or-chunk value on the wire between halves.
@@ -60,6 +66,9 @@ func (s senderEnd) SendChunk(ctx context.Context, c ChunkFrame) error {
 	}
 	if s.p.mangle != nil {
 		c.Data = s.p.mangle(c.Seq, append([]byte(nil), c.Data...))
+	}
+	if s.p.rewrite != nil {
+		c = s.p.rewrite(c)
 	}
 	select {
 	case s.p.toRecv <- transferFrame{chunk: &c}:
@@ -151,7 +160,7 @@ func TestTransferSHA256HappyPath(t *testing.T) {
 	digests := writeReportSet(t, srcDir, bodies)
 
 	p := newPipeChannel()
-	sendErr, recvErr := runTransfer(t, p, srcDir, dstDir)
+	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
 	if sendErr != nil {
 		t.Fatalf("SendReports: %v", sendErr)
 	}
@@ -194,7 +203,7 @@ func TestTransferCorruptedChunk(t *testing.T) {
 		return data
 	}
 
-	sendErr, recvErr := runTransfer(t, p, srcDir, dstDir)
+	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
 	if sendErr != nil {
 		t.Fatalf("SendReports: %v", sendErr)
 	}
@@ -240,7 +249,7 @@ func TestTransferDroppedChunkRetries(t *testing.T) {
 		return false
 	}
 
-	sendErr, recvErr := runTransfer(t, p, srcDir, dstDir)
+	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
 	if sendErr != nil {
 		t.Fatalf("SendReports: %v", sendErr)
 	}
@@ -276,7 +285,7 @@ func TestTransferCorruptedChunkNoRetryLandsNothing(t *testing.T) {
 		return data
 	}
 
-	sendErr, recvErr := runTransfer(t, p, srcDir, dstDir)
+	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
 	if sendErr == nil {
 		t.Errorf("SendReports err = nil, want a transfer failure after the retry")
 	}
@@ -379,7 +388,7 @@ func TestTransferReceiverLocalFailureDoesNotHang(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dstDir, 0o755) })
 
 	p := newPipeChannel()
-	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir, 5*time.Second)
+	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
 
 	// The sender must not hang; a declined transfer is not a sender failure.
 	if sendErr != nil {
@@ -400,11 +409,142 @@ func TestTransferReceiverLocalFailureDoesNotHang(t *testing.T) {
 	assertNoPartFiles(t, dstDir)
 }
 
+// TestTransferOversizeChunkRejectedMidStream pins T1a: a manifest declaring a
+// small file followed by a contiguous chunk stream that would exceed the
+// declared size must be rejected BEFORE the last chunk — a token-authed but
+// buggy/hostile sender must not be able to stream unlimited non-Last bytes past
+// the manifest-declared (cap-validated) size and fill the receiver's disk. The
+// receiver keeps nothing, and never writes more than the declared size.
+func TestTransferOversizeChunkRejectedMidStream(t *testing.T) {
+	dstDir := t.TempDir()
+
+	// Manifest declares 4 bytes; the sender streams a 4-byte first chunk (Last
+	// = false) then keeps going. The receiver must reject the moment the
+	// running total would exceed 4, not wait for a Last that never comes.
+	const declared = 4
+	m := Manifest{
+		Files:     []TransferFile{{Name: "report.json", Size: declared, SHA256: "00"}},
+		TotalSize: declared,
+	}
+
+	// hostileEnd streams the manifest, then contiguous non-Last chunks forever
+	// (until the receiver declines) each carrying `declared` bytes at the
+	// running offset — the classic disk-fill attack. maxPart records the
+	// largest .part size the receiver ever flushed, sampled just before each
+	// ack: the receiver must reject before its running total passes `declared`,
+	// so this can never exceed `declared`.
+	acks := make(chan AckFrame, 1)
+	var maxPart int64
+	sampleWritten := func() {
+		// Sampled just before each new chunk is yielded: at that point the
+		// receiver has fully processed (and flushed) all prior chunks, so the
+		// .part size reflects the running written total. With the fix the
+		// receiver rejects before ever writing past the declared size.
+		if fi, err := os.Stat(filepath.Join(dstDir, "report.json.part")); err == nil {
+			if fi.Size() > maxPart {
+				maxPart = fi.Size()
+			}
+		}
+	}
+	ch := &scriptedRecvChannel{
+		frames: []scriptedFrame{{m: m, isManifest: true}},
+		next: func(seq int) scriptedFrame {
+			sampleWritten()
+			return scriptedFrame{c: ChunkFrame{
+				Name:   "report.json",
+				Seq:    seq,
+				Offset: int64(seq) * 4,
+				Data:   []byte("data"), // 4 bytes
+				Last:   false,
+			}}
+		},
+		onAck: func(a AckFrame) {
+			select {
+			case acks <- a:
+			default:
+			}
+		},
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- ReceiveReports(context.Background(), dstDir, ch) }()
+
+	var ack AckFrame
+	select {
+	case ack = <-acks:
+	case <-time.After(testutil.TestTimeout(t)):
+		t.Fatal("receiver never rejected the oversize stream (disk-fill wedge)")
+	}
+	select {
+	case <-done:
+	case <-time.After(testutil.TestTimeout(t)):
+		t.Fatal("ReceiveReports did not return after rejecting the oversize stream")
+	}
+
+	// The reject is a real rejection (not an OK ack).
+	if ack.OK {
+		t.Errorf("ack = %+v, want a rejection of the oversize stream", ack)
+	}
+	// Nothing oversized was ever committed, and no .part scratch survived.
+	if _, err := os.Stat(filepath.Join(dstDir, "report.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("report.json exists after an oversize stream, want nothing kept")
+	}
+	if maxPart > declared {
+		t.Errorf("receiver flushed %d bytes to disk, over the declared %d-byte size", maxPart, declared)
+	}
+	assertNoPartFiles(t, dstDir)
+}
+
+// TestTransferUnexpectedChunkNameFatal pins T1b: a manifest naming report.json
+// followed by a first chunk naming a different (still-allowlisted) file is a
+// FATAL, non-retryable decline — the sender must STOP rather than retransmit
+// into a receiver that has already gone away. The ack carries Declined so the
+// sender short-circuits (errManifestDeclined) instead of treating it as a
+// retryable !OK and parking forever in RecvAck; the receiver keeps nothing.
+func TestTransferUnexpectedChunkNameFatal(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	// A single-chunk report.json is enough; the sender renames the chunk.
+	bodies := map[string]string{"report.json": "hello"}
+	writeReportSet(t, srcDir, bodies)
+
+	p := newPipeChannel()
+	// The manifest still names report.json (BuildManifest only offers
+	// allowlisted files), but every chunk claims report.md — an unexpected name
+	// for the file the receiver is currently expecting.
+	p.rewrite = func(c ChunkFrame) ChunkFrame {
+		c.Name = "report.md"
+		return c
+	}
+
+	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
+
+	// The sender must not park in RecvAck: a fatal decline ends the transfer as
+	// a non-failure (errManifestDeclined -> nil), NOT a retry loop or a hang.
+	if sendErr != nil {
+		t.Errorf("SendReports err = %v, want nil (a fatal decline is not a failure)", sendErr)
+	}
+	// The receiver surfaces the protocol fault as a receive error the caller
+	// logs as a warning.
+	if recvErr == nil {
+		t.Errorf("ReceiveReports err = nil, want a protocol-fault error for the unexpected chunk name")
+	}
+	// Nothing landed under either name.
+	for _, name := range []string{"report.json", "report.md"} {
+		if _, err := os.Stat(filepath.Join(dstDir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s exists after an unexpected-name chunk, want nothing kept", name)
+		}
+	}
+	assertNoPartFiles(t, dstDir)
+}
+
 // runTransferBounded runs both transfer halves concurrently and fails the test
-// (rather than wedging the whole `go test` run) if either half has not returned
-// within limit — the guard that turns a mutual hang into a visible failure.
-func runTransferBounded(t *testing.T, p *pipeChannel, srcDir, dstDir string, limit time.Duration) (sendErr, recvErr error) {
+// (rather than wedging the whole `go test` run to the global timeout) if either
+// half has not returned within the testutil.TestTimeout budget — the watchdog
+// that turns a future mutual-deadlock regression into a fast, useful failure.
+func runTransferBounded(t *testing.T, p *pipeChannel, srcDir, dstDir string) (sendErr, recvErr error) {
 	t.Helper()
+	limit := testutil.TestTimeout(t)
 	done := make(chan struct{})
 	go func() {
 		sendErr, recvErr = runTransfer(t, p, srcDir, dstDir)
@@ -417,6 +557,46 @@ func runTransferBounded(t *testing.T, p *pipeChannel, srcDir, dstDir string, lim
 		t.Fatalf("transfer did not complete within %s (mutual hang)", limit)
 		return nil, nil
 	}
+}
+
+// scriptedFrame is one manifest-or-chunk value a scriptedRecvChannel yields.
+type scriptedFrame struct {
+	m          Manifest
+	c          ChunkFrame
+	isManifest bool
+}
+
+// scriptedRecvChannel is a ReceiverChannel that drives ReceiveReports from a
+// fixed prologue of frames and then an unbounded generated chunk stream — the
+// seam a hostile-sender test needs, since the pipeChannel's SendReports half
+// can only ever offer well-behaved, manifest-consistent chunks. It captures
+// every ack and lets the test sample disk state just before each ack.
+type scriptedRecvChannel struct {
+	frames []scriptedFrame             // fixed prologue (manifest, seed chunks)
+	next   func(seq int) scriptedFrame // generator for chunks past the prologue
+	onAck  func(a AckFrame)
+	seq    int
+}
+
+func (s *scriptedRecvChannel) RecvFrame(ctx context.Context) (Manifest, ChunkFrame, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, ChunkFrame{}, false, err
+	}
+	if len(s.frames) > 0 {
+		f := s.frames[0]
+		s.frames = s.frames[1:]
+		return f.m, f.c, f.isManifest, nil
+	}
+	f := s.next(s.seq)
+	s.seq++
+	return f.m, f.c, f.isManifest, nil
+}
+
+func (s *scriptedRecvChannel) SendAck(ctx context.Context, a AckFrame) error {
+	if s.onAck != nil {
+		s.onAck(a)
+	}
+	return nil
 }
 
 // assertNoPartFiles fails if any *.part scratch file survived in dir.
