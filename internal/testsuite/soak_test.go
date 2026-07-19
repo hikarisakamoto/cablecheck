@@ -2,6 +2,7 @@ package testsuite
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"cablecheck/internal/clock"
 	"cablecheck/internal/clock/clocktest"
 	"cablecheck/internal/config"
+	"cablecheck/internal/evaluate"
 	"cablecheck/internal/model"
 	"cablecheck/internal/runner/runnertest"
 	"cablecheck/internal/testutil"
@@ -241,6 +243,73 @@ func TestSoakCancelDiscardsPartialCycle(t *testing.T) {
 	}
 	if len(results.TCP) != 2 {
 		t.Errorf("TCP results = %d, want only cycle one's two directions", len(results.TCP))
+	}
+}
+
+// TestSoakCancelFinalCountersRetainLocalAndLeaveRemoteUnavailable models the
+// peer session being torn down with the caller context. The deferred final
+// boundary uses WithoutCancel, so PC1 can still capture locally, but the
+// RemoteCaller must reject PC2's snapshot once its session context is done.
+func TestSoakCancelFinalCountersRetainLocalAndLeaveRemoteUnavailable(t *testing.T) {
+	defer testutil.LeakCheck(t)
+
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
+		StdoutFile: fixturePath("ethtool", "settings_e1000e_1g.txt")})
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsPrefix("-S"),
+		StdoutFile: fixturePath("ethtool", "stats_e1000e_clean.txt")})
+	fr.Script(runnertest.Script{Name: "ip", StdoutFile: fixturePath("ip", "linkstats_clean.json")})
+	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("ping", "quick_clean_100.txt")})
+	started := make(chan struct{})
+	hang := make(chan struct{})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_39_fwd.json"), Delay: hang, Started: started})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc := newFakeCallerWithSession(t, ctx)
+	rc.reply(OpLinkSettings, &LinkSettingsResult{Settings: model.LinkSettings{SpeedMbps: 1000, Duplex: "full"}})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 7}})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 8}})
+	rc.reply(OpPingRun, &PingRunResult{Ping: model.PingResult{Received: 500, IntervalUsedSec: 0.02}})
+	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+
+	results := &SessionResults{}
+	plan := newSoakPlan(newTestOps(t, fr), results,
+		clocktest.New(time.Unix(1_700_000_000, 0)), time.Hour, config.SoakLoadContinuous)
+	plan.UDPDuration = 0
+
+	done := make(chan error, 1)
+	go func() { done <- plan.Run(ctx, rc) }()
+	testutil.WaitFor(t, started, "first soak TCP client never started")
+	cancel()
+
+	err := <-done
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled soak Run error = %v, want context cancellation", err)
+	}
+	if results.FinalCounters.PC1 == nil {
+		t.Fatal("final PC1 counter snapshot missing after cancellation")
+	}
+	if results.FinalCounters.PC2 != nil {
+		t.Fatalf("final PC2 counter snapshot = %+v, want absent after session cancellation", results.FinalCounters.PC2)
+	}
+	deltas, deltaOK := evaluate.DeltaSet(results.InitialCounters.PC2, results.FinalCounters.PC2)
+	if deltaOK || len(deltas) != 0 {
+		t.Errorf("PC2 deltas = (%v, %v), want unavailable empty set", deltas, deltaOK)
+	}
+	report := &model.Report{
+		InitialCounters: results.InitialCounters,
+		FinalCounters:   results.FinalCounters,
+		Partial:         results.Incomplete,
+	}
+	facts := evaluate.FactsFromReport(report)
+	if facts.PC2.CountersAvailable || facts.PC2.DeltaOK {
+		t.Errorf("PC2 facts = %+v, want counters unavailable with DeltaOK=false", facts.PC2)
+	}
+	if !results.Incomplete || !facts.Partial {
+		t.Errorf("cancelled run markers: Incomplete=%v Partial=%v, want both true", results.Incomplete, facts.Partial)
 	}
 }
 

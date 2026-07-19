@@ -19,15 +19,28 @@ import (
 // fakeCaller is a scripted peer.RemoteCaller: it records op order and params
 // and answers each op from a FIFO of canned payloads.
 type fakeCaller struct {
-	t       *testing.T
-	mu      sync.Mutex
-	ops     []string
-	params  map[string][]json.RawMessage
-	replies map[string][]any
+	t          *testing.T
+	sessionCtx context.Context
+	mu         sync.Mutex
+	ops        []string
+	params     map[string][]json.RawMessage
+	replies    map[string][]any
 }
 
 func newFakeCaller(t *testing.T) *fakeCaller {
-	return &fakeCaller{t: t, params: map[string][]json.RawMessage{}, replies: map[string][]any{}}
+	return newFakeCallerWithSession(t, context.Background())
+}
+
+// newFakeCallerWithSession models the lifetime that remoteCaller observes in
+// addition to each Call's context. WithoutCancel can keep a cleanup call's
+// context alive, but it cannot revive an already-cancelled peer session.
+func newFakeCallerWithSession(t *testing.T, sessionCtx context.Context) *fakeCaller {
+	return &fakeCaller{
+		t:          t,
+		sessionCtx: sessionCtx,
+		params:     map[string][]json.RawMessage{},
+		replies:    map[string][]any{},
+	}
 }
 
 // reply queues one canned ok result payload for op.
@@ -48,6 +61,12 @@ func (f *fakeCaller) replyStatus(op, status, errText string, payload any) {
 
 func (f *fakeCaller) Call(ctx context.Context, op string, params any, timeout time.Duration,
 	onProgress func(protocol.TestProgress)) (*protocol.TestResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := f.sessionCtx.Err(); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ops = append(f.ops, op)
