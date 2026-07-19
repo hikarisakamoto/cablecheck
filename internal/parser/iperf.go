@@ -112,8 +112,12 @@ type iperfWire struct {
 type DirStats struct {
 	// Bytes is the total bytes carried in this direction.
 	Bytes uint64
-	// BitsPerSecond is the average throughput in this direction.
+	// BitsPerSecond is the sender-side average throughput in this direction.
 	BitsPerSecond float64
+	// ReceiverBitsPerSecond is the receiver-side average throughput in this
+	// direction. It is populated from the distinct end.streams[].receiver
+	// rows emitted by native --bidir runs.
+	ReceiverBitsPerSecond float64
 	// Retransmits is the TCP retransmission count; nil when the running
 	// iperf3 did not report it (absent is not zero — receiver-side sums and
 	// all UDP runs have no retransmit counter).
@@ -317,6 +321,8 @@ func ParseIperf3(out []byte) (Iperf3Result, error) {
 			res.Intervals = append(res.Intervals, intervalRow(iv.Sum))
 		} else if row := deriveIntervalRow(iv.Streams, true); row != nil {
 			res.Intervals = append(res.Intervals, *row)
+		} else {
+			res.Intervals = append(res.Intervals, missingIntervalRow(iv))
 		}
 	}
 	res.IntervalMinBps, res.IntervalMaxBps, res.IntervalAvgBps, res.IntervalCoV, res.Collapses =
@@ -326,20 +332,28 @@ func ParseIperf3(out []byte) (Iperf3Result, error) {
 	case bidir:
 		b := &BidirStats{}
 		for _, st := range w.End.Streams {
-			sum := streamDirRow(st)
-			if sum == nil {
+			direction := streamDirRow(st)
+			if direction == nil {
 				continue
 			}
-			// Whichever row survived carries the stream's direction flag,
-			// so a receiver-only stream still lands in the right direction.
 			dir := &b.LocalToPeer
-			if !sum.Sender {
+			if !direction.Sender {
 				dir = &b.PeerToLocal
 			}
-			dir.Bytes += sum.Bytes
-			dir.BitsPerSecond += sum.BitsPerSecond
-			if sum.Retransmits != nil {
-				addRetransmits(&dir.Retransmits, *sum.Retransmits)
+			if st.Sender != nil {
+				dir.Bytes += st.Sender.Bytes
+				dir.BitsPerSecond += st.Sender.BitsPerSecond
+				if st.Sender.Retransmits != nil {
+					addRetransmits(&dir.Retransmits, *st.Sender.Retransmits)
+				}
+			} else {
+				// Keep receiver-only output useful on iperf3 variants that omit
+				// the sender row entirely.
+				dir.Bytes += st.Receiver.Bytes
+				dir.BitsPerSecond += st.Receiver.BitsPerSecond
+			}
+			if st.Receiver != nil {
+				dir.ReceiverBitsPerSecond += st.Receiver.BitsPerSecond
 			}
 		}
 		res.Bidir = b
@@ -410,6 +424,26 @@ func deriveIntervalRow(streams []iperfSum, sender bool) *IntervalStat {
 		}
 	}
 	return out
+}
+
+// missingIntervalRow records a gap in the forward bidirectional series. Its
+// bounds come from any surviving reverse row so variation and collapse
+// analysis sees a zero sample at the right point in time instead of silently
+// shifting later samples earlier.
+func missingIntervalRow(iv iperfInterval) IntervalStat {
+	var timing *iperfSum
+	switch {
+	case iv.Sum != nil:
+		timing = iv.Sum
+	case iv.SumBidirReverse != nil:
+		timing = iv.SumBidirReverse
+	case len(iv.Streams) > 0:
+		timing = &iv.Streams[0]
+	}
+	if timing == nil {
+		return IntervalStat{}
+	}
+	return IntervalStat{StartSec: timing.Start, EndSec: timing.End}
 }
 
 // sumOutOfOrder totals the per-stream UDP out_of_order counters — iperf3

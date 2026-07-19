@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cablecheck/internal/clock"
@@ -183,12 +184,22 @@ func (c *CounterCollector) carrierChanges() *uint64 {
 	return &v
 }
 
-// teeRaw points the spec's stdout tee at rawDir/<label>.txt when a raw
-// directory is configured, so the verbatim tool output lands in the report's
-// raw/ tree.
+var rawTeeSequence = struct {
+	sync.Mutex
+	nextByDir map[string]int
+}{nextByDir: make(map[string]int)}
+
+// teeRaw points the spec's stdout tee at a unique NN-<label>.txt path when a
+// raw directory is configured. The per-directory sequence mirrors the report
+// RawStore naming convention and keeps repeated phases (including concurrent
+// bidirectional clients) from truncating an earlier artifact with O_TRUNC.
 func teeRaw(spec runner.CommandSpec, rawDir string) runner.CommandSpec {
 	if rawDir != "" && spec.Label != "" {
-		spec.TeeStdoutPath = filepath.Join(rawDir, spec.Label+".txt")
+		rawTeeSequence.Lock()
+		rawTeeSequence.nextByDir[rawDir]++
+		seq := rawTeeSequence.nextByDir[rawDir]
+		rawTeeSequence.Unlock()
+		spec.TeeStdoutPath = filepath.Join(rawDir, fmt.Sprintf("%02d-%s.txt", seq, spec.Label))
 	}
 	return spec
 }

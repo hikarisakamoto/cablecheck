@@ -219,6 +219,9 @@ func TestIperf3BidirFromStreams(t *testing.T) {
 			if fwd.BitsPerSecond != 941e6 {
 				t.Errorf("LocalToPeer.BitsPerSecond = %v, want 941e6 from the sender-flagged stream", fwd.BitsPerSecond)
 			}
+			if fwd.ReceiverBitsPerSecond != 940.8e6 {
+				t.Errorf("LocalToPeer.ReceiverBitsPerSecond = %v, want 940.8e6 from the receiver row", fwd.ReceiverBitsPerSecond)
+			}
 			if fwd.Bytes != 1176250000 {
 				t.Errorf("LocalToPeer.Bytes = %d, want 1176250000", fwd.Bytes)
 			}
@@ -227,6 +230,9 @@ func TestIperf3BidirFromStreams(t *testing.T) {
 			}
 			if rev.BitsPerSecond != 887e6 {
 				t.Errorf("PeerToLocal.BitsPerSecond = %v, want 887e6 from the reverse stream", rev.BitsPerSecond)
+			}
+			if rev.ReceiverBitsPerSecond != 886.4e6 {
+				t.Errorf("PeerToLocal.ReceiverBitsPerSecond = %v, want 886.4e6 from the reverse receiver row", rev.ReceiverBitsPerSecond)
 			}
 			if rev.Bytes != 1108750000 {
 				t.Errorf("PeerToLocal.Bytes = %d, want 1108750000", rev.Bytes)
@@ -252,6 +258,39 @@ func TestIperf3BidirFromStreams(t *testing.T) {
 				t.Errorf("CongSender = %q, want cubic", res.CongSender)
 			}
 		})
+	}
+}
+
+// TestIperf3BidirMissingForwardIntervalKeepsSeriesContiguous covers iperf3
+// 3.7-3.11 output where duplicate sum keys leave only the reverse row and no
+// forward stream rows survive. The missing forward sample remains visible as
+// a zero-rate placeholder instead of shortening and time-shifting the series.
+func TestIperf3BidirMissingForwardIntervalKeepsSeriesContiguous(t *testing.T) {
+	raw := []byte(`{
+		"start":{"version":"iperf 3.9","test_start":{"protocol":"TCP","num_streams":1,"duration":3}},
+		"intervals":[
+			{"sum":{"start":0,"end":1,"seconds":1,"bytes":100,"bits_per_second":800,"sender":true}},
+			{"sum":{"start":1,"end":2,"seconds":1,"bytes":90,"bits_per_second":720,"sender":false}},
+			{"sum":{"start":2,"end":3,"seconds":1,"bytes":100,"bits_per_second":800,"sender":true}}
+		],
+		"end":{"streams":[
+			{"sender":{"bytes":300,"bits_per_second":800,"sender":true}},
+			{"sender":{"bytes":270,"bits_per_second":720,"sender":false}}
+		]}
+	}`)
+	res, err := ParseIperf3(raw)
+	if err != nil {
+		t.Fatalf("ParseIperf3: %v", err)
+	}
+	if len(res.Intervals) != 3 {
+		t.Fatalf("len(Intervals) = %d, want 3 contiguous samples", len(res.Intervals))
+	}
+	gap := res.Intervals[1]
+	if gap.StartSec != 1 || gap.EndSec != 2 {
+		t.Errorf("missing-forward placeholder bounds = %v-%v, want 1-2", gap.StartSec, gap.EndSec)
+	}
+	if gap.Bytes != 0 || gap.Bps != 0 || gap.Retransmits != nil {
+		t.Errorf("missing-forward placeholder = %+v, want a zero sample with absent retransmits", gap)
 	}
 }
 

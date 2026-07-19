@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
 )
 
@@ -72,6 +73,12 @@ func TestBidirNative(t *testing.T) {
 	}
 	if b.PC2ToPC1.SenderBitsPerSecond != 887e6 {
 		t.Errorf("PC2ToPC1.SenderBitsPerSecond = %v, want 887e6 from the fixture streams", b.PC2ToPC1.SenderBitsPerSecond)
+	}
+	if b.PC1ToPC2.ReceiverBitsPerSecond != 940.8e6 {
+		t.Errorf("PC1ToPC2.ReceiverBitsPerSecond = %v, want 940.8e6 from the fixture receiver row", b.PC1ToPC2.ReceiverBitsPerSecond)
+	}
+	if b.PC2ToPC1.ReceiverBitsPerSecond != 886.4e6 {
+		t.Errorf("PC2ToPC1.ReceiverBitsPerSecond = %v, want 886.4e6 from the fixture receiver row", b.PC2ToPC1.ReceiverBitsPerSecond)
 	}
 	if b.PC1ToPC2.Retransmissions == nil || *b.PC1ToPC2.Retransmissions != 17 {
 		t.Errorf("PC1ToPC2.Retransmissions = %v, want 17", b.PC1ToPC2.Retransmissions)
@@ -165,5 +172,44 @@ func TestBidirFallbackTwoPorts(t *testing.T) {
 	}
 	if results.Incomplete {
 		t.Errorf("fallback run marked incomplete; the fallback is a limitation, not a failure")
+	}
+}
+
+// TestBidirFallbackStopsRemoteServerWhenLocalReadyFails pins cleanup of the
+// forward one-off server on PC2 when the reverse server on PC1 exits before
+// readiness. No client ever reaches the remote server on this path, so it
+// must be stopped explicitly instead of waiting for session teardown.
+func TestBidirFallbackStopsRemoteServerWhenLocalReadyFails(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{
+		Name:  "iperf3",
+		Match: runnertest.ArgsContain("-s", "5202"),
+		Result: runner.CommandResult{
+			ExitCode: 1,
+			Stderr:   []byte("unable to start listener for connections: Address already in use\n"),
+		},
+		Delay: closedChan(),
+	})
+
+	rc := newFakeCaller(t)
+	rc.reply(OpIperfCaps, &model.Iperf3Caps{Version: "3.9", JSON: true, Bidir: false})
+	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+
+	plan := newQuickPlan(newTestOps(t, fr), &SessionResults{})
+	if err := plan.stepBidir(context.Background(), rc); err == nil {
+		t.Errorf("stepBidir succeeded despite the local reverse server readiness failure")
+	}
+	wantOps := []string{OpIperfCaps, OpIperfServerStart, OpIperfServerStop}
+	if !slices.Equal(rc.ops, wantOps) {
+		t.Errorf("remote ops = %q, want %q; PC2's port 5201 server must be stopped on the early return", rc.ops, wantOps)
+	}
+	if len(rc.params[OpIperfServerStop]) == 1 {
+		var stop IperfServerStopParams
+		if err := json.Unmarshal(rc.params[OpIperfServerStop][0], &stop); err != nil {
+			t.Errorf("unmarshal server stop params: %v", err)
+		} else if stop.Port != 5201 {
+			t.Errorf("server stop port = %d, want the remote forward server on 5201", stop.Port)
+		}
 	}
 }

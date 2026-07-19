@@ -440,6 +440,13 @@ func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, not
 			"bidirectional stress skipped: peer iperf3 unavailable")
 		return nil
 	}
+	remoteStopped := false
+	defer func() {
+		if !remoteStopped {
+			_, _ = q.callRemote(ctx, rc, OpIperfServerStop,
+				IperfServerStopParams{Port: q.IperfPort}, opCallTimeout)
+		}
+	}()
 	h, err := q.Ops.Iperf.StartServer(ctx, q.LocalIP, q.IperfPort+1)
 	if err != nil {
 		return err
@@ -487,8 +494,10 @@ func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, not
 	}
 	q.Results.Bidir = b
 
-	if _, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
-		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout); stopErr != nil &&
+	_, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
+		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout)
+	remoteStopped = true
+	if stopErr != nil &&
 		localErr == nil && remoteErr == nil {
 		return stopErr
 	}

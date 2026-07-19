@@ -298,12 +298,11 @@ func (m *IperfManager) RunBidirClient(ctx context.Context, local, peer netip.Add
 }
 
 // bidirDirFromStats maps one stream-derived direction onto the report model.
-// The stream rows carry a single rate per direction, recorded as the sender
-// side; the receiver rate is not reported separately in bidir mode.
 func bidirDirFromStats(d parser.DirStats) model.BidirDirection {
 	return model.BidirDirection{
-		SenderBitsPerSecond: d.BitsPerSecond,
-		Retransmissions:     d.Retransmits,
+		SenderBitsPerSecond:   d.BitsPerSecond,
+		ReceiverBitsPerSecond: d.ReceiverBitsPerSecond,
+		Retransmissions:       d.Retransmits,
 	}
 }
 

@@ -2,6 +2,7 @@ package testsuite
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,6 +11,48 @@ import (
 	"cablecheck/internal/parser"
 	"cablecheck/internal/runner/runnertest"
 )
+
+// TestCounterSnapshotsUseDistinctRawTeeFiles ensures before/after snapshots
+// cannot truncate one another's forensic artifacts. Every command in the two
+// snapshots must receive its own sequenced tee path.
+func TestCounterSnapshotsUseDistinctRawTeeFiles(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("-S", "eth0"),
+		Result: fixture(t, "ethtool", "stats_e1000e_clean")})
+	fr.Script(runnertest.Script{Name: "ip", Match: runnertest.ArgsExact("-j", "-s", "-s", "link", "show", "dev", "eth0"),
+		Result: fixture(t, "ip", "linkstats_clean")})
+
+	root := t.TempDir()
+	writeSysfs(t, root, "eth0", "carrier_changes", "2\n")
+	c := &CounterCollector{
+		R: fr, Clock: clocktest.New(time.Unix(1_700_000_000, 0)), IfName: "eth0",
+		SysfsRoot: root, RawDir: t.TempDir(),
+	}
+	for _, phase := range []string{"before", "after"} {
+		if _, err := c.Snapshot(context.Background()); err != nil {
+			t.Errorf("%s Snapshot: %v", phase, err)
+		}
+	}
+
+	paths := make(map[string]bool)
+	for _, call := range fr.Calls() {
+		path := call.Spec.TeeStdoutPath
+		if path == "" {
+			t.Errorf("%s %q has no raw tee path", call.Name, call.Args)
+			continue
+		}
+		if paths[path] {
+			t.Errorf("raw tee path %q reused; the later snapshot would overwrite the earlier artifact", path)
+		}
+		paths[path] = true
+		if filepath.Dir(path) != c.RawDir {
+			t.Errorf("raw tee path = %q, want it under %q", path, c.RawDir)
+		}
+	}
+	if len(paths) != 4 {
+		t.Errorf("two snapshots produced %d distinct raw tee paths, want 4", len(paths))
+	}
+}
 
 // TestCounterSnapshotsBeforeAfter drives two full before/after snapshots off
 // Times:1 scripts, then verifies the ethtool-missing fallback: Standard comes
