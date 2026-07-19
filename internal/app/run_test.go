@@ -481,10 +481,18 @@ func TestRunInterruptProducesPartialReport(t *testing.T) {
 	var out1, out2 runOutput
 	pc1, fr1, states1 := newRunApp(t, config.RolePC1, 0, 45321, &out1, clk1, nil)
 	var finalizations, failureFinalizations int
+	var monitorStateMu sync.Mutex
+	monitorStopped := false
 	pc1.deps.hooks.onFinalize = func(hasFailure, _ bool) {
 		finalizations++
 		if hasFailure {
 			failureFinalizations++
+		}
+		monitorStateMu.Lock()
+		stopped := monitorStopped
+		monitorStateMu.Unlock()
+		if !stopped {
+			t.Errorf("partial report finalized before the link monitor stopped")
 		}
 	}
 	started := make(chan struct{})
@@ -508,6 +516,19 @@ func TestRunInterruptProducesPartialReport(t *testing.T) {
 	fireCountdown(clk1)
 
 	testutil.WaitFor(t, started, "iperf3 client never started")
+	pc1.monitorMu.Lock()
+	originalStop := pc1.monitorStop
+	if originalStop == nil {
+		pc1.monitorMu.Unlock()
+		t.Fatal("link monitor did not start before the TCP test")
+	}
+	pc1.monitorStop = func() {
+		originalStop()
+		monitorStateMu.Lock()
+		monitorStopped = true
+		monitorStateMu.Unlock()
+	}
+	pc1.monitorMu.Unlock()
 	cancel()
 
 	code1, err1 := pc1.Wait()

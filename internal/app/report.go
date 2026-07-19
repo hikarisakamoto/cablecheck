@@ -220,19 +220,42 @@ func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResult
 			UDP:           results.UDP,
 			Bidirectional: results.Bidir,
 		},
-		InitialCounters:  results.InitialCounters,
-		FinalCounters:    results.FinalCounters,
-		CounterDeltas:    deltas,
-		MonitoringEvents: a.monitoringEvents(),
-		Warnings:         warnings,
-		SkippedTests:     append(a.skippedTests(), results.SkippedTests...),
-		UDPRateAssumed:   results.UDPRateAssumed,
-		Partial:          partial,
-		Failure:          failure,
-		Link:             link,
-		Machines:         &model.MachinePair{PC1: local, PC2: remote},
+		InitialCounters:     results.InitialCounters,
+		FinalCounters:       results.FinalCounters,
+		CycleCounters:       results.CycleCounters,
+		CounterDeltas:       deltas,
+		MonitoringEvents:    mergeMonitoringEvents(results.MonitoringEvents, a.monitoringEvents()),
+		Warnings:            warnings,
+		SkippedTests:        append(a.skippedTests(), results.SkippedTests...),
+		UDPRateAssumed:      results.UDPRateAssumed,
+		Partial:             partial,
+		SoakCyclesCompleted: results.CyclesCompleted,
+		Failure:             failure,
+		Link:                link,
+		Machines:            &model.MachinePair{PC1: local, PC2: remote},
 	}
 	return rep
+}
+
+// mergeMonitoringEvents preserves a plan-retained timeline (used by soak
+// cycles) and adds any final events captured by the stopped app monitor,
+// without duplicating snapshots present in both sources.
+func mergeMonitoringEvents(retained, monitored []model.MonitoringEvent) []model.MonitoringEvent {
+	if len(retained) == 0 && len(monitored) == 0 {
+		return nil
+	}
+	out := make([]model.MonitoringEvent, 0, len(retained)+len(monitored))
+	seen := make(map[model.MonitoringEvent]struct{}, len(retained)+len(monitored))
+	for _, events := range [][]model.MonitoringEvent{retained, monitored} {
+		for _, event := range events {
+			if _, ok := seen[event]; ok {
+				continue
+			}
+			seen[event] = struct{}{}
+			out = append(out, event)
+		}
+	}
+	return out
 }
 
 // skippedTests names the planned tests this version cannot run yet: the quick

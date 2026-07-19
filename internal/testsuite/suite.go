@@ -62,6 +62,18 @@ type SessionResults struct {
 	// SkippedTests records planned measurements that could not run because a
 	// required tool became unavailable at runtime.
 	SkippedTests []model.SkippedTest
+	// MonitoringEvents holds link-state events (carrier flaps, renegotiations)
+	// observed during the run. The quick and standard plans leave it empty —
+	// the app folds the sysfs monitor's history into the report directly — but
+	// the soak plan records a snapshot of the monitor's timeline per cycle so
+	// completed cycles retain their events even after a mid-soak interrupt.
+	MonitoringEvents []model.MonitoringEvent
+	// CyclesCompleted counts the soak test cycles that ran to completion; it is
+	// zero for the quick and standard plans.
+	CyclesCompleted int
+	// CycleCounters holds one counter snapshot pair per completed soak cycle,
+	// in cycle order, for throughput/error degradation tracking across a soak.
+	CycleCounters []model.PeerCounters
 	// Incomplete marks a run that did not finish all steps.
 	Incomplete bool
 }
@@ -539,8 +551,13 @@ func (q *QuickPlan) stepTCPReverse(ctx context.Context, rc peer.RemoteCaller) er
 // --udp-rate override). Each phase's server sits on the receiving side; each
 // client computes its -l datagram size from its own MTU.
 func (q *QuickPlan) stepUDP(ctx context.Context, rc peer.RemoteCaller) error {
-	rate := q.udpRate()
+	return q.stepUDPAtRate(ctx, rc, q.udpRate())
+}
 
+// stepUDPAtRate measures UDP loss and jitter in both directions at the given
+// target rate. It is the body of stepUDP, exposed so the standard plan can run
+// an extra reduced-rate UDP pass without re-deriving the default rate.
+func (q *QuickPlan) stepUDPAtRate(ctx context.Context, rc peer.RemoteCaller, rate model.Bitrate) error {
 	// Forward: server on PC2, local client sends.
 	ran, err := q.withRemoteServer(ctx, rc, "udp",
 		"UDP loss/jitter skipped: peer iperf3 unavailable", func() error {

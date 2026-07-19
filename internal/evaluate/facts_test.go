@@ -189,6 +189,83 @@ func TestFactsFromReportDirections(t *testing.T) {
 	}
 }
 
+func TestFactsFromReportUsesWorstRepeatedTCPResult(t *testing.T) {
+	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	r := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{Name: "eth0", Driver: "e1000e", SpeedMbps: 1000}},
+		PC2: model.PeerReport{NIC: model.NICReport{Name: "eth1", Driver: "r8169", SpeedMbps: 1000}},
+		Tests: model.TestsSection{
+			Ping: []model.PingResult{
+				{Direction: model.DirectionPC1ToPC2},
+				{Direction: model.DirectionPC1ToPC2, LossPercent: 3, Duplicates: 2, Spikes: []model.PingSpike{{}}, LongestGapMs: 1500},
+			},
+			TCP: []model.TCPResult{
+				{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+				{
+					Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 300_000_000,
+					ThroughputVariation: 0.4, Retransmissions: uint64Ptr(100),
+					IntervalResults: []model.TCPInterval{
+						{BitsPerSecond: 100_000_000, Bytes: 12_500_000},
+						{BitsPerSecond: 100_000_000, Bytes: 12_500_000},
+						{BitsPerSecond: 10_000_000, Bytes: 1_250_000},
+						{BitsPerSecond: 100_000_000, Bytes: 12_500_000},
+					},
+				},
+				{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
+			},
+			UDP: []model.UDPResult{
+				{Direction: model.DirectionPC1ToPC2, TargetBps: 800_000_000, ActualSenderBps: 800_000_000, LossPercent: 4, JitterMs: 7},
+				{Direction: model.DirectionPC1ToPC2, TargetBps: 400_000_000, ActualSenderBps: 400_000_000},
+			},
+		},
+		InitialCounters: model.PeerCounters{PC1: before, PC2: before},
+		FinalCounters:   model.PeerCounters{PC1: after, PC2: after},
+	}
+
+	f := FactsFromReport(r)
+	if got := f.Dir[0].TCPBitrate; got != 300_000_000 {
+		t.Fatalf("pc1->pc2 TCP bitrate = %s, want worst repeated result 300 Mbit/s", got)
+	}
+	if got := f.Dir[0].TCPCoV; got != 0.4 {
+		t.Errorf("pc1->pc2 TCP variation = %v, want worst repeated result 0.4", got)
+	}
+	if got := f.Dir[0].TCPRetransRate; got <= 0 {
+		t.Errorf("pc1->pc2 retransmit rate = %v, want degraded repeat's non-zero rate", got)
+	}
+	if got := f.Dir[0].TCPCollapses; got != 1 {
+		t.Errorf("pc1->pc2 collapses = %d, want the collapse from the degraded repeat", got)
+	}
+	if got := f.Dir[0].PingLossPct; got != 3 {
+		t.Errorf("pc1->pc2 ping loss = %v, want worst repeated result 3", got)
+	}
+	if got := f.Dir[0].UDPLossPct; got != 4 {
+		t.Errorf("pc1->pc2 UDP loss = %v, want lossy primary-rate result 4", got)
+	}
+	if got := f.Dir[0].UDPJitterMs; got != 7 {
+		t.Errorf("pc1->pc2 UDP jitter = %v, want worst repeated result 7", got)
+	}
+	res := Evaluate(f)
+	if res.Class != model.HealthPoor {
+		t.Errorf("class = %s, want POOR from the degraded repeat (findings %v)", res.Class, findingIDs(res))
+	}
+	if !slices.Contains(findingIDs(res), "PERF-01") {
+		t.Errorf("findings = %v, want PERF-01 from the degraded repeat", findingIDs(res))
+	}
+}
+
+func TestFactsFromReportAnyIncompleteTCPRepeatMakesDirectionUnavailable(t *testing.T) {
+	r := &model.Report{Tests: model.TestsSection{TCP: []model.TCPResult{
+		{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+		{Direction: model.DirectionPC1ToPC2, Incomplete: true},
+	}}}
+
+	f := FactsFromReport(r)
+	if f.Dir[0].TCPAvailable {
+		t.Errorf("TCPAvailable = true, want false when any repeat is incomplete: %+v", f.Dir[0])
+	}
+}
+
 func TestFactsFromReportIgnoresIncompleteTCPDirection(t *testing.T) {
 	r := &model.Report{
 		PC1:     model.PeerReport{NIC: model.NICReport{Name: "eth0", Driver: "e1000e", SpeedMbps: 1000}},

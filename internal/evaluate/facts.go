@@ -191,10 +191,10 @@ func FactsFromReport(r *model.Report) *Facts {
 			continue
 		}
 		d := &f.Dir[i]
-		d.PingLossPct = p.LossPercent
-		d.PingDuplicates = p.Duplicates
-		d.PingSpikes = len(p.Spikes)
-		d.PingMaxGap = time.Duration(p.LongestGapMs * float64(time.Millisecond))
+		d.PingLossPct = max(d.PingLossPct, p.LossPercent)
+		d.PingDuplicates = max(d.PingDuplicates, p.Duplicates)
+		d.PingSpikes = max(d.PingSpikes, len(p.Spikes))
+		d.PingMaxGap = max(d.PingMaxGap, time.Duration(p.LongestGapMs*float64(time.Millisecond)))
 	}
 	for _, p := range r.Tests.FullSizePing {
 		i := dirIndex(p.Direction)
@@ -203,32 +203,43 @@ func FactsFromReport(r *model.Report) *Facts {
 		}
 		d := &f.Dir[i]
 		d.FullSizeAvailable = true
-		d.FullSizeLossPct = p.LossPercent
-		d.FragErrors += p.SendErrors + p.IcmpErrors
+		d.FullSizeLossPct = max(d.FullSizeLossPct, p.LossPercent)
+		d.FragErrors = max(d.FragErrors, p.SendErrors+p.IcmpErrors)
 	}
 
-	var tcpSeen [2]bool
+	var tcpIncomplete [2]bool
 	for _, tr := range r.Tests.TCP {
 		i := dirIndex(tr.Direction)
-		if i < 0 || tcpSeen[i] {
-			continue // evaluate the first run per direction
+		if i < 0 {
+			continue
 		}
-		tcpSeen[i] = true
 		if tr.Incomplete {
+			tcpIncomplete[i] = true
 			continue
 		}
 		d := &f.Dir[i]
+		first := !d.TCPAvailable
 		d.TCPAvailable = true
 		bps := tr.ReceiverBitsPerSecond
 		if bps <= 0 {
 			bps = tr.SenderBitsPerSecond
 		}
-		if bps > 0 {
-			d.TCPBitrate = model.Bitrate(bps)
+		bitrate := model.Bitrate(bps)
+		if first || bitrate < d.TCPBitrate {
+			d.TCPBitrate = bitrate
 		}
-		d.TCPCoV = tr.ThroughputVariation
-		d.TCPCollapses = collapses(tr.IntervalResults)
-		d.TCPRetransRate = retransRate(tr)
+		d.TCPCoV = max(d.TCPCoV, tr.ThroughputVariation)
+		d.TCPCollapses = max(d.TCPCollapses, collapses(tr.IntervalResults))
+		d.TCPRetransRate = max(d.TCPRetransRate, retransRate(tr))
+	}
+	for i, incomplete := range tcpIncomplete {
+		if incomplete {
+			f.Dir[i].TCPAvailable = false
+			f.Dir[i].TCPBitrate = 0
+			f.Dir[i].TCPCoV = 0
+			f.Dir[i].TCPCollapses = 0
+			f.Dir[i].TCPRetransRate = 0
+		}
 	}
 
 	for _, u := range r.Tests.UDP {
@@ -238,12 +249,14 @@ func FactsFromReport(r *model.Report) *Facts {
 		}
 		d := &f.Dir[i]
 		d.UDPAvailable = true
-		d.UDPLossPct = u.LossPercent
-		d.UDPJitterMs = u.JitterMs
+		d.UDPLossPct = max(d.UDPLossPct, u.LossPercent)
+		d.UDPJitterMs = max(d.UDPJitterMs, u.JitterMs)
 		if u.OutOfOrder != nil && u.TotalPackets > 0 {
-			d.UDPOutOfOrderPct = float64(*u.OutOfOrder) / float64(u.TotalPackets) * 100
+			pct := float64(*u.OutOfOrder) / float64(u.TotalPackets) * 100
+			d.UDPOutOfOrderPct = max(d.UDPOutOfOrderPct, pct)
 		}
-		d.UDPTargetReached = u.TargetBps > 0 && u.ActualSenderBps >= 0.9*float64(u.TargetBps)
+		d.UDPTargetReached = d.UDPTargetReached ||
+			u.TargetBps > 0 && u.ActualSenderBps >= 0.9*float64(u.TargetBps)
 	}
 
 	f.NegotiatedSpeed = negotiatedSpeed(r)

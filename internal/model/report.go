@@ -49,6 +49,9 @@ type Report struct {
 	InitialCounters PeerCounters `json:"initialCounters"`
 	// FinalCounters are the per-peer counter snapshots taken after testing.
 	FinalCounters PeerCounters `json:"finalCounters"`
+	// CycleCounters are the pre-load counter snapshots for each completed soak
+	// cycle, in cycle order. They are omitted for quick and standard runs.
+	CycleCounters []PeerCounters `json:"cycleCounters,omitempty"`
 	// CounterDeltas are the per-peer counter changes across the run.
 	CounterDeltas PeerCounterDeltas `json:"counterDeltas"`
 	// MonitoringEvents is the timeline of link events observed during the run.
@@ -71,6 +74,9 @@ type Report struct {
 	// Partial is true when the run was interrupted and the report covers
 	// only the tests that completed.
 	Partial bool `json:"partial"`
+	// SoakCyclesCompleted is the number of soak test cycles that ran to
+	// completion; it is set only for soak-mode runs (omitted otherwise).
+	SoakCyclesCompleted int `json:"soakCyclesCompleted,omitempty"`
 	// Failure describes what broke, for abnormal endings.
 	Failure *FailureDetails `json:"failure,omitempty"`
 

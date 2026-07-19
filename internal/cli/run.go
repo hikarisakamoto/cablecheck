@@ -18,12 +18,8 @@ func cmdRun(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if err != nil {
 		return err
 	}
-	if cfg.Mode != config.ModeQuick {
-		fmt.Fprintf(stderr, "cablecheck: warning: --mode %s is not implemented yet; running the quick (TCP-only) plan with %s-mode parameters\n",
-			cfg.Mode, cfg.Mode)
-	}
-	if cfg.UDPRate != 0 || cfg.CableTest || cfg.CableTestTDR {
-		fmt.Fprintf(stderr, "cablecheck: warning: UDP and cable-test flags are validated and recorded but not exercised yet in this version\n")
+	if cfg.CableTest || cfg.CableTestTDR {
+		fmt.Fprintf(stderr, "cablecheck: warning: cable-test flags are validated and recorded but not exercised yet in this version\n")
 	}
 
 	progress := NewProgress(stdout, cfg.Verbose)
@@ -120,16 +116,17 @@ Connection:
                             pc2 requires the token displayed by pc1
 
 Test parameters:
-  --mode string             quick | standard | soak (default quick; standard and
-                            soak parse fully but fall back to the quick plan in
-                            this version)
+  --mode string             quick | standard | soak (default quick). standard adds
+                            repeated 60s TCP, an extra reduced-rate UDP pass and
+                            longer pings; soak repeats test cycles for --soak-duration
   --tcp-duration duration   per-direction TCP test length (default 30s/60s/60s per mode)
-  --udp-duration duration   UDP test length (accepted, not exercised yet; default 20s/30s/20s)
-  --udp-rate string         UDP target bitrate, e.g. 800M (accepted, not exercised yet;
-                            default: 80% of the negotiated link speed)
+  --udp-duration duration   UDP test length (default 20s/30s/20s per mode)
+  --udp-rate string         UDP target bitrate, e.g. 800M
+                            (default: 80% of the negotiated link speed)
   --parallel-streams int    iperf3 -P stream count, 1-16 (default 4)
   --soak-duration duration  soak mode only: total soak length (default 1h)
-  --soak-load string        soak mode only: periodic | continuous (default periodic)
+  --soak-load string        soak mode only: periodic (idle gaps) | continuous
+                            (back-to-back cycles) (default periodic)
   --monitor-interval duration
                             link monitor polling interval (default 1s)
 

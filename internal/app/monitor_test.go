@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"cablecheck/internal/model"
 	"cablecheck/internal/network"
 	"cablecheck/internal/testsuite"
+	"cablecheck/internal/testutil"
 )
 
 // writeSysfsAttr writes a single sysfs attribute file for the interface under
@@ -55,10 +57,14 @@ func TestAssembleReportSurfacesRenegotiation(t *testing.T) {
 	fc.BlockUntilWaiters(1)
 	fc.Advance(interval)
 	// Wait for the poll to record the event, then stop the monitor.
-	deadline := time.Now().Add(2 * time.Second)
+	timeout := time.NewTimer(testutil.TestTimeout(t))
+	defer timeout.Stop()
 	for len(m.History()) == 0 {
-		if time.Now().After(deadline) {
+		select {
+		case <-timeout.C:
 			t.Fatal("monitor produced no event for the scripted renegotiation")
+		default:
+			runtime.Gosched()
 		}
 	}
 	cancel()
@@ -94,6 +100,30 @@ func TestAssembleReportSurfacesRenegotiation(t *testing.T) {
 	facts := evaluate.FactsFromReport(rep)
 	if facts.Renegotiations != 1 {
 		t.Fatalf("Facts.Renegotiations = %d, want 1", facts.Renegotiations)
+	}
+}
+
+func TestAssemblePartialReportRetainsPlanMonitoringEvents(t *testing.T) {
+	cfg := &config.RunConfig{Role: config.RolePC1, Mode: config.ModeSoak}
+	a, err := New(cfg, Deps{StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	event := model.MonitoringEvent{
+		At:     time.Date(2026, 7, 19, 14, 0, 0, 0, time.UTC),
+		Type:   "carrier_lost",
+		Detail: "captured before interrupt",
+	}
+	results := &testsuite.SessionResults{
+		Incomplete:       true,
+		MonitoringEvents: []model.MonitoringEvent{event},
+	}
+	rep := a.assembleReport(&preflightInfo{}, results, event.At, event.At, &model.FailureDetails{
+		Stage: "testing", Error: "interrupted",
+	}, nil)
+
+	if len(rep.MonitoringEvents) != 1 || rep.MonitoringEvents[0] != event {
+		t.Errorf("partial report MonitoringEvents = %+v, want retained event %+v", rep.MonitoringEvents, event)
 	}
 }
 

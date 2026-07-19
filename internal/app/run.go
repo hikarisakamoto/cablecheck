@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"cablecheck/internal/clock"
 	"cablecheck/internal/config"
 	"cablecheck/internal/logging"
+	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/reporting"
@@ -18,11 +20,14 @@ import (
 	"cablecheck/internal/testsuite"
 )
 
-// suite bundles the constructed test components of one run.
+// suite bundles the constructed test components of one run. plan is the
+// mode-selected coordinator test plan (quick, standard or soak); steps are its
+// ordered display names for the session's progress step list.
 type suite struct {
 	ops     *testsuite.Ops
 	results *testsuite.SessionResults
-	plan    *testsuite.QuickPlan
+	plan    peer.PlanFunc
+	steps   []string
 	reg     *runner.Registry
 }
 
@@ -92,7 +97,7 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		Stdin:            a.deps.Stdin,
 		Stdout:           a.deps.Stdout,
 		Mode:             string(a.cfg.Mode),
-		Steps:            testsuite.QuickPlanSteps(),
+		Steps:            s.steps,
 		Complete:         v.complete,
 		OnHandshake:      a.setSessionTestID,
 		OnState: func(_, to peer.State) {
@@ -130,7 +135,7 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	if a.cfg.Role == config.RolePC1 {
 		pcfg.Transport = &preboundListener{ln: a.ln}
 		plan = func(ctx context.Context, rc peer.RemoteCaller) error {
-			if err := s.plan.Run(ctx, rc); err != nil {
+			if err := s.plan(ctx, rc); err != nil {
 				return err
 			}
 			// Freeze the link timeline before assembling: every render (this
@@ -148,6 +153,11 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	}
 
 	outcome, runErr := peer.Run(ctx, pcfg, plan, serverOpDetacher{ops: s.ops})
+	// Freeze and join the monitor before any success or partial report can be
+	// assembled. On the successful coordinator path the plan already stopped
+	// it before its provisional render; this idempotent call covers interrupts,
+	// peer failures, aborts, and the worker path as well.
+	a.stopLinkMonitor()
 	// An aborted run must leave no one-off iperf3 server behind, whatever
 	// the session managed to clean up itself.
 	s.ops.StopAllServers(context.WithoutCancel(ctx))
@@ -234,11 +244,67 @@ func (a *App) buildSuite(pf *preflightInfo, rawDir, tag string, log *slog.Logger
 		IperfCaps: pf.LocalIperfCaps,
 	}
 	results := &testsuite.SessionResults{}
+	plan, steps := a.buildPlan(pf, ops, results)
 	return &suite{
 		ops:     ops,
 		results: results,
 		reg:     reg,
-		plan: &testsuite.QuickPlan{
+		plan:    plan,
+		steps:   steps,
+	}
+}
+
+// buildPlan selects the coordinator test plan by mode and returns it as a
+// peer.PlanFunc together with its ordered step display names. quick uses
+// QuickPlan, standard StandardPlan (longer pings, repeated TCP, an extra
+// reduced-rate UDP pass, bidirectional stress), and soak SoakPlan (test cycles
+// repeated for the soak wall-clock budget). All three satisfy peer.PlanFunc and
+// drive the worker over the same RPCs.
+func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuite.SessionResults) (peer.PlanFunc, []string) {
+	switch a.cfg.Mode {
+	case config.ModeStandard:
+		p := &testsuite.StandardPlan{
+			Ops:            ops,
+			LocalIP:        a.cfg.LocalIP,
+			PeerIP:         a.cfg.PeerIP,
+			IperfPort:      a.cfg.IperfPort,
+			TCPDuration:    a.cfg.TCPDuration,
+			UDPDuration:    a.cfg.UDPDuration,
+			UDPRate:        a.cfg.UDPRate,
+			TCPRepeats:     a.cfg.TCPRepeats,
+			MTU:            pf.Iface.MTU,
+			Streams:        a.cfg.ParallelStreams,
+			PingCount:      a.cfg.PingCount,
+			LocalIperfCaps: pf.LocalIperfCaps,
+			Results:        results,
+			OnStep:         a.deps.OnStep,
+		}
+		return p.Run, testsuite.StandardPlanSteps()
+	case config.ModeSoak:
+		p := &testsuite.SoakPlan{
+			Ops:            ops,
+			Clock:          a.deps.Clock,
+			LocalIP:        a.cfg.LocalIP,
+			PeerIP:         a.cfg.PeerIP,
+			IperfPort:      a.cfg.IperfPort,
+			TCPDuration:    a.cfg.TCPDuration,
+			UDPDuration:    a.cfg.UDPDuration,
+			UDPRate:        a.cfg.UDPRate,
+			TCPRepeats:     a.cfg.TCPRepeats,
+			MTU:            pf.Iface.MTU,
+			Streams:        a.cfg.ParallelStreams,
+			PingCount:      a.cfg.PingCount,
+			LocalIperfCaps: pf.LocalIperfCaps,
+			SoakDuration:   a.cfg.SoakDuration,
+			SoakLoad:       a.cfg.SoakLoad,
+			CycleGap:       a.soakCycleGap(),
+			EventSource:    a.monitorEventSnapshot,
+			Results:        results,
+			OnStep:         a.deps.OnStep,
+		}
+		return p.Run, testsuite.SoakPlanSteps()
+	default:
+		p := &testsuite.QuickPlan{
 			Ops:            ops,
 			LocalIP:        a.cfg.LocalIP,
 			PeerIP:         a.cfg.PeerIP,
@@ -252,8 +318,30 @@ func (a *App) buildSuite(pf *preflightInfo, rawDir, tag string, log *slog.Logger
 			LocalIperfCaps: pf.LocalIperfCaps,
 			Results:        results,
 			OnStep:         a.deps.OnStep,
-		},
+		}
+		return p.Run, testsuite.QuickPlanSteps()
 	}
+}
+
+// soakCycleGap is the periodic soak load profile's idle window between test
+// cycles: the link is left quiet for as long as one TCP phase stressed it (a
+// conservative rest that still keeps the soak progressing), floored so a tiny
+// configured TCP duration cannot collapse the gap to nothing. The continuous
+// profile ignores this and runs cycles back-to-back.
+func (a *App) soakCycleGap() time.Duration {
+	gap := a.cfg.TCPDuration
+	if gap < time.Second {
+		gap = time.Second
+	}
+	return gap
+}
+
+// monitorEventSnapshot returns the sysfs link monitor's event timeline mapped
+// onto the report model, or nil when no monitor is running. The soak plan calls
+// it after each cycle so completed cycles retain their disconnect/renegotiation
+// events even if a later cycle is interrupted.
+func (a *App) monitorEventSnapshot() []model.MonitoringEvent {
+	return a.monitoringEvents()
 }
 
 // printTokenBanner displays the session token and the matching PC2 command
