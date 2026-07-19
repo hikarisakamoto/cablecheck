@@ -106,7 +106,7 @@ Warnings do not make `doctor` fail. Any failed check makes it exit 4.
 
 ## Run a test
 
-Start PC1 first. It binds only `192.168.50.1`, generates a 32-character session token when `--token` is omitted, and prints both the token and a ready-to-copy PC2 command:
+Start PC1 first. It binds only `192.168.50.1`, generates a short 6-digit session token when `--token` is omitted, and prints both the token and a ready-to-copy PC2 command:
 
 ```bash
 # PC1: coordinator
@@ -132,9 +132,9 @@ When both sides have sent `ready`, PC1 sends a synchronized start confirmation w
 
 ### Session tokens
 
-The token authenticates the two CableCheck processes for one session. PC1 auto-generates it only when its `--token` is empty; PC2 always requires `--token`. A supplied token must contain 8–128 printable ASCII characters with no whitespace.
+The token authenticates the two CableCheck processes for one session. When `--token` is omitted, PC1 generates a random 6-digit code (from a cryptographic source) that is easy to read aloud and retype on PC2; PC2 always requires `--token`. A token you supply yourself must contain 6–128 printable ASCII characters with no whitespace.
 
-The token is sent in plaintext inside the opening control message. It is not encryption and does not make an untrusted network safe. CableCheck never writes the token to reports or structured logs.
+The 6-digit code is a session guard for a trusted direct link — it prevents an accidental cross-connection to the wrong process, not a determined attacker. The token is sent in plaintext inside the opening control message: it is not encryption and does not make an untrusted network safe. CableCheck never writes the token to reports or structured logs.
 
 ## Test modes
 

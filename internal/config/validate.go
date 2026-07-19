@@ -2,10 +2,10 @@ package config
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/big"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -32,7 +32,7 @@ const (
 	minParallelStreams = 1
 	maxParallelStreams = 16
 
-	minTokenLen = 8
+	minTokenLen = 6
 	maxTokenLen = 128
 
 	minUDPRate model.Bitrate = 1_000_000
@@ -272,7 +272,7 @@ func checkDurationBounds(flagName string, d, minBound, maxBound time.Duration) e
 
 // resolveToken applies the token rules: an empty token is generated on PC1
 // (and flagged as generated so the CLI displays it) and rejected on PC2; a
-// provided token must be 8-128 printable-ASCII characters with no
+// provided token must be 6-128 printable-ASCII characters with no
 // whitespace.
 func resolveToken(role Role, token string) (string, bool, error) {
 	if token == "" {
@@ -296,14 +296,17 @@ func resolveToken(role Role, token string) (string, bool, error) {
 	return token, false, nil
 }
 
-// generateToken returns 16 bytes from crypto/rand hex-encoded to 32
-// characters. This is the one sanctioned crypto/rand use in this package.
+// generateToken returns a 6-digit numeric session token from crypto/rand,
+// uniform over 000000-999999. It is deliberately short so it is easy to read
+// aloud and retype on the second PC: the token guards a trusted direct link
+// against accidental cross-connection, not an untrusted network (see the
+// security notes). This is the one sanctioned crypto/rand use in this package.
 func generateToken() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b[:]), nil
+	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
 // validateOutputDir rejects any ".." path element in the raw value (before

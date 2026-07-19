@@ -583,30 +583,40 @@ func TestModeDefaults(t *testing.T) {
 }
 
 func TestTokenRules(t *testing.T) {
-	hexToken := regexp.MustCompile(`^[0-9a-f]{32}$`)
+	sixDigit := regexp.MustCompile(`^[0-9]{6}$`)
 
-	t.Run("pc1 empty token generates 32 hex chars", func(t *testing.T) {
+	t.Run("pc1 empty token generates a 6-digit code", func(t *testing.T) {
 		raw := validRaw(t)
 		raw.Token = ""
 		cfg, err := Resolve(raw, nil)
 		if err != nil {
 			t.Fatalf("Resolve() error = %v, want nil", err)
 		}
-		if !hexToken.MatchString(cfg.Token) {
-			t.Errorf("Token = %q, want 32 lowercase hex chars", cfg.Token)
+		if !sixDigit.MatchString(cfg.Token) {
+			t.Errorf("Token = %q, want 6 digits", cfg.Token)
 		}
 		if !cfg.TokenGenerated {
 			t.Errorf("TokenGenerated = false, want true")
 		}
 
-		raw2 := validRaw(t)
-		raw2.Token = ""
-		cfg2, err := Resolve(raw2, nil)
-		if err != nil {
-			t.Fatalf("second Resolve() error = %v, want nil", err)
+		// Sample several tokens and require more than one distinct value.
+		// (A single pair could collide 1-in-a-million; not-all-identical
+		// across a handful is effectively certain and never flakes.)
+		seen := map[string]struct{}{cfg.Token: {}}
+		for i := 0; i < 8; i++ {
+			r := validRaw(t)
+			r.Token = ""
+			c, err := Resolve(r, nil)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v, want nil", err)
+			}
+			if !sixDigit.MatchString(c.Token) {
+				t.Errorf("Token = %q, want 6 digits", c.Token)
+			}
+			seen[c.Token] = struct{}{}
 		}
-		if cfg2.Token == cfg.Token {
-			t.Errorf("two generated tokens are identical (%q); want random tokens", cfg.Token)
+		if len(seen) < 2 {
+			t.Errorf("all generated tokens were identical (%v); want random tokens", seen)
 		}
 	})
 
@@ -638,8 +648,9 @@ func TestTokenRules(t *testing.T) {
 			token string
 			ok    bool
 		}{
-			{"seven77", false},
-			{"eight888", true},
+			{"12345", false},  // 5 chars, below the 6 minimum
+			{"123456", true},  // 6 chars, matches a generated code
+			{"seven77", true}, // 7 chars, valid
 			{strings.Repeat("a", 128), true},
 			{strings.Repeat("a", 129), false},
 		} {
@@ -650,7 +661,7 @@ func TestTokenRules(t *testing.T) {
 				t.Errorf("Resolve(token len %d) error = %v, want nil", len(tc.token), err)
 			}
 			if !tc.ok {
-				wantValidationError(t, err, "--token", "8")
+				wantValidationError(t, err, "--token", "6-128")
 			}
 		}
 	})
