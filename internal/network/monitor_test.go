@@ -325,6 +325,51 @@ func TestCableTestWindowAnnotations(t *testing.T) {
 	}
 }
 
+func TestCableTestWindowBoundaryPolls(t *testing.T) {
+	newMonitor := func(t *testing.T) (*Monitor, string) {
+		t.Helper()
+		root := t.TempDir()
+		writeLinkState(t, root, "eth0", linkState{
+			operstate: "up", carrier: "1", speed: "1000", duplex: "full", carrierChanges: "20",
+		})
+		fc := clocktest.New(time.Date(2026, 7, 18, 11, 0, 0, 0, time.UTC))
+		return NewMonitor("eth0", time.Second, fc, WithSysfsRoot(root)), root
+	}
+
+	t.Run("close captures final in-window transition", func(t *testing.T) {
+		m, root := newMonitor(t)
+		m.SetCableTestWindow(true)
+		writeLinkState(t, root, "eth0", linkState{
+			operstate: "up", carrier: "1", speed: "1000", duplex: "full", carrierChanges: "22",
+		})
+
+		if got := m.SetCableTestWindow(false); got != 2 {
+			t.Errorf("window carrier count = %d, want 2 for the transition before close", got)
+		}
+		history := m.History()
+		if len(history) != 1 || history[0].Type != Renegotiation || !history[0].SelfInflicted {
+			t.Errorf("history = %+v, want one self-inflicted in-window renegotiation", history)
+		}
+	})
+
+	t.Run("open excludes preceding transition", func(t *testing.T) {
+		m, root := newMonitor(t)
+		writeLinkState(t, root, "eth0", linkState{
+			operstate: "up", carrier: "1", speed: "1000", duplex: "full", carrierChanges: "22",
+		})
+
+		m.SetCableTestWindow(true)
+		m.poll()
+		if got := m.SetCableTestWindow(false); got != 0 {
+			t.Errorf("window carrier count = %d, want 0 for the transition before open", got)
+		}
+		history := m.History()
+		if len(history) != 1 || history[0].Type != Renegotiation || history[0].SelfInflicted {
+			t.Errorf("history = %+v, want one ordinary pre-window renegotiation", history)
+		}
+	})
+}
+
 // TestMonitorChannelNeverBlocks fills the 64-event buffer with no consumer,
 // keeps polling, and asserts the poller never blocks: Run still returns
 // promptly on ctx cancel and Dropped() counts the overflow.

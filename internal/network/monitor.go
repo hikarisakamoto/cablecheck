@@ -243,6 +243,18 @@ func (m *Monitor) Run(ctx context.Context) error {
 // change from the previous snapshot implies.
 func (m *Monitor) poll() {
 	m.mu.Lock()
+	events := m.pollLocked()
+	for _, ev := range events {
+		m.emit(ev)
+	}
+	m.mu.Unlock()
+}
+
+// pollLocked performs one poll through the ordinary detection, tagging, and
+// history path. The caller must hold m.mu; keeping boundary snapshots and the
+// window flag change under the same lock prevents a periodic poll from
+// interleaving at either edge.
+func (m *Monitor) pollLocked() []LinkEvent {
 	snap := ReadLinkSnapshot(m.sysfsRoot, m.ifName)
 	snap.At = m.clk.Now()
 
@@ -264,11 +276,7 @@ func (m *Monitor) poll() {
 		}
 		m.history = append(m.history, events...)
 	}
-	m.mu.Unlock()
-
-	for _, ev := range events {
-		m.emit(ev)
-	}
+	return events
 }
 
 // FinalPoll captures one last snapshot after Run has stopped so a change
@@ -286,7 +294,21 @@ func (m *Monitor) FinalPoll() {
 func (m *Monitor) SetCableTestWindow(active bool) uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if active && !m.cableTestWindow {
+	if active == m.cableTestWindow {
+		if active {
+			return 0
+		}
+		return m.windowCarrierEvents
+	}
+
+	// Poll before changing the flag: the opening snapshot belongs outside the
+	// window, while the closing snapshot belongs inside it. This pins carrier
+	// attribution to the exact boundary without a periodic-poll race.
+	events := m.pollLocked()
+	for _, ev := range events {
+		m.emit(ev)
+	}
+	if active {
 		m.windowCarrierEvents = 0
 	}
 	m.cableTestWindow = active

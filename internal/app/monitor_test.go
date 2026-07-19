@@ -217,3 +217,73 @@ func TestStopLinkMonitorTagsFinalEventInsideCableWindow(t *testing.T) {
 		t.Errorf("final monitor events = %+v, want speed_changed and renegotiation", rep.MonitoringEvents)
 	}
 }
+
+func TestSetCableTestWindowKeepsPreWindowFaultForPHY03(t *testing.T) {
+	root := t.TempDir()
+	const iface = "eth0"
+	writeSysfsAttr(t, root, iface, "operstate", "up")
+	writeSysfsAttr(t, root, iface, "carrier", "1")
+	writeSysfsAttr(t, root, iface, "speed", "1000")
+	writeSysfsAttr(t, root, iface, "duplex", "full")
+	writeSysfsAttr(t, root, iface, "carrier_changes", "20")
+
+	fc := clocktest.New(time.Date(2026, 7, 18, 2, 0, 0, 0, time.UTC))
+	m := network.NewMonitor(iface, time.Second, fc, network.WithSysfsRoot(root))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- m.Run(ctx) }()
+	fc.BlockUntilWaiters(1)
+
+	cfg := &config.RunConfig{Role: config.RolePC1}
+	a, err := New(cfg, Deps{StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.monitor = m
+
+	// This +2 fault occurs before the disruptive window opens. The opening
+	// boundary poll must retain it as genuine rather than subtracting it as a
+	// cable-test side effect on the next periodic poll.
+	writeSysfsAttr(t, root, iface, "carrier_changes", "22")
+	a.setCableTestWindow(true)
+	fc.Advance(time.Second)
+	timeout := time.NewTimer(testutil.TestTimeout(t))
+	defer timeout.Stop()
+	for len(m.History()) == 0 {
+		select {
+		case <-timeout.C:
+			t.Fatal("monitor did not capture the pre-window carrier fault")
+		default:
+			runtime.Gosched()
+		}
+	}
+	selfInflicted := a.setCableTestWindow(false)
+	cancel()
+	<-done
+
+	report := &model.Report{
+		Tests: model.TestsSection{CableTest: &model.CableTestResult{
+			SelfInflictedCarrierEvents: model.PeerCarrierEvents{PC1: selfInflicted},
+		}},
+		InitialCounters: model.PeerCounters{PC1: &model.CounterSnapshot{
+			Standard: map[string]uint64{"link_resets": 20},
+		}},
+		FinalCounters: model.PeerCounters{PC1: &model.CounterSnapshot{
+			Standard: map[string]uint64{"link_resets": 22},
+		}},
+	}
+	facts := evaluate.FactsFromReport(report)
+	if facts.PC1.CarrierEvents != 2 {
+		t.Errorf("PC1 carrier events = %d, want 2 genuine pre-window transitions", facts.PC1.CarrierEvents)
+	}
+	var phy03 bool
+	for _, finding := range evaluate.Evaluate(facts).Findings {
+		if finding.RuleID == "PHY-03" {
+			phy03 = true
+			break
+		}
+	}
+	if !phy03 {
+		t.Errorf("PHY-03 did not fire for genuine pre-window carrier transitions (self-inflicted count %d)", selfInflicted)
+	}
+}
