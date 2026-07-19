@@ -12,12 +12,12 @@ import (
 	"cablecheck/internal/runner"
 )
 
-// Iperf3 support window: versions below 3.7 predate --bidir and several JSON
-// shape fixes CableCheck relies on; versions above 3.17 are untested.
-const (
-	iperfMinMinor = 7
-	iperfMaxMinor = 17
-)
+// Iperf3 minimum: versions below 3.7 predate --bidir and several JSON shape
+// fixes CableCheck relies on. There is no upper bound — the tool was validated
+// through 3.17, but newer releases are accepted because iperf3's JSON output is
+// backward-compatible across the 3.x series and per-flag capability detection
+// falls back to the --help usage text, so an untested-but-newer iperf3 works.
+const iperfMinMinor = 7
 
 // iperfVersionRe matches the first line of `iperf3 --version`,
 // e.g. "iperf 3.16 (cJSON 1.7.15)".
@@ -31,8 +31,8 @@ const capProbeTimeout = 10 * time.Second
 // when BOTH signals agree: the version window says the upstream feature
 // exists AND the --help usage text lists the flag (which catches distro
 // patches and backports, since the usage text is generated from the accepted
-// option table). Anything that is not iperf3 within the 3.7-3.17 support
-// window is a hard error.
+// option table). Anything that is not iperf3, or is older than 3.7, is a hard
+// error; versions newer than the tested 3.17 are accepted.
 func DetectIperfCaps(ctx context.Context, r runner.Runner) (model.Iperf3Caps, error) {
 	var caps model.Iperf3Caps
 
@@ -46,14 +46,14 @@ func DetectIperfCaps(ctx context.Context, r runner.Runner) (model.Iperf3Caps, er
 	firstLine, _, _ := strings.Cut(strings.TrimSpace(string(verRes.Stdout)), "\n")
 	m := iperfVersionRe.FindStringSubmatch(firstLine)
 	if m == nil {
-		return caps, fmt.Errorf("testsuite: %q does not look like iperf3 (iperf3 3.%d-3.%d required)",
-			firstLine, iperfMinMinor, iperfMaxMinor)
+		return caps, fmt.Errorf("testsuite: %q does not look like iperf3 (iperf3 3.%d or newer required)",
+			firstLine, iperfMinMinor)
 	}
 	major, _ := strconv.Atoi(m[1])
 	minor, _ := strconv.Atoi(m[2])
-	if major != 3 || minor < iperfMinMinor || minor > iperfMaxMinor {
-		return caps, fmt.Errorf("testsuite: iperf %d.%d is outside the supported window 3.%d-3.%d",
-			major, minor, iperfMinMinor, iperfMaxMinor)
+	if major != 3 || minor < iperfMinMinor {
+		return caps, fmt.Errorf("testsuite: iperf %d.%d is unsupported; iperf3 3.%d or newer is required",
+			major, minor, iperfMinMinor)
 	}
 	caps.Version = fmt.Sprintf("%d.%d", major, minor)
 

@@ -18,7 +18,7 @@ CableCheck is a Go 1.24, standard-library-only program for Linux. It relies on L
 
 Runtime requirements on **both** PCs:
 
-- `iperf3` 3.7 through 3.17; JSON support is required. Native `--bidir` is used only when both peers support it; otherwise CableCheck uses two coordinated one-way phases.
+- `iperf3` 3.7 or newer (validated through 3.17; newer releases are accepted because the JSON output is backward-compatible and feature detection reads `iperf3 --help`). JSON support is required. Native `--bidir` is used only when both peers support it; otherwise CableCheck uses two coordinated one-way phases.
 - `ethtool` for link state and NIC statistics.
 - `iputils` `ping`; BusyBox `ping` is not supported.
 - `iproute2` for `ip -j` interface and counter data.
@@ -315,7 +315,7 @@ Ctrl+C attempts to preserve completed measurements in a partial PC1 report. The 
 ## Troubleshooting
 
 **“required tool not found” or `doctor` reports FAIL**  
-Install the exact package shown by `cablecheck doctor`. Confirm that `ping -V` identifies iputils and `iperf3 --version` is within 3.7–3.17.
+Install the exact package shown by `cablecheck doctor`. Confirm that `ping -V` identifies iputils and `iperf3 --version` is 3.7 or newer.
 
 **Local IP is not assigned / interface not found**  
 Run `ip -j addr`, check the exact address and interface name, bring the interface up, and reapply the temporary address. `--interface` does not bypass the requirement that the interface own `--local-ip`.

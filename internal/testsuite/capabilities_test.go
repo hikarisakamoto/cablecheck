@@ -69,10 +69,29 @@ func TestCapabilityDetection(t *testing.T) {
 		}
 	})
 
-	t.Run("VersionBelowWindowHardError", func(t *testing.T) {
+	t.Run("VersionBelowMinimumHardError", func(t *testing.T) {
 		version := runner.CommandResult{Stdout: []byte("iperf 3.1 (cJSON 1.5.2)\n")}
 		if _, err := detect(t, version, fixture(t, "iperf", "help_no_bidir")); err == nil {
-			t.Errorf("DetectIperfCaps accepted iperf 3.1, want hard error (support window 3.7-3.17)")
+			t.Errorf("DetectIperfCaps accepted iperf 3.1, want hard error (3.7 or newer required)")
+		}
+	})
+
+	t.Run("VersionAboveTestedWindowAccepted", func(t *testing.T) {
+		// iperf3 newer than the 3.17 tested ceiling must be accepted: the JSON
+		// output is backward-compatible and capabilities come from --help.
+		version := runner.CommandResult{Stdout: []byte("iperf 3.21 (cJSON 1.7.18)\n")}
+		got, err := detect(t, version, fixture(t, "iperf", "help_with_bidir"))
+		if err != nil {
+			t.Fatalf("DetectIperfCaps rejected iperf 3.21, want accept: %v", err)
+		}
+		if got.Version != "3.21" {
+			t.Errorf("Version = %q, want 3.21", got.Version)
+		}
+		if !got.JSON || !got.UDP {
+			t.Errorf("JSON/UDP must be unconditional true for any accepted 3.x")
+		}
+		if !got.Bidir {
+			t.Errorf("Bidir = false although 3.21 and --help both support --bidir")
 		}
 	})
 }
