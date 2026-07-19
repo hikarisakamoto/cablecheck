@@ -52,7 +52,7 @@ Connect the two Ethernet ports directly. Modern NICs normally handle MDI-X autom
 First list interface names and assigned addresses:
 
 ```bash
-ip -j addr
+ip addr
 ```
 
 Interface names vary by machine—examples include `enp3s0`, `eno1`, and `enx...`. Substitute the real name for `enpXsY` below. Assign temporary addresses on an otherwise unused subnet and bring each interface up:
@@ -67,7 +67,7 @@ sudo ip addr add 192.168.50.2/24 dev enpXsY
 sudo ip link set dev enpXsY up
 ```
 
-Run `ip -j addr` again to confirm that PC1 owns `192.168.50.1` and PC2 owns `192.168.50.2`. CableCheck normally discovers the interface by an exact match on `--local-ip`; use `--interface enpXsY` only when you want to require a particular interface.
+Run `ip addr` again to confirm that PC1 owns `192.168.50.1` and PC2 owns `192.168.50.2`. CableCheck normally discovers the interface by an exact match on `--local-ip`; use `--interface enpXsY` only when you want to require a particular interface.
 
 The `ip addr add` assignments are temporary and disappear when removed or after reboot. To remove them manually, use `sudo ip addr del 192.168.50.1/24 dev enpXsY` on PC1 and the corresponding `.2` address on PC2.
 
