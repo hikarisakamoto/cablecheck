@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -361,6 +362,85 @@ func TestRunQuickHappyPath(t *testing.T) {
 		if strings.HasSuffix(e.Name(), ".part") {
 			t.Errorf("pc2 left a partial file %q", e.Name())
 		}
+	}
+}
+
+// TestRunNoReportTransferSendsPostCapsVerdict pins that PC1 merges the
+// worker's handshake capabilities and re-evaluates before complete even when
+// report transfer is disabled. A virtual PC2 must make both PC1's local
+// report and the complete payload received by PC2 INCONCLUSIVE.
+func TestRunNoReportTransferSendsPostCapsVerdict(t *testing.T) {
+	defer testutil.LeakCheck(t)
+	ctx := context.Background()
+
+	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	clk1, clk2 := clocktest.New(start), clocktest.New(start)
+	var out1, out2 runOutput
+	pc1, _, _ := newRunApp(t, config.RolePC1, 0, 45341, &out1, clk1, nil)
+	pc1.cfg.NoReportTransfer = true
+	if err := pc1.Start(ctx); err != nil {
+		t.Fatalf("pc1 Start: %v", err)
+	}
+
+	ctrl := pc1.ControlAddr().(*net.TCPAddr)
+	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45351, &out2, clk2, nil)
+	pc2.cfg.NoReportTransfer = true
+	pc2.cfg.AllowVirtualInterface = true
+	virtualRoot := t.TempDir()
+	virtualNIC := filepath.Join(virtualRoot, "eth0")
+	if err := os.MkdirAll(virtualNIC, 0o755); err != nil {
+		t.Fatalf("mkdir virtual NIC: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(virtualNIC, "type"), []byte("1\n"), 0o644); err != nil {
+		t.Fatalf("write virtual NIC type: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(virtualNIC, "carrier_changes"), []byte("1\n"), 0o644); err != nil {
+		t.Fatalf("write virtual NIC carrier_changes: %v", err)
+	}
+	pc2.sysfsRoot = virtualRoot
+	if err := pc2.Start(ctx); err != nil {
+		t.Fatalf("pc2 Start: %v", err)
+	}
+
+	fireCountdown(clk2)
+	waitForState(t, states2, peer.StateTesting)
+	fireCountdown(clk1)
+
+	code2, err2 := pc2.Wait()
+	code1, err1 := pc1.Wait()
+	if err1 != nil || code1 != ExitInconclusive {
+		t.Errorf("pc1 = (%d, %v), want (%d, nil)\npc1 %s\npc2 %s", code1, err1, ExitInconclusive, out1.dump(), out2.dump())
+	}
+	if err2 != nil || code2 != ExitInconclusive {
+		t.Errorf("pc2 = (%d, %v), want (%d, nil); complete payload was not post-caps\npc1 %s\npc2 %s", code2, err2, ExitInconclusive, out1.dump(), out2.dump())
+	}
+
+	dir1 := findReportDir(t, pc1.cfg.OutputDir)
+	data, err := os.ReadFile(filepath.Join(dir1, "report.json"))
+	if err != nil {
+		t.Fatalf("read pc1 report.json: %v", err)
+	}
+	var rep model.Report
+	if err := json.Unmarshal(data, &rep); err != nil {
+		t.Fatalf("unmarshal pc1 report.json: %v", err)
+	}
+	if rep.Classification != model.HealthInconclusive {
+		t.Errorf("pc1 report classification = %s, want INCONCLUSIVE", rep.Classification)
+	}
+	if !slices.Contains(findingRuleIDs(rep.Findings), "HOST-02") {
+		t.Errorf("pc1 report findings = %v, want HOST-02", findingRuleIDs(rep.Findings))
+	}
+
+	dir2 := findReportDir(t, pc2.cfg.OutputDir)
+	summary, err := os.ReadFile(filepath.Join(dir2, "summary.txt"))
+	if err != nil {
+		t.Fatalf("read pc2 summary.txt: %v", err)
+	}
+	if !strings.Contains(string(summary), "INCONCLUSIVE") {
+		t.Errorf("pc2 summary does not contain the post-caps complete verdict:\n%s", summary)
+	}
+	if _, err := os.Stat(filepath.Join(dir2, "report.json")); !os.IsNotExist(err) {
+		t.Errorf("pc2 report.json exists despite disabled transfer: %v", err)
 	}
 }
 

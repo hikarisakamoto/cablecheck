@@ -696,8 +696,8 @@ func ruleLIM01(f *Facts) *model.Finding {
 	}
 }
 
-// noncriticalTests names the tests whose absence caps EXCELLENT to GOOD but
-// never invalidates the run.
+// noncriticalTests names the whole-test absences whose reduced coverage caps
+// EXCELLENT to GOOD but never invalidates the run.
 var noncriticalTests = map[string]bool{
 	"ping":           true,
 	"udp":            true,
@@ -711,6 +711,13 @@ var noncriticalTests = map[string]bool{
 
 func ruleLIM02(f *Facts) *model.Finding {
 	var ev []string
+	if f.Dir[0].TCPAvailable != f.Dir[1].TCPAvailable {
+		missing := 0
+		if f.Dir[0].TCPAvailable {
+			missing = 1
+		}
+		ev = append(ev, fmt.Sprintf("TCP throughput %s could not complete", dirNames[missing]))
+	}
 	for _, name := range f.Unavailable {
 		if noncriticalTests[name] {
 			ev = append(ev, fmt.Sprintf("test %q could not run", name))
@@ -723,7 +730,7 @@ func ruleLIM02(f *Facts) *model.Finding {
 		RuleID:   "LIM-02",
 		Category: model.CategoryLimitation,
 		Severity: model.SevMarker,
-		Text:     "Some non-critical tests could not run — coverage is reduced.",
+		Text:     "Some planned measurements could not run — coverage is reduced.",
 		Evidence: ev,
 	}
 }

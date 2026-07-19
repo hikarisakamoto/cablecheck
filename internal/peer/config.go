@@ -67,6 +67,11 @@ type Config struct {
 	// start_confirmation to drive the worker's "[1/8]" numbering.
 	Steps []string
 
+	// PrepareComplete, when set on the coordinator, runs after the plan
+	// succeeds and peer capabilities are known, before report transfer is
+	// considered and before the complete frame is sent. Its error is a warning
+	// only; Complete may fall back to the caller's previously prepared verdict.
+	PrepareComplete func(peerCaps protocol.Capabilities) error
 	// SendReports, when set on the coordinator, is invoked in its own
 	// goroutine after the plan succeeds (state generating_report) to stream
 	// the report files to the peer over the given ReportChannel. A nil

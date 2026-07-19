@@ -280,6 +280,14 @@ func TestReportJSONRoundTrip(t *testing.T) {
 	if bytes.Contains(data, []byte(`"token":`)) {
 		t.Errorf("report JSON contains a token field")
 	}
+	// PingResult keeps the schema 1.0.0 wire name even though the Go field
+	// was clarified to LongestMissingRunLen.
+	if !bytes.Contains(data, []byte(`"longestSeqGap":1`)) {
+		t.Errorf("JSON missing stable longestSeqGap wire key: %.500s", data)
+	}
+	if bytes.Contains(data, []byte(`"longestMissingRunLen":`)) {
+		t.Errorf("JSON contains breaking longestMissingRunLen wire key: %.500s", data)
+	}
 	// Severity must marshal as a string.
 	if !bytes.Contains(data, []byte(`"severity":"warning"`)) {
 		t.Errorf("severity did not marshal as a string: %.200s", data)

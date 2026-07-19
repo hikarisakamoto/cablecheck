@@ -95,18 +95,16 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		IdleTimeout:       a.idleTimeout,
 	}
 	// Report transfer is gated inside the peer session by NoReportTransfer and
-	// the peer's AcceptReportTransfer capability; the app just supplies the two
-	// direction callbacks. PC1 streams its rendered report set to PC2; PC2
-	// receives the verified files into its own report directory.
+	// the peer's AcceptReportTransfer capability. PC1 always re-evaluates with
+	// the worker capabilities before that decision and before complete, then
+	// streams its rendered report set when enabled; PC2 receives the verified
+	// files into its own report directory.
 	if a.cfg.Role == config.RolePC1 {
-		// prepare re-renders and re-evaluates the report with the peer machine
-		// description before the transfer, so the complete frame and PC2's
-		// transferred copy use the worker capabilities learned at handshake.
-		prepare := func(peerCaps protocol.Capabilities) error {
+		pcfg.PrepareComplete = func(peerCaps protocol.Capabilities) error {
 			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
 				&peer.Outcome{PeerCaps: peerCaps, TestID: a.sessionTestID()}, log)
 		}
-		pcfg.SendReports = a.sendReportsCallback(dir, prepare, log)
+		pcfg.SendReports = a.sendReportsCallback(dir)
 	} else {
 		pcfg.ReceiveReports = a.receiveReportsCallback(dir)
 	}
@@ -120,7 +118,8 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 			// Assemble, evaluate and render before returning: the session
 			// sends the complete frame (whose payload v.complete supplies)
 			// as soon as the plan reports success. The report files must
-			// exist here because SendReports streams them right after.
+			// exist here because PrepareComplete replaces them with the
+			// capability-enriched rendering before any optional transfer.
 			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil, nil, log)
 		}
 	}

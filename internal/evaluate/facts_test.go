@@ -226,4 +226,37 @@ func TestFactsFromReportIgnoresIncompleteTCPDirection(t *testing.T) {
 	}
 }
 
+// TestEvaluateOneIncompleteTCPDirectionCapsExcellent exercises the report
+// boundary: one usable TCP measurement plus one incomplete placeholder is
+// reduced coverage, not a fully clean two-direction run.
+func TestEvaluateOneIncompleteTCPDirectionCapsExcellent(t *testing.T) {
+	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	r := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{Name: "eth0", Driver: "e1000e", SpeedMbps: 1000}},
+		PC2: model.PeerReport{NIC: model.NICReport{Name: "eth1", Driver: "r8169", SpeedMbps: 1000}},
+		Tests: model.TestsSection{TCP: []model.TCPResult{
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC2ToPC1, Incomplete: true},
+		}},
+		InitialCounters: model.PeerCounters{PC1: before, PC2: before},
+		FinalCounters:   model.PeerCounters{PC1: after, PC2: after},
+		SkippedTests: []model.SkippedTest{{
+			Name: "tcp", Reason: "TCP throughput PC2 to PC1 was incomplete",
+		}},
+	}
+
+	f := FactsFromReport(r)
+	if !f.Dir[0].TCPAvailable || f.Dir[1].TCPAvailable {
+		t.Fatalf("TCP availability = [%v %v], want [true false]", f.Dir[0].TCPAvailable, f.Dir[1].TCPAvailable)
+	}
+	res := Evaluate(f)
+	if res.Class != model.HealthGood {
+		t.Errorf("class = %s, want GOOD rather than EXCELLENT for one incomplete TCP direction (findings %v)", res.Class, findingIDs(res))
+	}
+	if !slices.Contains(findingIDs(res), "LIM-02") {
+		t.Errorf("findings = %v, want LIM-02", findingIDs(res))
+	}
+}
+
 func uint64Ptr(v uint64) *uint64 { return &v }

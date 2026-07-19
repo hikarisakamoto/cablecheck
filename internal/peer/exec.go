@@ -194,6 +194,11 @@ func (s *session) handlePlanDone(err error) {
 		s.log.Warn("generating_report transition rejected", "err", terr)
 		return
 	}
+	if s.cfg.PrepareComplete != nil {
+		if err := s.cfg.PrepareComplete(s.peerCaps); err != nil {
+			s.log.Warn("preparing final verdict with peer capabilities failed; using the provisional verdict", "err", err)
+		}
+	}
 	if s.cfg.SendReports != nil && !s.cfg.NoReportTransfer && s.peerCaps.AcceptReportTransfer {
 		s.startTransfer(s.cfg.SendReports)
 		return

@@ -257,7 +257,7 @@ type PingResult struct {
     Percentiles                 map[int]float64 // 50,90,95,99 nearest-rank over first-reply RTTs
     Spikes                      []PingSpike     // rtt > max(5*p50, p50+10ms)
     MissingSeqRuns              []SeqRun        // {FirstSeq,Len}
-    LongestSeqGap               int
+    LongestMissingRunLen        int          `json:"longestSeqGap"`
     LongestGapMs                float64         // max Δ between consecutive reply timestamps (-D)
     IntervalUsedSec             float64
     ExitCode                    int

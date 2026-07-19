@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
@@ -11,30 +10,16 @@ import (
 )
 
 // sendReportsCallback returns the coordinator's SendReports peer callback: it
-// re-renders the report on disk enriched with the peer's machine description
-// (known from the handshake, exposed via the channel) so the transferred files
-// are byte-identical to PC1's final report, then streams the allowlisted
-// report files from dir to the worker. The mangle hook (nil in production)
-// corrupts outbound chunk data at the sender boundary for the integration
-// corruption scenario. A transfer failure is a warning by contract, so the
-// returned error only feeds the session's warning path — it never changes
-// classification or exit code.
-//
-// prepare re-renders and re-evaluates the report set with the given peer
-// capabilities before the complete frame is sent. A prepare failure degrades gracefully: it is logged and the
-// transfer proceeds with whatever the plan wrapper already rendered at dir
-// (a valid report set, only missing the peer-machine enrichment). Streaming
-// those bytes is strictly better than aborting the transfer and sending PC2
-// nothing.
-func (a *App) sendReportsCallback(dir string, prepare func(protocol.Capabilities) error,
-	log *slog.Logger) func(context.Context, *peer.ReportChannel) error {
+// streams the already prepared allowlisted report files from dir to the
+// worker. PrepareComplete has re-rendered them with peer capabilities before
+// the session decides whether transfer runs. The mangle hook (nil in
+// production) corrupts outbound chunk data at the sender boundary for the
+// integration corruption scenario. A transfer failure is a warning by
+// contract, so the returned error only feeds the session's warning path — it
+// never changes classification or exit code.
+func (a *App) sendReportsCallback(dir string) func(context.Context, *peer.ReportChannel) error {
 	mangle := a.deps.hooks.mangleReportChunk
 	return func(ctx context.Context, rt *peer.ReportChannel) error {
-		if prepare != nil {
-			if err := prepare(rt.PeerCaps()); err != nil {
-				log.Warn("re-rendering the report with peer capabilities failed; transferring the plan's rendering", "err", err)
-			}
-		}
 		return reporting.SendReports(ctx, dir, &reportSender{rt: rt, mangle: mangle})
 	}
 }

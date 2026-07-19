@@ -109,7 +109,7 @@
           "95": 0.26,
           "99": 0.31
         },
-        "longestMissingRunLen": 0,
+        "longestSeqGap": 0,
         "longestGapMs": 0,
         "intervalUsedSec": 0.02,
         "exitCode": 0,
@@ -134,7 +134,7 @@
           "95": 0.26,
           "99": 0.31
         },
-        "longestMissingRunLen": 0,
+        "longestSeqGap": 0,
         "longestGapMs": 0,
         "intervalUsedSec": 0.02,
         "exitCode": 0,
