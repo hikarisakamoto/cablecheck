@@ -68,6 +68,15 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	s := a.buildSuite(pf, rawDir, clkNowID(clk), log)
 	v := &verdict{}
 
+	// Watch the tested interface's sysfs link state for the testing phase; its
+	// History becomes the report's MonitoringEvents (carrier flaps, speed and
+	// duplex changes, renegotiations). The monitor is started when the session
+	// enters the testing phase (see OnState below) so its clock ticker never
+	// registers before the synchronized-start countdown timer. stopLinkMonitor
+	// cancels and joins the poll goroutine; it is idempotent and always called
+	// on teardown so no goroutine leaks.
+	defer a.stopLinkMonitor()
+
 	pcfg := peer.Config{
 		Role:             peer.Role(a.cfg.Role),
 		LocalIP:          a.cfg.LocalIP,
@@ -87,6 +96,11 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		Complete:         v.complete,
 		OnHandshake:      a.setSessionTestID,
 		OnState: func(_, to peer.State) {
+			// Start the sysfs link monitor exactly when the testing phase
+			// begins, so its clock ticker registers after the countdown timer.
+			if to == peer.StateTesting {
+				a.startLinkMonitor(ctx, pf.Iface.Name)
+			}
 			if h := a.deps.hooks.onState; h != nil {
 				h(to)
 			}
@@ -119,6 +133,11 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 			if err := s.plan.Run(ctx, rc); err != nil {
 				return err
 			}
+			// Freeze the link timeline before assembling: every render (this
+			// provisional one and the PrepareComplete enrichment) must see the
+			// same complete MonitoringEvents so the transferred report stays
+			// byte-identical to PC1's final copy.
+			a.stopLinkMonitor()
 			// Assemble, evaluate and render before returning: the session
 			// sends the complete frame (whose payload v.complete supplies)
 			// as soon as the plan reports success. The report files must

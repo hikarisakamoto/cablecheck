@@ -17,6 +17,7 @@ import (
 
 	"cablecheck/internal/clock"
 	"cablecheck/internal/config"
+	"cablecheck/internal/network"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner"
@@ -90,6 +91,14 @@ type App struct {
 	// sysfsRoot overrides /sys/class/net for interface classification in
 	// tests; empty means the real tree.
 	sysfsRoot string
+	// monitor is the sysfs link monitor running for the testing phase; nil
+	// before startLinkMonitor and on runs that do not watch the link. Its
+	// History supplies the report's MonitoringEvents at assembly time.
+	// monitorMu guards monitor and monitorStop, which the session event loop
+	// (via OnState) and the run goroutine both touch.
+	monitorMu   sync.Mutex
+	monitor     *network.Monitor
+	monitorStop func()
 	// heartbeatInterval/idleTimeout override the session's protocol timers
 	// in tests; zero means the protocol defaults.
 	heartbeatInterval, idleTimeout time.Duration
