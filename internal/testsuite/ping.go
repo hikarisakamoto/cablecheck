@@ -14,9 +14,13 @@ import (
 	"cablecheck/internal/runner"
 )
 
-// icmpOverheadBytes is the IPv4 header (20) plus ICMP header (8): the ping
-// payload that fills the MTU exactly is always MTU minus this overhead.
+// icmpOverheadBytes is the IPv4 header (20) plus ICMP header (8): before
+// applying IPv4's packet-size limit, a full-MTU payload is MTU minus this.
 const icmpOverheadBytes = 28
+
+// maxIPv4ICMPPayload is the largest ICMP payload representable in an IPv4
+// packet: 65535 bytes minus the 20-byte IPv4 and 8-byte ICMP headers.
+const maxIPv4ICMPPayload = 65507
 
 // pingTimeoutSlack pads the runner timeout beyond the -w wall-clock bound:
 // ping itself gets first chance to enforce the deadline, and the runner kills
@@ -67,17 +71,18 @@ func (p *PingTester) Quick(ctx context.Context, peer netip.Addr, count int) (mod
 	return model.PingResult{}, notes, errors.New("testsuite: ping interval ladder exhausted")
 }
 
-// FullSize runs the full-size non-fragmenting ping (-M do -s MTU-28): every
-// probe fills one link-layer frame exactly, so loss here that quick-mode ping
-// does not show points at frame-size-dependent cable problems. The payload is
-// computed from the interface MTU, never hardcoded.
+// FullSize runs the largest valid non-fragmenting IPv4 ping for the interface:
+// min(MTU-28, 65507). It fills one link-layer frame when the MTU is representable
+// by IPv4; larger MTUs use IPv4's maximum packet size. Loss here that quick-mode
+// ping does not show points at frame-size-dependent cable problems.
 func (p *PingTester) FullSize(ctx context.Context, peer netip.Addr, mtu, count int) (model.PingResult, []string, error) {
 	const interval = 0.2
 	wallSec := int(math.Ceil(float64(count)*interval)) + 20
+	payload := min(mtu-icmpOverheadBytes, maxIPv4ICMPPayload)
 	args := []string{
 		"-n", "-D",
 		"-M", "do",
-		"-s", strconv.Itoa(mtu - icmpOverheadBytes),
+		"-s", strconv.Itoa(payload),
 		"-c", strconv.Itoa(count),
 		"-i", formatInterval(interval),
 		"-W", "2",

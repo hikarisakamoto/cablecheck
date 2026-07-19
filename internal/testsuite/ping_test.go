@@ -102,6 +102,38 @@ func TestPingLadder(t *testing.T) {
 	}
 }
 
+func TestFullSizePayloadClampsIPv4Maximum(t *testing.T) {
+	peer := netip.MustParseAddr("10.0.0.2")
+	for _, tc := range []struct {
+		name        string
+		mtu         int
+		wantPayload string
+	}{
+		{name: "standard MTU", mtu: 1500, wantPayload: "1472"},
+		{name: "loopback MTU", mtu: 65536, wantPayload: "65507"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := runnertest.New(t)
+			fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-M", "do"),
+				Result: fixture(t, "ping", "quick_clean_100")})
+			pt := &PingTester{R: fr}
+
+			if _, _, err := pt.FullSize(context.Background(), peer, tc.mtu, 100); err != nil {
+				t.Fatalf("FullSize MTU %d: %v", tc.mtu, err)
+			}
+			args := fr.CallsFor("ping")[0].Args
+			i := slices.Index(args, "-s")
+			if i < 0 || i+1 >= len(args) {
+				t.Errorf("FullSize MTU %d args %q lack a -s payload", tc.mtu, args)
+				return
+			}
+			if args[i+1] != tc.wantPayload {
+				t.Errorf("FullSize MTU %d payload = %s, want %s", tc.mtu, args[i+1], tc.wantPayload)
+			}
+		})
+	}
+}
+
 // TestPingRunnerTimeout pins the runner-timeout backstop: every ping
 // invocation (each quick-ladder rung and the full-size run) bounds its
 // runtime to its own -w wall-clock budget plus 10 seconds of slack, so a
