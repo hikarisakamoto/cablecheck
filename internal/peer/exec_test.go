@@ -93,9 +93,10 @@ func TestCableTestWindowWorkerCoordination(t *testing.T) {
 	states := newStateRecorder(&cfg2)
 	var active atomic.Bool
 	windowChanges := make(chan bool, 2)
-	cfg2.OnCableTestWindow = func(on bool) {
+	cfg2.OnCableTestWindow = func(on bool) uint64 {
 		active.Store(on)
 		windowChanges <- on
+		return 2
 	}
 	handler := opFunc(func(_ context.Context, op string, _ json.RawMessage,
 		_ func(protocol.TestProgress)) (any, string, error) {
@@ -117,6 +118,12 @@ func TestCableTestWindowWorkerCoordination(t *testing.T) {
 	if err != nil {
 		t.Errorf("marshal window params: %v", err)
 	}
+	unmatchedEndID := h.send(protocol.TypeTestRequest, "", protocol.TestRequest{
+		Op: protocol.OpCableTestWindowEnd, TimeoutMs: 30_000,
+	})
+	if result := awaitTestResult(t, h, unmatchedEndID); result.Status != "rejected" {
+		t.Errorf("end-without-open status = %q, want rejected", result.Status)
+	}
 	startID := h.send(protocol.TypeTestRequest, "", protocol.TestRequest{
 		Op: protocol.OpCableTestWindowStart, Params: params, TimeoutMs: 30_000,
 	})
@@ -127,14 +134,104 @@ func TestCableTestWindowWorkerCoordination(t *testing.T) {
 		t.Errorf("start window callback = %v active=%v, want true/true", on, active.Load())
 	}
 
+	doubleStartID := h.send(protocol.TypeTestRequest, "", protocol.TestRequest{
+		Op: protocol.OpCableTestWindowStart,
+		Params: func() json.RawMessage {
+			raw, marshalErr := json.Marshal(protocol.CableTestWindowParams{IdleTimeoutMs: 1})
+			if marshalErr != nil {
+				t.Errorf("marshal short window params: %v", marshalErr)
+			}
+			return raw
+		}(),
+		TimeoutMs: 30_000,
+	})
+	if result := awaitTestResult(t, h, doubleStartID); result.Status != "rejected" {
+		t.Errorf("double-start status = %q, want rejected", result.Status)
+	}
+	select {
+	case on := <-windowChanges:
+		t.Errorf("double-start invoked monitor callback with %v", on)
+	default:
+	}
+
 	endID := h.send(protocol.TypeTestRequest, "", protocol.TestRequest{
 		Op: protocol.OpCableTestWindowEnd, TimeoutMs: 30_000,
 	})
-	if result := awaitTestResult(t, h, endID); result.Status != "ok" {
-		t.Errorf("end status = %q, want ok", result.Status)
+	endResult := awaitTestResult(t, h, endID)
+	if endResult.Status != "ok" {
+		t.Errorf("end status = %q, want ok", endResult.Status)
+	}
+	var windowResult protocol.CableTestWindowResult
+	if err := json.Unmarshal(endResult.Result, &windowResult); err != nil {
+		t.Errorf("decode window-end result: %v", err)
+	} else if windowResult.SelfInflictedCarrierEvents != 2 {
+		t.Errorf("worker carrier count = %d, want 2", windowResult.SelfInflictedCarrierEvents)
 	}
 	if on := <-windowChanges; on || active.Load() {
 		t.Errorf("end window callback = %v active=%v, want false/false", on, active.Load())
+	}
+	secondEndID := h.send(protocol.TypeTestRequest, "", protocol.TestRequest{
+		Op: protocol.OpCableTestWindowEnd, TimeoutMs: 30_000,
+	})
+	if result := awaitTestResult(t, h, secondEndID); result.Status != "rejected" {
+		t.Errorf("second end status = %q, want rejected", result.Status)
+	}
+
+	h.send(protocol.TypeAbort, "", protocol.Abort{Reason: "user_interrupt", Stage: "testing", Initiator: "pc1"})
+	out := awaitResult(t, resCh)
+	if !errors.Is(out.err, ErrPeerAborted) {
+		t.Errorf("Run error = %v, want ErrPeerAborted", out.err)
+	}
+}
+
+func TestCableTestWindowFailedStartCleansUp(t *testing.T) {
+	testutil.LeakCheck(t)
+	cfg1, cfg2 := testConfigs(t)
+	tr := newPipeTransport()
+	cfg1.Transport, cfg2.Transport = tr, tr
+	cfg2.NonInteractive = true
+	states := newStateRecorder(&cfg2)
+
+	windowChanges := make(chan bool, 2)
+	cfg2.OnCableTestWindow = func(on bool) uint64 {
+		windowChanges <- on
+		return 0
+	}
+	handler := opFunc(func(_ context.Context, op string, _ json.RawMessage,
+		_ func(protocol.TestProgress)) (any, string, error) {
+		if op == protocol.OpCableTestWindowStart {
+			return nil, "failed", errors.New("window setup failed")
+		}
+		return struct{}{}, "ok", nil
+	})
+
+	ctx := t.Context()
+	resCh := startSession(ctx, cfg2, nil, handler)
+	h := startCoordinatorHarness(t, ctx, tr, cfg1)
+	h.await(protocol.TypeReady)
+	h.send(protocol.TypeReady, "", protocol.Ready{})
+	h.send(protocol.TypeStartConfirm, "", protocol.StartConfirmation{StartInMs: 0})
+	states.wait(t, StateTesting)
+
+	params, err := json.Marshal(protocol.CableTestWindowParams{IdleTimeoutMs: 240_000})
+	if err != nil {
+		t.Errorf("marshal window params: %v", err)
+	}
+	startID := h.send(protocol.TypeTestRequest, "", protocol.TestRequest{
+		Op: protocol.OpCableTestWindowStart, Params: params, TimeoutMs: 30_000,
+	})
+	if result := awaitTestResult(t, h, startID); result.Status != "failed" {
+		t.Errorf("failed-start status = %q, want failed", result.Status)
+	}
+	if first, second := <-windowChanges, <-windowChanges; !first || second {
+		t.Errorf("failed-start callbacks = %v,%v, want true,false cleanup", first, second)
+	}
+
+	endID := h.send(protocol.TypeTestRequest, "", protocol.TestRequest{
+		Op: protocol.OpCableTestWindowEnd, TimeoutMs: 30_000,
+	})
+	if result := awaitTestResult(t, h, endID); result.Status != "rejected" {
+		t.Errorf("end after failed start status = %q, want rejected", result.Status)
 	}
 
 	h.send(protocol.TypeAbort, "", protocol.Abort{Reason: "user_interrupt", Stage: "testing", Initiator: "pc1"})

@@ -174,7 +174,7 @@ func TestStartLinkMonitorNoLeak(t *testing.T) {
 	a.stopLinkMonitor()
 }
 
-func TestStopLinkMonitorCapturesChangeAfterLastInterval(t *testing.T) {
+func TestStopLinkMonitorTagsFinalEventInsideCableWindow(t *testing.T) {
 	root := t.TempDir()
 	const iface = "eth0"
 	writeSysfsAttr(t, root, iface, "operstate", "up")
@@ -192,6 +192,7 @@ func TestStopLinkMonitorCapturesChangeAfterLastInterval(t *testing.T) {
 	a.sysfsRoot = root
 	a.startLinkMonitor(context.Background(), iface)
 	fc.BlockUntilWaiters(1)
+	a.setCableTestWindow(true)
 
 	// The speed change happens after the last interval poll. Teardown's final
 	// snapshot is the only opportunity to retain it.
@@ -202,6 +203,9 @@ func TestStopLinkMonitorCapturesChangeAfterLastInterval(t *testing.T) {
 	rep := a.assembleReport(&preflightInfo{}, &testsuite.SessionResults{}, when, when, nil, nil)
 	var speedChanged, renegotiated bool
 	for _, event := range rep.MonitoringEvents {
+		if !event.SelfInflicted {
+			t.Errorf("final-poll event = %+v, want cable-window annotation", event)
+		}
 		switch event.Type {
 		case "speed_changed":
 			speedChanged = true

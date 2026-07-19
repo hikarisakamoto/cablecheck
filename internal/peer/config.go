@@ -94,9 +94,10 @@ type Config struct {
 	OnState func(from, to State)
 	// OnCableTestWindow marks the interval in which link-monitor events are
 	// expected consequences of the disruptive diagnostic. It is called on
-	// the worker before the start request is acknowledged and after the end
-	// result is sent.
-	OnCableTestWindow func(active bool)
+	// the worker before the start request is acknowledged and before the end
+	// result is sent. Closing returns that side's locally observed carrier
+	// transition count.
+	OnCableTestWindow func(active bool) uint64
 
 	// HeartbeatInterval overrides the 5s heartbeat ticker period; zero
 	// means protocol.HeartbeatInterval. Test-tunable.

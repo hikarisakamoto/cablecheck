@@ -53,6 +53,20 @@ func (s *session) handleTestRequest(env *protocol.Envelope) {
 		})
 		return
 	}
+	if req.Op == protocol.OpCableTestWindowStart && s.cableWindowActive {
+		s.writeTestResult(env.MessageID, protocol.TestResult{
+			Status: "rejected", Error: "cable-test window already active",
+			StartedAt: s.clk.Now().UTC(), FinishedAt: s.clk.Now().UTC(),
+		})
+		return
+	}
+	if req.Op == protocol.OpCableTestWindowEnd && !s.cableWindowActive {
+		s.writeTestResult(env.MessageID, protocol.TestResult{
+			Status: "rejected", Error: "cable-test window is not active",
+			StartedAt: s.clk.Now().UTC(), FinishedAt: s.clk.Now().UTC(),
+		})
+		return
+	}
 	if req.Op == protocol.OpCableTestWindowStart {
 		var p protocol.CableTestWindowParams
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.IdleTimeoutMs <= 0 {
@@ -66,7 +80,7 @@ func (s *session) handleTestRequest(env *protocol.Envelope) {
 		s.conn.SetIdleTimeout(time.Duration(p.IdleTimeoutMs) * time.Millisecond)
 		s.cableWindowActive = true
 		if s.cfg.OnCableTestWindow != nil {
-			s.cfg.OnCableTestWindow(true)
+			_ = s.cfg.OnCableTestWindow(true)
 		}
 	}
 	s.startOp(env.MessageID, req)
@@ -135,6 +149,32 @@ func (s *session) startOp(reqID string, req *protocol.TestRequest) {
 // releases the single-op slot.
 func (s *session) handleOpDone(ev evOpDone) {
 	res := ev.res
+	s.opMu.Lock()
+	opName := ""
+	if s.activeOp != nil && s.activeOp.reqID == ev.reqID {
+		opName = s.activeOp.op
+		s.activeOp = nil
+	}
+	s.opMu.Unlock()
+
+	if opName == protocol.OpCableTestWindowEnd {
+		var carrierEvents uint64
+		if s.cfg.OnCableTestWindow != nil {
+			carrierEvents = s.cfg.OnCableTestWindow(false)
+		}
+		s.cableWindowActive = false
+		s.conn.SetIdleTimeout(s.cfg.idleTimeout())
+		ev.resultPayload = protocol.CableTestWindowResult{
+			SelfInflictedCarrierEvents: carrierEvents,
+		}
+	} else if opName == protocol.OpCableTestWindowStart && res.Status != "ok" {
+		if s.cfg.OnCableTestWindow != nil {
+			_ = s.cfg.OnCableTestWindow(false)
+		}
+		s.cableWindowActive = false
+		s.conn.SetIdleTimeout(s.cfg.idleTimeout())
+	}
+
 	if ev.resultPayload != nil {
 		raw, err := json.Marshal(ev.resultPayload)
 		if err != nil {
@@ -146,20 +186,6 @@ func (s *session) handleOpDone(ev evOpDone) {
 		}
 	}
 	s.writeTestResult(ev.reqID, res)
-	s.opMu.Lock()
-	opName := ""
-	if s.activeOp != nil && s.activeOp.reqID == ev.reqID {
-		opName = s.activeOp.op
-		s.activeOp = nil
-	}
-	s.opMu.Unlock()
-	if opName == protocol.OpCableTestWindowEnd {
-		s.conn.SetIdleTimeout(s.cfg.idleTimeout())
-		if s.cableWindowActive && s.cfg.OnCableTestWindow != nil {
-			s.cfg.OnCableTestWindow(false)
-		}
-		s.cableWindowActive = false
-	}
 }
 
 // handleOpProgress forwards one throttled executor progress update.

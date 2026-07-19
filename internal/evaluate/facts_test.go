@@ -155,45 +155,78 @@ func TestCounterDelta(t *testing.T) {
 	})
 }
 
-// TestCableTestWindowEventsExcludedFromPHY03AndPHY04 verifies the evaluator
-// removes the diagnostic's expected link transitions from both carrier-reset
-// and renegotiation evidence.
-func TestCableTestWindowEventsExcludedFromPHY03AndPHY04(t *testing.T) {
+// TestPC2SelfInflictedCableFlapDoesNotFirePHY03 verifies the worker's own
+// window count is subtracted only from the worker's reset counter.
+func TestPC2SelfInflictedCableFlapDoesNotFirePHY03(t *testing.T) {
 	before := snap(map[string]uint64{"link_resets": 10})
 	after := snap(map[string]uint64{"link_resets": 12})
-	after.CapturedAt = before.CapturedAt.Add(10 * time.Second)
-	windowAt := before.CapturedAt.Add(5 * time.Second)
 	report := &model.Report{
-		InitialCounters: model.PeerCounters{PC1: &before},
-		FinalCounters:   model.PeerCounters{PC1: &after},
-		MonitoringEvents: []model.MonitoringEvent{
-			{At: windowAt, Type: "carrier_lost", Detail: "self-inflicted cable-test window", SelfInflicted: true},
-			{At: windowAt, Type: "carrier_restored", Detail: "self-inflicted cable-test window", SelfInflicted: true},
-			{At: windowAt, Type: "renegotiation", Detail: "self-inflicted cable-test window", SelfInflicted: true},
-		},
+		InitialCounters: model.PeerCounters{PC2: &before},
+		FinalCounters:   model.PeerCounters{PC2: &after},
+		Tests: model.TestsSection{CableTest: &model.CableTestResult{
+			Available:                  true,
+			SelfInflictedCarrierEvents: model.PeerCarrierEvents{PC2: 2},
+		}},
 	}
 	facts := FactsFromReport(report)
-	if facts.PC1.CarrierEvents != 0 {
-		t.Errorf("CarrierEvents = %d, want 0 after excluding cable-test transitions", facts.PC1.CarrierEvents)
+	if facts.PC2.CarrierEvents != 0 {
+		t.Errorf("PC2.CarrierEvents = %d, want 0 after subtracting its cable-test flap", facts.PC2.CarrierEvents)
 	}
-	if facts.Renegotiations != 0 {
-		t.Errorf("Renegotiations = %d, want 0 after excluding cable-test window", facts.Renegotiations)
+	if finding := ruleByID(t, "PHY-03").Evaluate(facts); finding != nil {
+		t.Errorf("PHY-03 = %+v, want no self-inflicted finding", finding)
 	}
-	for _, id := range []string{"PHY-03", "PHY-04"} {
-		if finding := ruleByID(t, id).Evaluate(facts); finding != nil {
-			t.Errorf("%s = %+v, want no self-inflicted finding", id, finding)
-		}
-	}
+}
 
-	// The production plan runs cable diagnostics after final counters. Such
-	// later tagged events must not subtract an earlier ordinary reset that is
-	// genuinely inside the counter interval.
-	after.Standard["link_resets"] = 11
-	report.MonitoringEvents[0].At = after.CapturedAt.Add(time.Second)
-	report.MonitoringEvents[1].At = after.CapturedAt.Add(time.Second)
-	lateFacts := FactsFromReport(report)
-	if lateFacts.PC1.CarrierEvents != 1 {
-		t.Errorf("late-window CarrierEvents = %d, want earlier ordinary reset retained", lateFacts.PC1.CarrierEvents)
+func TestPC2GenuineCarrierFaultStillFiresPHY03(t *testing.T) {
+	before := snap(map[string]uint64{"link_resets": 10})
+	after := snap(map[string]uint64{"link_resets": 13})
+	report := &model.Report{
+		InitialCounters: model.PeerCounters{PC2: &before},
+		FinalCounters:   model.PeerCounters{PC2: &after},
+		Tests: model.TestsSection{CableTest: &model.CableTestResult{
+			Available:                  true,
+			SelfInflictedCarrierEvents: model.PeerCarrierEvents{PC2: 2},
+		}},
+	}
+	facts := FactsFromReport(report)
+	if facts.PC2.CarrierEvents != 1 {
+		t.Errorf("PC2.CarrierEvents = %d, want one genuine reset retained", facts.PC2.CarrierEvents)
+	}
+	if finding := ruleByID(t, "PHY-03").Evaluate(facts); finding == nil {
+		t.Errorf("PHY-03 = nil, want genuine PC2 carrier fault finding")
+	}
+}
+
+func TestCableWindowCarrierCountsIgnorePeerClockSkew(t *testing.T) {
+	before := snap(map[string]uint64{"link_resets": 20})
+	after := snap(map[string]uint64{"link_resets": 22})
+	before.CapturedAt = time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)
+	after.CapturedAt = before.CapturedAt.Add(time.Second)
+	report := &model.Report{
+		InitialCounters: model.PeerCounters{PC2: &before},
+		FinalCounters:   model.PeerCounters{PC2: &after},
+		MonitoringEvents: []model.MonitoringEvent{{
+			At: before.CapturedAt.Add(-12 * time.Hour), Type: "carrier_lost", SelfInflicted: true,
+		}},
+		Tests: model.TestsSection{CableTest: &model.CableTestResult{
+			Available:                  true,
+			SelfInflictedCarrierEvents: model.PeerCarrierEvents{PC2: 2},
+		}},
+	}
+	if got := FactsFromReport(report).PC2.CarrierEvents; got != 0 {
+		t.Errorf("PC2.CarrierEvents = %d under skewed clocks, want 0 from explicit worker count", got)
+	}
+}
+
+func TestRequestedTDRUnavailabilityIsReportedAsLimitation(t *testing.T) {
+	facts := FactsFromReport(&model.Report{Tests: model.TestsSection{
+		CableTest: &model.CableTestResult{
+			Available:            true,
+			TDRUnavailableReason: "driver does not support cable test",
+		},
+	}})
+	if !slices.Contains(facts.Unavailable, "cable_test_tdr") {
+		t.Errorf("Unavailable = %q, want cable_test_tdr limitation", facts.Unavailable)
 	}
 }
 

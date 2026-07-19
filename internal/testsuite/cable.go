@@ -2,6 +2,7 @@ package testsuite
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -46,6 +47,8 @@ func (t *CableTester) Run(ctx context.Context, tdr bool) (model.CableTestResult,
 	if tdrResult.Available {
 		base.Samples = tdrResult.Samples
 		base.UnparsedLines = tdrResult.UnparsedLines
+	} else {
+		base.TDRUnavailableReason = tdrResult.UnavailableReason
 	}
 	return base, nil
 }
@@ -93,8 +96,9 @@ type CablePlan struct {
 	NormalIdleTimeout time.Duration
 	// BeginWindow marks local monitor events self-inflicted.
 	BeginWindow func()
-	// EndWindow clears the local monitor annotation.
-	EndWindow func()
+	// EndWindow clears the local monitor annotation and returns PC1's locally
+	// observed carrier transitions.
+	EndWindow func() uint64
 	// OnStep announces the appended cable diagnostic step when non-nil.
 	OnStep func(step, total int, name string)
 	// Step is the appended step's 1-based index.
@@ -125,7 +129,10 @@ func (p *CablePlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 	windowStarted := false
 	defer func() {
 		if windowStarted && p.EndWindow != nil {
-			p.EndWindow()
+			carrierEvents := p.EndWindow()
+			if p.Results.CableTest != nil {
+				p.Results.CableTest.SelfInflictedCarrierEvents.PC1 = carrierEvents
+			}
 		}
 		rc.SetIdleTimeout(normalTimeout)
 	}()
@@ -163,6 +170,14 @@ func (p *CablePlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 			note += ": " + end.Error
 		}
 		p.Results.Notes = append(p.Results.Notes, note)
+	} else {
+		var peerWindow protocol.CableTestWindowResult
+		if err := json.Unmarshal(end.Result, &peerWindow); err != nil {
+			p.Results.Notes = append(p.Results.Notes,
+				"cable-test peer window result was malformed: "+err.Error())
+		} else {
+			p.Results.CableTest.SelfInflictedCarrierEvents.PC2 = peerWindow.SelfInflictedCarrierEvents
+		}
 	}
 	return nil
 }

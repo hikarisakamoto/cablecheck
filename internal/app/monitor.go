@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 	"sync"
 
 	"cablecheck/internal/model"
@@ -53,15 +51,7 @@ func (a *App) startLinkMonitor(ctx context.Context, ifName string) {
 		once.Do(func() {
 			cancel()
 			wg.Wait()
-			before := m.Current()
-			after := network.ReadLinkSnapshot(a.sysfsRoot, ifName)
-			after.At = a.deps.Clock.Now()
-			finalEvents := finalLinkEvents(before, after)
-			if len(finalEvents) > 0 {
-				a.monitorMu.Lock()
-				a.monitorFinalEvents = append(a.monitorFinalEvents, finalEvents...)
-				a.monitorMu.Unlock()
-			}
+			m.FinalPoll()
 		})
 	}
 }
@@ -87,16 +77,15 @@ func (a *App) stopLinkMonitor() {
 func (a *App) monitoringEvents() []model.MonitoringEvent {
 	a.monitorMu.Lock()
 	m := a.monitor
-	finalEvents := append([]model.MonitoringEvent(nil), a.monitorFinalEvents...)
 	a.monitorMu.Unlock()
 	if m == nil {
 		return nil
 	}
 	hist := m.History()
-	if len(hist) == 0 && len(finalEvents) == 0 {
+	if len(hist) == 0 {
 		return nil
 	}
-	events := make([]model.MonitoringEvent, 0, len(hist)+len(finalEvents))
+	events := make([]model.MonitoringEvent, 0, len(hist))
 	for _, e := range hist {
 		events = append(events, model.MonitoringEvent{
 			At:            e.At.UTC(),
@@ -105,59 +94,17 @@ func (a *App) monitoringEvents() []model.MonitoringEvent {
 			SelfInflicted: e.SelfInflicted,
 		})
 	}
-	events = append(events, finalEvents...)
 	return events
 }
 
 // setCableTestWindow toggles self-inflicted annotation on the running link
 // monitor. It is safe before monitoring starts and after it stops.
-func (a *App) setCableTestWindow(active bool) {
+func (a *App) setCableTestWindow(active bool) uint64 {
 	a.monitorMu.Lock()
 	m := a.monitor
 	a.monitorMu.Unlock()
 	if m != nil {
-		m.SetCableTestWindow(active)
+		return m.SetCableTestWindow(active)
 	}
-}
-
-// finalLinkEvents mirrors the monitor's interval change detection for the one
-// teardown snapshot taken after its polling goroutine has stopped.
-func finalLinkEvents(before, after network.LinkSnapshot) []model.MonitoringEvent {
-	var events []model.MonitoringEvent
-	add := func(eventType, detail string) {
-		events = append(events, model.MonitoringEvent{At: after.At.UTC(), Type: eventType, Detail: detail})
-	}
-
-	if before.Carrier == 1 && after.Carrier == 0 {
-		add(string(network.CarrierLost), "carrier down (link lost)")
-	} else if before.Carrier == 0 && after.Carrier == 1 {
-		add(string(network.CarrierRestored), "carrier up (link restored)")
-	}
-
-	speedChanged := before.SpeedMbps >= 0 && after.SpeedMbps >= 0 && before.SpeedMbps != after.SpeedMbps
-	if speedChanged {
-		add(string(network.SpeedChanged), fmt.Sprintf("speed %dMb/s -> %dMb/s", before.SpeedMbps, after.SpeedMbps))
-	}
-	duplexChanged := knownDuplex(before.Duplex) && knownDuplex(after.Duplex) && before.Duplex != after.Duplex
-	if duplexChanged {
-		add(string(network.DuplexChanged), "duplex "+before.Duplex+" -> "+after.Duplex)
-	}
-	if before.Operstate != after.Operstate {
-		add(string(network.OperstateChanged), "operstate "+before.Operstate+" -> "+after.Operstate)
-	}
-
-	flap := after.CarrierChanges >= before.CarrierChanges+2
-	if flap || before.Carrier == 1 && after.Carrier == 1 && (speedChanged || duplexChanged) {
-		detail := "renegotiation without carrier drop"
-		if flap {
-			detail = "sub-interval link flap (carrier_changes +" +
-				strconv.FormatUint(after.CarrierChanges-before.CarrierChanges, 10) + ")"
-		}
-		add(string(network.Renegotiation), detail)
-	}
-	return events
-}
-
-func knownDuplex(duplex string) bool {
-	return duplex == "full" || duplex == "half"
+	return 0
 }

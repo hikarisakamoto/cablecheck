@@ -179,14 +179,15 @@ type Monitor struct {
 	clk       clock.Clock
 	sysfsRoot string
 
-	ch              chan LinkEvent
-	dropped         atomic.Uint64
-	cableTestWindow atomic.Bool
+	ch      chan LinkEvent
+	dropped atomic.Uint64
 
-	mu      sync.Mutex
-	last    *LinkSnapshot
-	current LinkSnapshot
-	history []LinkEvent
+	mu                  sync.Mutex
+	last                *LinkSnapshot
+	current             LinkSnapshot
+	history             []LinkEvent
+	cableTestWindow     bool
+	windowCarrierEvents uint64
 }
 
 // MonitorOption customizes a Monitor at construction.
@@ -241,10 +242,10 @@ func (m *Monitor) Run(ctx context.Context) error {
 // poll reads a fresh snapshot, records it as current, and emits any events the
 // change from the previous snapshot implies.
 func (m *Monitor) poll() {
+	m.mu.Lock()
 	snap := ReadLinkSnapshot(m.sysfsRoot, m.ifName)
 	snap.At = m.clk.Now()
 
-	m.mu.Lock()
 	prev := m.last
 	m.current = snap
 	stored := snap
@@ -252,10 +253,13 @@ func (m *Monitor) poll() {
 	var events []LinkEvent
 	if prev != nil {
 		events = detectEvents(*prev, snap)
-		if m.cableTestWindow.Load() {
+		if m.cableTestWindow {
 			for i := range events {
 				events[i].SelfInflicted = true
 				events[i].Detail += " (self-inflicted cable-test window)"
+			}
+			if snap.CarrierChanges >= prev.CarrierChanges {
+				m.windowCarrierEvents += snap.CarrierChanges - prev.CarrierChanges
 			}
 		}
 		m.history = append(m.history, events...)
@@ -267,10 +271,29 @@ func (m *Monitor) poll() {
 	}
 }
 
+// FinalPoll captures one last snapshot after Run has stopped so a change
+// after the last ticker interval is not lost. Window state and snapshot
+// production use the same mutex as ordinary polls.
+func (m *Monitor) FinalPoll() {
+	m.poll()
+}
+
 // SetCableTestWindow marks whether newly observed link events are expected
-// consequences of the coordinated disruptive cable diagnostic.
-func (m *Monitor) SetCableTestWindow(active bool) {
-	m.cableTestWindow.Store(active)
+// consequences of the coordinated disruptive cable diagnostic. A genuine
+// carrier fault during this explicit opt-in window is inherently ambiguous
+// and is conservatively counted as self-inflicted. The returned count is the
+// locally observed carrier transitions when closing the window.
+func (m *Monitor) SetCableTestWindow(active bool) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if active && !m.cableTestWindow {
+		m.windowCarrierEvents = 0
+	}
+	m.cableTestWindow = active
+	if active {
+		return 0
+	}
+	return m.windowCarrierEvents
 }
 
 // emit delivers an event on the buffered channel; when the buffer is full it

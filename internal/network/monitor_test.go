@@ -298,7 +298,7 @@ func TestCableTestWindowAnnotations(t *testing.T) {
 	fc.Advance(time.Second)
 	waitHistoryGrows(t, m, 0)
 
-	m.SetCableTestWindow(false)
+	windowCarrierEvents := m.SetCableTestWindow(false)
 	before := len(m.History())
 	writeLinkState(t, root, "eth0", linkState{
 		operstate: "up", carrier: "1", speed: "100", duplex: "full", carrierChanges: "22",
@@ -319,6 +319,9 @@ func TestCableTestWindowAnnotations(t *testing.T) {
 	}
 	if history[len(history)-1].SelfInflicted {
 		t.Errorf("post-window event = %+v, want ordinary event", history[len(history)-1])
+	}
+	if windowCarrierEvents != 2 {
+		t.Errorf("window carrier count = %d, want two locally observed transitions", windowCarrierEvents)
 	}
 }
 

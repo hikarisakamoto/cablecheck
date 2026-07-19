@@ -572,8 +572,10 @@ func (s *session) shutdown(spec finishSpec) (Outcome, error) {
 	if spec.farewell {
 		s.sendFarewell(spec.farewellReason, spec.farewellStage)
 	}
-	if s.cableWindowActive && s.cfg.OnCableTestWindow != nil {
-		s.cfg.OnCableTestWindow(false)
+	if s.cableWindowActive {
+		if s.cfg.OnCableTestWindow != nil {
+			_ = s.cfg.OnCableTestWindow(false)
+		}
 		s.cableWindowActive = false
 	}
 	s.conn.Close()

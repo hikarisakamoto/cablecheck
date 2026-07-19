@@ -269,6 +269,14 @@ type TDRSample struct {
 	Amplitude int `json:"amplitude"`
 }
 
+// PeerCarrierEvents records each peer's locally observed carrier transitions
+// during its own coordinated cable-test window. The values are deliberately
+// clock-independent because peer wall clocks are not synchronized.
+type PeerCarrierEvents struct {
+	PC1 uint64 `json:"pc1"`
+	PC2 uint64 `json:"pc2"`
+}
+
 // CableTestResult is the outcome of `ethtool --cable-test`. Unavailability
 // (unsupported driver, no root, old ethtool) is recorded as Available=false
 // with a reason and never counts as a cable failure.
@@ -281,6 +289,12 @@ type CableTestResult struct {
 	Pairs []CablePairResult `json:"pairs,omitempty"`
 	// Samples holds tolerant TDR reflection samples when requested.
 	Samples []TDRSample `json:"samples,omitempty"`
+	// TDRUnavailableReason explains why a requested TDR diagnostic did not
+	// run even though the base cable test was available.
+	TDRUnavailableReason string `json:"tdrUnavailableReason,omitempty"`
+	// SelfInflictedCarrierEvents holds each side's own monitor count from the
+	// disruptive cable-test window.
+	SelfInflictedCarrierEvents PeerCarrierEvents `json:"selfInflictedCarrierEvents"`
 	// UnparsedLines counts TDR data lines the tolerant parser could not
 	// decode. Headers and blank lines do not count.
 	UnparsedLines int `json:"unparsedLines,omitempty"`

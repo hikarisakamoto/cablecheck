@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner/runnertest"
@@ -25,7 +26,11 @@ func (c *cableCoordCaller) Call(_ context.Context, op string, _ any, _ time.Dura
 	if op == OpCableTestWindowEnd && c.dropEnd {
 		return nil, errors.New("control connection dropped")
 	}
-	return &protocol.TestResult{Status: StatusOK, Result: json.RawMessage(`{}`)}, nil
+	result := json.RawMessage(`{}`)
+	if op == OpCableTestWindowEnd {
+		result = json.RawMessage(`{"selfInflictedCarrierEvents":3}`)
+	}
+	return &protocol.TestResult{Status: StatusOK, Result: result}, nil
 }
 
 func (c *cableCoordCaller) Warn(code, _ string) {
@@ -73,7 +78,10 @@ func TestCableTestCoordination(t *testing.T) {
 				TDR:    tc.tdr, Results: results,
 				NormalIdleTimeout: 20 * time.Second,
 				BeginWindow:       func() { caller.events = append(caller.events, "monitor:begin") },
-				EndWindow:         func() { caller.events = append(caller.events, "monitor:end") },
+				EndWindow: func() uint64 {
+					caller.events = append(caller.events, "monitor:end")
+					return 2
+				},
 			}
 			if err := plan.Run(context.Background(), caller); err != nil {
 				t.Errorf("CablePlan.Run: %v", err)
@@ -83,6 +91,13 @@ func TestCableTestCoordination(t *testing.T) {
 			}
 			if tc.tdr && len(results.CableTest.Samples) != 5 {
 				t.Errorf("TDR samples = %+v, want five", results.CableTest.Samples)
+			}
+			wantCounts := model.PeerCarrierEvents{PC1: 2, PC2: 3}
+			if tc.dropEnd {
+				wantCounts.PC2 = 0
+			}
+			if results.CableTest.SelfInflictedCarrierEvents != wantCounts {
+				t.Errorf("carrier counts = %+v, want %+v", results.CableTest.SelfInflictedCarrierEvents, wantCounts)
 			}
 
 			wantPrefix := []string{
@@ -147,5 +162,28 @@ func TestCableTesterUsesPrivilegedWrapper(t *testing.T) {
 	}
 	if !result.Available || len(result.Pairs) != 4 {
 		t.Errorf("result = %+v, want available pair result", result)
+	}
+}
+
+func TestCableTestRequestedTDRUnavailabilityIsRecorded(t *testing.T) {
+	restoreEUID := geteuid
+	geteuid = func() int { return 0 }
+	defer func() { geteuid = restoreEUID }()
+
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("--cable-test", "eth0"),
+		Result: fixture(t, "ethtool", "cabletest_ok")})
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("--cable-test-tdr", "eth0"),
+		Result: fixture(t, "ethtool", "cabletest_unsupported")})
+
+	result, err := (&CableTester{R: fr, IfName: "eth0", SudoOK: true}).Run(context.Background(), true)
+	if err != nil {
+		t.Errorf("CableTester.Run: %v", err)
+	}
+	if !result.Available {
+		t.Errorf("base cable test Available = false, want true")
+	}
+	if result.TDRUnavailableReason != "driver does not support cable test" {
+		t.Errorf("TDRUnavailableReason = %q, want unsupported-driver reason", result.TDRUnavailableReason)
 	}
 }

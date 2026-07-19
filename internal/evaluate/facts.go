@@ -183,11 +183,15 @@ func DeltaSet(before, after *model.CounterSnapshot) (model.CounterDeltaSet, bool
 // report. It never mutates the report.
 func FactsFromReport(r *model.Report) *Facts {
 	f := &Facts{LinkUpAtEnd: true}
+	var selfInflicted model.PeerCarrierEvents
+	if r.Tests.CableTest != nil {
+		selfInflicted = r.Tests.CableTest.SelfInflictedCarrierEvents
+	}
 
 	f.PC1 = sideFacts(r.InitialCounters.PC1, r.FinalCounters.PC1,
-		selfInflictedCarrierEvents(r, r.InitialCounters.PC1, r.FinalCounters.PC1))
+		selfInflicted.PC1)
 	f.PC2 = sideFacts(r.InitialCounters.PC2, r.FinalCounters.PC2,
-		selfInflictedCarrierEvents(r, r.InitialCounters.PC2, r.FinalCounters.PC2))
+		selfInflicted.PC2)
 
 	for _, p := range r.Tests.Ping {
 		i := dirIndex(p.Direction)
@@ -539,25 +543,6 @@ func renegotiations(r *model.Report) int {
 	return n
 }
 
-// selfInflictedCarrierEvents counts expected carrier transitions observed
-// inside a coordinated cable-test window. The same physical transition is
-// subtracted from each side's link_resets delta (the evaluator already uses
-// the worse side rather than summing the peers).
-func selfInflictedCarrierEvents(r *model.Report, before, after *model.CounterSnapshot) uint64 {
-	if before == nil || after == nil || before.CapturedAt.IsZero() || after.CapturedAt.IsZero() {
-		return 0
-	}
-	var n uint64
-	for _, ev := range r.MonitoringEvents {
-		insideCounters := !ev.At.Before(before.CapturedAt) && !ev.At.After(after.CapturedAt)
-		if insideCounters && ev.SelfInflicted &&
-			(ev.Type == "carrier_lost" || ev.Type == "carrier_restored") {
-			n++
-		}
-	}
-	return n
-}
-
 // maxCPUPct returns the maximum host/remote CPU utilization across every
 // throughput test in the report.
 func maxCPUPct(r *model.Report) float64 {
@@ -604,6 +589,8 @@ func unavailableTests(r *model.Report) []string {
 	}
 	if ct := r.Tests.CableTest; ct != nil && !ct.Available {
 		add("cable_test")
+	} else if ct != nil && ct.TDRUnavailableReason != "" {
+		add("cable_test_tdr")
 	}
 	return names
 }

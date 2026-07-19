@@ -91,6 +91,7 @@ type Conn struct {
 	wmu         sync.Mutex    // serializes WriteEnvelope
 	maxFrame    uint32
 	writeTO     time.Duration
+	deadlineMu  sync.Mutex   // serializes idleTimeout with the active read deadline
 	idleTimeout atomic.Int64 // nanoseconds; mutable for cable-test link-loss windows
 	closeOnce   sync.Once
 	closeErr    error
@@ -139,8 +140,11 @@ func (c *Conn) ReadEnvelope() (*Envelope, error) {
 // readEnvelope reads and decodes exactly one frame; ReadEnvelope wraps it
 // with the poison-on-error bookkeeping.
 func (c *Conn) readEnvelope() (*Envelope, error) {
+	c.deadlineMu.Lock()
 	deadline := wallClock.Now().Add(time.Duration(c.idleTimeout.Load()))
-	if err := c.nc.SetReadDeadline(deadline); err != nil {
+	err := c.nc.SetReadDeadline(deadline)
+	c.deadlineMu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	var hdr [4]byte
@@ -201,6 +205,8 @@ func (c *Conn) WriteEnvelope(env *Envelope) error {
 // once a ReadEnvelope has timed out the connection is done (see
 // ReadEnvelope); there is no timeout-and-retry pattern.
 func (c *Conn) SetIdleTimeout(d time.Duration) {
+	c.deadlineMu.Lock()
+	defer c.deadlineMu.Unlock()
 	c.idleTimeout.Store(int64(d))
 	_ = c.nc.SetReadDeadline(wallClock.Now().Add(d))
 }

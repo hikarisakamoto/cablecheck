@@ -351,7 +351,7 @@ func (a *App) wrapCablePlan(base peer.PlanFunc, steps []string, ops *testsuite.O
 		Base: base, Tester: ops.Cable, TDR: a.cfg.CableTestTDR, Results: results,
 		NormalIdleTimeout: a.idleTimeout,
 		BeginWindow:       func() { a.setCableTestWindow(true) },
-		EndWindow:         func() { a.setCableTestWindow(false) },
+		EndWindow:         func() uint64 { return a.setCableTestWindow(false) },
 		OnStep:            a.deps.OnStep,
 		Step:              len(steps),
 		Total:             len(steps),

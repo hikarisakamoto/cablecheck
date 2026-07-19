@@ -191,6 +191,12 @@ type CableTestWindowParams struct {
 	IdleTimeoutMs int64 `json:"idleTimeoutMs"`
 }
 
+// CableTestWindowResult reports the worker monitor's local observations when
+// the coordinated disruptive window closes.
+type CableTestWindowResult struct {
+	SelfInflictedCarrierEvents uint64 `json:"selfInflictedCarrierEvents"`
+}
+
 // TestProgress streams progress for an in-flight op (PC2 → PC1);
 // Envelope.InReplyTo carries the request's MessageID.
 type TestProgress struct {
