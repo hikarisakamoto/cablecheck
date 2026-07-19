@@ -71,6 +71,46 @@ func TestBuildSuiteSelectsPlanByMode(t *testing.T) {
 	}
 }
 
+// TestCableTestPlanOptIn verifies the disruptive step is absent by default
+// and appended exactly once for every mode when explicitly requested.
+func TestCableTestPlanOptIn(t *testing.T) {
+	for _, mode := range []config.Mode{config.ModeQuick, config.ModeStandard, config.ModeSoak} {
+		t.Run(string(mode), func(t *testing.T) {
+			cfg := &config.RunConfig{
+				Role: config.RolePC1, LocalIP: netip.MustParseAddr("127.0.0.1"),
+				PeerIP: netip.MustParseAddr("127.0.0.2"), Mode: mode,
+				Token: "testtoken1234", CableTest: true,
+				TCPDuration: time.Minute, UDPDuration: 30 * time.Second,
+				ParallelStreams: 4, PingCount: 100, TCPRepeats: 2,
+				SoakDuration: time.Hour, SoakLoad: config.SoakLoadPeriodic,
+			}
+			a, err := New(cfg, Deps{StateDir: t.TempDir()})
+			if err != nil {
+				t.Errorf("New: %v", err)
+				return
+			}
+			pf := &preflightInfo{}
+			pf.Iface.Name = "eth0"
+			s := a.buildSuite(pf, t.TempDir(), "cable-plan", slog.Default())
+			if got := s.steps[len(s.steps)-1]; got != "cable diagnostics" {
+				t.Errorf("last step = %q, want cable diagnostics", got)
+			}
+			var base int
+			switch mode {
+			case config.ModeStandard:
+				base = len(testsuite.StandardPlanSteps())
+			case config.ModeSoak:
+				base = len(testsuite.SoakPlanSteps())
+			default:
+				base = len(testsuite.QuickPlanSteps())
+			}
+			if len(s.steps) != base+1 {
+				t.Errorf("steps = %q, want base length %d plus one", s.steps, base)
+			}
+		})
+	}
+}
+
 // TestSoakReportReflectsModeAndCycles pins that a soak run's report echoes the
 // soak mode and configuration and reports the number of completed cycles, so
 // the report reflects what actually ran rather than only the requested mode.

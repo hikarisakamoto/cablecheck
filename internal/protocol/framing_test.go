@@ -31,6 +31,42 @@ func pipeConns(t *testing.T) (a, b *protocol.Conn) {
 	return a, b
 }
 
+type deadlineConn struct {
+	net.Conn
+	readDeadlines chan time.Time
+}
+
+func (c *deadlineConn) SetReadDeadline(deadline time.Time) error {
+	c.readDeadlines <- deadline
+	return c.Conn.SetReadDeadline(deadline)
+}
+
+// TestSetIdleTimeoutWidensActiveRead pins the cable-test requirement that a
+// read already blocked in the session loop is widened immediately, not only
+// the next ReadEnvelope call.
+func TestSetIdleTimeoutWidensActiveRead(t *testing.T) {
+	left, right := net.Pipe()
+	recorded := &deadlineConn{Conn: left, readDeadlines: make(chan time.Time, 2)}
+	conn := protocol.NewConn(recorded)
+	t.Cleanup(func() {
+		conn.Close()
+		right.Close()
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := conn.ReadEnvelope()
+		done <- err
+	}()
+	first := <-recorded.readDeadlines
+	conn.SetIdleTimeout(2 * time.Minute)
+	second := <-recorded.readDeadlines
+	if !second.After(first.Add(time.Minute)) {
+		t.Errorf("widened deadline = %v, initial = %v; want active read extended", second, first)
+	}
+	conn.Close()
+	<-done
+}
+
 // writeRawFrame writes a length-prefixed frame around body to w. It reports
 // failures via t.Errorf only, so it is safe from non-test goroutines.
 func writeRawFrame(t *testing.T, w io.Writer, body []byte) {

@@ -135,20 +135,21 @@ type session struct {
 	stdinFile *os.File
 
 	// Loop-owned state (no locking: single goroutine).
-	localReady   bool
-	peerReady    bool
-	sentComplete bool
-	peerComplete *protocol.Complete
-	peerHB       *protocol.Heartbeat
-	peerHBAt     time.Time
-	lastRecvAt   time.Time
-	invalidState int
-	countdown    []countdownStep
-	countdownC   <-chan time.Time
-	transfer     chan *protocol.Envelope
-	transferOn   bool
-	transferRan  bool
-	fin          *finishSpec
+	localReady        bool
+	peerReady         bool
+	sentComplete      bool
+	peerComplete      *protocol.Complete
+	peerHB            *protocol.Heartbeat
+	peerHBAt          time.Time
+	lastRecvAt        time.Time
+	invalidState      int
+	cableWindowActive bool
+	countdown         []countdownStep
+	countdownC        <-chan time.Time
+	transfer          chan *protocol.Envelope
+	transferOn        bool
+	transferRan       bool
+	fin               *finishSpec
 }
 
 // activeOp is the handle of the worker's in-flight operation.
@@ -570,6 +571,10 @@ func (s *session) shutdown(spec finishSpec) (Outcome, error) {
 	}
 	if spec.farewell {
 		s.sendFarewell(spec.farewellReason, spec.farewellStage)
+	}
+	if s.cableWindowActive && s.cfg.OnCableTestWindow != nil {
+		s.cfg.OnCableTestWindow(false)
+		s.cableWindowActive = false
 	}
 	s.conn.Close()
 	s.closePendingCalls()

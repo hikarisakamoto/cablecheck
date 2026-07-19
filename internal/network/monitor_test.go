@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -272,6 +273,52 @@ func TestRenegotiationByCarrierChanges(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("Renegotiation count = %d, want exactly 1 (history %v)", n, typesOf(hist))
+	}
+}
+
+// TestCableTestWindowAnnotations verifies monitor events observed inside the
+// disruptive diagnostic window are explicitly tagged and annotated, while
+// later ordinary events are not.
+func TestCableTestWindowAnnotations(t *testing.T) {
+	root := t.TempDir()
+	fc := clocktest.New(time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC))
+	writeLinkState(t, root, "eth0", linkState{
+		operstate: "up", carrier: "1", speed: "1000", duplex: "full", carrierChanges: "20",
+	})
+	m := NewMonitor("eth0", time.Second, fc, WithSysfsRoot(root))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- m.Run(ctx) }()
+
+	m.SetCableTestWindow(true)
+	writeLinkState(t, root, "eth0", linkState{
+		operstate: "up", carrier: "1", speed: "1000", duplex: "full", carrierChanges: "22",
+	})
+	fc.BlockUntilWaiters(1)
+	fc.Advance(time.Second)
+	waitHistoryGrows(t, m, 0)
+
+	m.SetCableTestWindow(false)
+	before := len(m.History())
+	writeLinkState(t, root, "eth0", linkState{
+		operstate: "up", carrier: "1", speed: "100", duplex: "full", carrierChanges: "22",
+	})
+	fc.BlockUntilWaiters(1)
+	fc.Advance(time.Second)
+	waitHistoryGrows(t, m, before)
+
+	cancel()
+	<-done
+	history := m.History()
+	if len(history) < 2 {
+		t.Errorf("history = %+v, want window renegotiation and ordinary speed change", history)
+		return
+	}
+	if !history[0].SelfInflicted || !strings.Contains(history[0].Detail, "self-inflicted cable-test window") {
+		t.Errorf("window event = %+v, want self-inflicted annotation", history[0])
+	}
+	if history[len(history)-1].SelfInflicted {
+		t.Errorf("post-window event = %+v, want ordinary event", history[len(history)-1])
 	}
 }
 

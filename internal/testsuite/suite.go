@@ -48,6 +48,9 @@ type SessionResults struct {
 	Bidir *model.BidirResult
 	// UDP holds the UDP loss/jitter results, one per direction.
 	UDP []model.UDPResult
+	// CableTest holds the opt-in local ethtool pair/TDR diagnostic. It stays
+	// nil when the feature is off.
+	CableTest *model.CableTestResult
 	// UDPRateAssumed reports that the UDP target rate was assumed (100M
 	// fallback) because the negotiated link speed was unknown; the
 	// evaluator soft-pedals UDP findings on it.

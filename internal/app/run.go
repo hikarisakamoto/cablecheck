@@ -83,23 +83,24 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	defer a.stopLinkMonitor()
 
 	pcfg := peer.Config{
-		Role:             peer.Role(a.cfg.Role),
-		LocalIP:          a.cfg.LocalIP,
-		PeerIP:           a.cfg.PeerIP,
-		ControlPort:      a.controlPort,
-		Token:            a.cfg.Token,
-		NonInteractive:   a.cfg.NonInteractive,
-		NoReportTransfer: a.cfg.NoReportTransfer,
-		Version:          a.deps.Build.Version,
-		Caps:             pf.Caps,
-		Clock:            clk,
-		Logger:           log,
-		Stdin:            a.deps.Stdin,
-		Stdout:           a.deps.Stdout,
-		Mode:             string(a.cfg.Mode),
-		Steps:            s.steps,
-		Complete:         v.complete,
-		OnHandshake:      a.setSessionTestID,
+		Role:              peer.Role(a.cfg.Role),
+		LocalIP:           a.cfg.LocalIP,
+		PeerIP:            a.cfg.PeerIP,
+		ControlPort:       a.controlPort,
+		Token:             a.cfg.Token,
+		NonInteractive:    a.cfg.NonInteractive,
+		NoReportTransfer:  a.cfg.NoReportTransfer,
+		Version:           a.deps.Build.Version,
+		Caps:              pf.Caps,
+		Clock:             clk,
+		Logger:            log,
+		Stdin:             a.deps.Stdin,
+		Stdout:            a.deps.Stdout,
+		Mode:              string(a.cfg.Mode),
+		Steps:             s.steps,
+		Complete:          v.complete,
+		OnHandshake:       a.setSessionTestID,
+		OnCableTestWindow: a.setCableTestWindow,
 		OnState: func(_, to peer.State) {
 			// Start the sysfs link monitor exactly when the testing phase
 			// begins, so its clock ticker registers after the countdown timer.
@@ -240,6 +241,7 @@ func (a *App) buildSuite(pf *preflightInfo, rawDir, tag string, log *slog.Logger
 		Link:      &testsuite.LinkInspector{R: r, IfName: pf.Iface.Name, RawDir: rawDir},
 		Ping:      &testsuite.PingTester{R: r, RawDir: rawDir},
 		Iperf:     &testsuite.IperfManager{R: r, Reg: registrar, RawDir: rawDir, Clock: clk, TestID: tag},
+		Cable:     &testsuite.CableTester{R: r, IfName: pf.Iface.Name, RawDir: rawDir, SudoOK: pf.SudoOK},
 		MTU:       pf.Iface.MTU,
 		IperfCaps: pf.LocalIperfCaps,
 	}
@@ -277,9 +279,9 @@ func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuit
 			PingCount:      a.cfg.PingCount,
 			LocalIperfCaps: pf.LocalIperfCaps,
 			Results:        results,
-			OnStep:         a.deps.OnStep,
+			OnStep:         a.baseStepObserver(),
 		}
-		return p.Run, testsuite.StandardPlanSteps()
+		return a.wrapCablePlan(p.Run, testsuite.StandardPlanSteps(), ops, results)
 	case config.ModeSoak:
 		p := &testsuite.SoakPlan{
 			Ops:            ops,
@@ -300,9 +302,9 @@ func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuit
 			CycleGap:       a.soakCycleGap(),
 			EventSource:    a.monitorEventSnapshot,
 			Results:        results,
-			OnStep:         a.deps.OnStep,
+			OnStep:         a.baseStepObserver(),
 		}
-		return p.Run, testsuite.SoakPlanSteps()
+		return a.wrapCablePlan(p.Run, testsuite.SoakPlanSteps(), ops, results)
 	default:
 		p := &testsuite.QuickPlan{
 			Ops:            ops,
@@ -317,10 +319,44 @@ func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuit
 			PingCount:      a.cfg.PingCount,
 			LocalIperfCaps: pf.LocalIperfCaps,
 			Results:        results,
-			OnStep:         a.deps.OnStep,
+			OnStep:         a.baseStepObserver(),
 		}
-		return p.Run, testsuite.QuickPlanSteps()
+		return a.wrapCablePlan(p.Run, testsuite.QuickPlanSteps(), ops, results)
 	}
+}
+
+// baseStepObserver adjusts base-mode progress totals when the opt-in cable
+// diagnostic appends one final plan step.
+func (a *App) baseStepObserver() func(step, total int, name string) {
+	if a.deps.OnStep == nil {
+		return nil
+	}
+	if !a.cfg.CableTest {
+		return a.deps.OnStep
+	}
+	return func(step, total int, name string) {
+		a.deps.OnStep(step, total+1, name)
+	}
+}
+
+// wrapCablePlan leaves every mode untouched when diagnostics are disabled;
+// when enabled it appends the coordinated disruptive step and display name.
+func (a *App) wrapCablePlan(base peer.PlanFunc, steps []string, ops *testsuite.Ops,
+	results *testsuite.SessionResults) (peer.PlanFunc, []string) {
+	if !a.cfg.CableTest {
+		return base, steps
+	}
+	steps = append(append([]string(nil), steps...), "cable diagnostics")
+	plan := &testsuite.CablePlan{
+		Base: base, Tester: ops.Cable, TDR: a.cfg.CableTestTDR, Results: results,
+		NormalIdleTimeout: a.idleTimeout,
+		BeginWindow:       func() { a.setCableTestWindow(true) },
+		EndWindow:         func() { a.setCableTestWindow(false) },
+		OnStep:            a.deps.OnStep,
+		Step:              len(steps),
+		Total:             len(steps),
+	}
+	return plan.Run, steps
 }
 
 // soakCycleGap is the periodic soak load profile's idle window between test

@@ -1,0 +1,6 @@
+Cable test started for device eth0.
+Cable test completed for device eth0.
+Pair A code OK
+Pair B code OK
+Pair C code OK
+Pair D code OK

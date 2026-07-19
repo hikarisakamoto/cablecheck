@@ -76,6 +76,52 @@ func TestRulePHY02CRCBands(t *testing.T) {
 	}
 }
 
+// TestRulePHY08PairFaults pins the severity ladder for direct cable-test
+// evidence and verifies unavailable diagnostics never become a fault.
+func TestRulePHY08PairFaults(t *testing.T) {
+	rule := ruleByID(t, "PHY-08")
+
+	t.Run("open and short are failed with distance evidence", func(t *testing.T) {
+		for _, status := range []model.PairStatus{model.PairOpen, model.PairShortIntra, model.PairShortInter} {
+			f := FactsFromReport(&model.Report{Tests: model.TestsSection{CableTest: &model.CableTestResult{
+				Available: true,
+				Pairs: []model.CablePairResult{{
+					Pair: "C", Status: status, HasFault: true, FaultMeters: 32,
+				}},
+			}}})
+			finding := rule.Evaluate(f)
+			if finding == nil || finding.Severity != model.SevFailed {
+				t.Errorf("PHY-08(%s) = %+v, want FAILED-tier finding", status, finding)
+				continue
+			}
+			if !strings.Contains(strings.Join(finding.Evidence, " "), "32.0m") {
+				t.Errorf("PHY-08(%s) evidence = %q, want fault distance", status, finding.Evidence)
+			}
+		}
+	})
+
+	t.Run("impedance is poor and unspecified warns", func(t *testing.T) {
+		for _, tc := range []struct {
+			status model.PairStatus
+			want   model.Severity
+		}{{model.PairImpedance, model.SevPoor}, {model.PairUnspecified, model.SevWarning}} {
+			finding := rule.Evaluate(&Facts{CableTestRan: true, CableTestPairs: []model.CablePairResult{{Pair: "A", Status: tc.status}}})
+			if finding == nil || finding.Severity != tc.want {
+				t.Errorf("PHY-08(%s) = %+v, want severity %v", tc.status, finding, tc.want)
+			}
+		}
+	})
+
+	t.Run("unavailable is not a fault", func(t *testing.T) {
+		f := FactsFromReport(&model.Report{Tests: model.TestsSection{CableTest: &model.CableTestResult{
+			Available: false, UnavailableReason: "driver does not support cable test",
+		}}})
+		if finding := rule.Evaluate(f); finding != nil {
+			t.Errorf("PHY-08(unavailable) = %+v, want no fault", finding)
+		}
+	})
+}
+
 func TestRuleTR01PingLoss(t *testing.T) {
 	rule := ruleByID(t, "TR-01")
 	cases := []struct {

@@ -219,6 +219,7 @@ func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResult
 			TCP:           results.TCP,
 			UDP:           results.UDP,
 			Bidirectional: results.Bidir,
+			CableTest:     results.CableTest,
 		},
 		InitialCounters:     results.InitialCounters,
 		FinalCounters:       results.FinalCounters,
@@ -258,22 +259,10 @@ func mergeMonitoringEvents(retained, monitored []model.MonitoringEvent) []model.
 	return out
 }
 
-// skippedTests names the planned tests this version cannot run yet: the quick
-// plan now runs the full traffic suite (full-size ping, UDP, bidirectional
-// stress), so only the opt-in cable diagnostics remain unimplemented.
+// skippedTests returns app-level static skips. Runtime unavailable tests are
+// recorded by their result or the plan's SessionResults.
 func (a *App) skippedTests() []model.SkippedTest {
-	var skipped []model.SkippedTest
-	if a.cfg.CableTest {
-		skipped = append(skipped, model.SkippedTest{
-			Name: "cable_test", Reason: "cable diagnostics are not implemented in this version",
-		})
-	}
-	if a.cfg.CableTestTDR {
-		skipped = append(skipped, model.SkippedTest{
-			Name: "cable_test_tdr", Reason: "cable diagnostics are not implemented in this version",
-		})
-	}
-	return skipped
+	return nil
 }
 
 // peerReportFromCaps converts the handshake capabilities into the peer's

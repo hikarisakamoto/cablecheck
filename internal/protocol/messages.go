@@ -174,6 +174,23 @@ type TestRequest struct {
 	TotalSteps int `json:"totalSteps"`
 }
 
+// Cable-test window operation names use the ordinary test_request/result
+// RPC path. The peer session recognizes them so it can change its own framed
+// connection timeout before acknowledging the coordinator.
+const (
+	// OpCableTestWindowStart opens the coordinated disruptive-test window.
+	OpCableTestWindowStart = "cable_test_window_start"
+	// OpCableTestWindowEnd closes the window after link recovery.
+	OpCableTestWindowEnd = "cable_test_window_end"
+)
+
+// CableTestWindowParams carries the widened per-frame idle timeout the
+// worker must install before acknowledging a disruptive cable test.
+type CableTestWindowParams struct {
+	// IdleTimeoutMs is the widened timeout in milliseconds.
+	IdleTimeoutMs int64 `json:"idleTimeoutMs"`
+}
+
 // TestProgress streams progress for an in-flight op (PC2 → PC1);
 // Envelope.InReplyTo carries the request's MessageID.
 type TestProgress struct {

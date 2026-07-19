@@ -194,14 +194,15 @@ func (c *Conn) WriteEnvelope(env *Envelope) error {
 	return nil
 }
 
-// SetIdleTimeout changes the per-frame read deadline used by subsequent
-// ReadEnvelope calls. It exists for the cable-test feature, which
-// pre-arranges a link-loss window on both sides before the link goes down —
-// widening the deadline in advance so the blocked read survives the outage.
-// It is not a polling knob: once a ReadEnvelope has timed out the connection
-// is done (see ReadEnvelope); there is no timeout-and-retry pattern.
+// SetIdleTimeout changes the per-frame read deadline and immediately updates
+// the underlying connection's active read deadline. The immediate update is
+// essential for cable-test coordination: each session normally already has
+// a ReadEnvelope blocked when the window is opened. It is not a polling knob:
+// once a ReadEnvelope has timed out the connection is done (see
+// ReadEnvelope); there is no timeout-and-retry pattern.
 func (c *Conn) SetIdleTimeout(d time.Duration) {
 	c.idleTimeout.Store(int64(d))
+	_ = c.nc.SetReadDeadline(wallClock.Now().Add(d))
 }
 
 // Close closes the underlying connection, unblocking any pending read. It

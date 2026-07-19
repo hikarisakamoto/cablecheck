@@ -53,6 +53,22 @@ func (s *session) handleTestRequest(env *protocol.Envelope) {
 		})
 		return
 	}
+	if req.Op == protocol.OpCableTestWindowStart {
+		var p protocol.CableTestWindowParams
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.IdleTimeoutMs <= 0 {
+			s.writeTestResult(env.MessageID, protocol.TestResult{
+				Status:    "rejected",
+				Error:     "invalid cable-test window timeout",
+				StartedAt: s.clk.Now().UTC(), FinishedAt: s.clk.Now().UTC(),
+			})
+			return
+		}
+		s.conn.SetIdleTimeout(time.Duration(p.IdleTimeoutMs) * time.Millisecond)
+		s.cableWindowActive = true
+		if s.cfg.OnCableTestWindow != nil {
+			s.cfg.OnCableTestWindow(true)
+		}
+	}
 	s.startOp(env.MessageID, req)
 }
 
@@ -131,10 +147,19 @@ func (s *session) handleOpDone(ev evOpDone) {
 	}
 	s.writeTestResult(ev.reqID, res)
 	s.opMu.Lock()
+	opName := ""
 	if s.activeOp != nil && s.activeOp.reqID == ev.reqID {
+		opName = s.activeOp.op
 		s.activeOp = nil
 	}
 	s.opMu.Unlock()
+	if opName == protocol.OpCableTestWindowEnd {
+		s.conn.SetIdleTimeout(s.cfg.idleTimeout())
+		if s.cableWindowActive && s.cfg.OnCableTestWindow != nil {
+			s.cfg.OnCableTestWindow(false)
+		}
+		s.cableWindowActive = false
+	}
 }
 
 // handleOpProgress forwards one throttled executor progress update.

@@ -37,6 +37,9 @@ type preflightInfo struct {
 	ToolVersions map[string]string
 	// Warnings are non-fatal preflight findings, echoed into the report.
 	Warnings []string
+	// SudoOK reports that the passwordless sudo probe succeeded. Root runs
+	// do not need it; Privileged handles that distinction at execution time.
+	SudoOK bool
 }
 
 // requiredTools maps each required executable to its distro package names
@@ -155,6 +158,7 @@ func (a *App) preflight(ctx context.Context) (*preflightInfo, error) {
 				"passwordless sudo unavailable; cable diagnostics (--cable-test) would be skipped")
 		}
 	}
+	pf.SudoOK = sudoOK
 
 	// 9. iperf3 capability detection (version window + --help agreement).
 	iperfCaps, err := testsuite.DetectIperfCaps(ctx, r)
@@ -196,8 +200,10 @@ func (a *App) preflight(ctx context.Context) (*preflightInfo, error) {
 			MAC:       iface.MAC,
 			USB:       iface.Class.USB,
 		},
-		SudoAvailable:        sudoOK,
-		CableTestSupported:   false, // cable diagnostics land in a later version
+		SudoAvailable: sudoOK,
+		// Driver support cannot be probed without running the disruptive
+		// command itself; the definitive availability lands in the result.
+		CableTestSupported:   false,
 		AcceptReportTransfer: !a.cfg.NoReportTransfer,
 	}
 	return pf, nil

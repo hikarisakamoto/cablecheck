@@ -18,10 +18,6 @@ func cmdRun(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if err != nil {
 		return err
 	}
-	if cfg.CableTest || cfg.CableTestTDR {
-		fmt.Fprintf(stderr, "cablecheck: warning: cable-test flags are validated and recorded but not exercised yet in this version\n")
-	}
-
 	progress := NewProgress(stdout, cfg.Verbose)
 	a, err := app.New(cfg, app.Deps{
 		Stdin:  stdin,
@@ -131,8 +127,7 @@ Test parameters:
                             link monitor polling interval (default 1s)
 
 Diagnostics:
-  --cable-test              request ethtool cable diagnostics (accepted, not
-                            exercised yet in this version)
+  --cable-test              run coordinated ethtool cable diagnostics
   --cable-test-tdr          request TDR cable diagnostics (implies --cable-test)
 
 Behavior:

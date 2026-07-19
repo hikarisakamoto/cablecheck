@@ -155,6 +155,48 @@ func TestCounterDelta(t *testing.T) {
 	})
 }
 
+// TestCableTestWindowEventsExcludedFromPHY03AndPHY04 verifies the evaluator
+// removes the diagnostic's expected link transitions from both carrier-reset
+// and renegotiation evidence.
+func TestCableTestWindowEventsExcludedFromPHY03AndPHY04(t *testing.T) {
+	before := snap(map[string]uint64{"link_resets": 10})
+	after := snap(map[string]uint64{"link_resets": 12})
+	after.CapturedAt = before.CapturedAt.Add(10 * time.Second)
+	windowAt := before.CapturedAt.Add(5 * time.Second)
+	report := &model.Report{
+		InitialCounters: model.PeerCounters{PC1: &before},
+		FinalCounters:   model.PeerCounters{PC1: &after},
+		MonitoringEvents: []model.MonitoringEvent{
+			{At: windowAt, Type: "carrier_lost", Detail: "self-inflicted cable-test window", SelfInflicted: true},
+			{At: windowAt, Type: "carrier_restored", Detail: "self-inflicted cable-test window", SelfInflicted: true},
+			{At: windowAt, Type: "renegotiation", Detail: "self-inflicted cable-test window", SelfInflicted: true},
+		},
+	}
+	facts := FactsFromReport(report)
+	if facts.PC1.CarrierEvents != 0 {
+		t.Errorf("CarrierEvents = %d, want 0 after excluding cable-test transitions", facts.PC1.CarrierEvents)
+	}
+	if facts.Renegotiations != 0 {
+		t.Errorf("Renegotiations = %d, want 0 after excluding cable-test window", facts.Renegotiations)
+	}
+	for _, id := range []string{"PHY-03", "PHY-04"} {
+		if finding := ruleByID(t, id).Evaluate(facts); finding != nil {
+			t.Errorf("%s = %+v, want no self-inflicted finding", id, finding)
+		}
+	}
+
+	// The production plan runs cable diagnostics after final counters. Such
+	// later tagged events must not subtract an earlier ordinary reset that is
+	// genuinely inside the counter interval.
+	after.Standard["link_resets"] = 11
+	report.MonitoringEvents[0].At = after.CapturedAt.Add(time.Second)
+	report.MonitoringEvents[1].At = after.CapturedAt.Add(time.Second)
+	lateFacts := FactsFromReport(report)
+	if lateFacts.PC1.CarrierEvents != 1 {
+		t.Errorf("late-window CarrierEvents = %d, want earlier ordinary reset retained", lateFacts.PC1.CarrierEvents)
+	}
+}
+
 func TestFactsFromReportDirections(t *testing.T) {
 	r := &model.Report{
 		Tests: model.TestsSection{

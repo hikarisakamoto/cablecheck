@@ -99,13 +99,25 @@ func (a *App) monitoringEvents() []model.MonitoringEvent {
 	events := make([]model.MonitoringEvent, 0, len(hist)+len(finalEvents))
 	for _, e := range hist {
 		events = append(events, model.MonitoringEvent{
-			At:     e.At.UTC(),
-			Type:   string(e.Type),
-			Detail: e.Detail,
+			At:            e.At.UTC(),
+			Type:          string(e.Type),
+			Detail:        e.Detail,
+			SelfInflicted: e.SelfInflicted,
 		})
 	}
 	events = append(events, finalEvents...)
 	return events
+}
+
+// setCableTestWindow toggles self-inflicted annotation on the running link
+// monitor. It is safe before monitoring starts and after it stops.
+func (a *App) setCableTestWindow(active bool) {
+	a.monitorMu.Lock()
+	m := a.monitor
+	a.monitorMu.Unlock()
+	if m != nil {
+		m.SetCableTestWindow(active)
+	}
 }
 
 // finalLinkEvents mirrors the monitor's interval change detection for the one

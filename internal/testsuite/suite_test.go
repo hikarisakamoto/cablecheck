@@ -101,6 +101,8 @@ func (f *fakeCaller) Call(ctx context.Context, op string, params any, timeout ti
 
 func (f *fakeCaller) Warn(code, text string) {}
 
+func (f *fakeCaller) SetIdleTimeout(time.Duration) {}
+
 // TestQuickPlanDrivesSteps runs the whole TCP-only quick plan against a
 // scripted local runner and a scripted remote caller, checking step
 // announcements, remote op order/params and the accumulated SessionResults.

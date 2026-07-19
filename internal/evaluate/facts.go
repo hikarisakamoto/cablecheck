@@ -184,8 +184,10 @@ func DeltaSet(before, after *model.CounterSnapshot) (model.CounterDeltaSet, bool
 func FactsFromReport(r *model.Report) *Facts {
 	f := &Facts{LinkUpAtEnd: true}
 
-	f.PC1 = sideFacts(r.InitialCounters.PC1, r.FinalCounters.PC1)
-	f.PC2 = sideFacts(r.InitialCounters.PC2, r.FinalCounters.PC2)
+	f.PC1 = sideFacts(r.InitialCounters.PC1, r.FinalCounters.PC1,
+		selfInflictedCarrierEvents(r, r.InitialCounters.PC1, r.FinalCounters.PC1))
+	f.PC2 = sideFacts(r.InitialCounters.PC2, r.FinalCounters.PC2,
+		selfInflictedCarrierEvents(r, r.InitialCounters.PC2, r.FinalCounters.PC2))
 
 	for _, p := range r.Tests.Ping {
 		i := dirIndex(p.Direction)
@@ -291,7 +293,7 @@ func FactsFromReport(r *model.Report) *Facts {
 }
 
 // sideFacts folds a snapshot pair into per-side counter facts.
-func sideFacts(before, after *model.CounterSnapshot) SideFacts {
+func sideFacts(before, after *model.CounterSnapshot, selfInflictedCarrier uint64) SideFacts {
 	set, ok := DeltaSet(before, after)
 	available := before != nil && after != nil &&
 		len(before.Standard) > 0 && len(after.Standard) > 0
@@ -304,9 +306,15 @@ func sideFacts(before, after *model.CounterSnapshot) SideFacts {
 		}
 		return total
 	}
+	carrierEvents := sum("link_resets")
+	if selfInflictedCarrier >= carrierEvents {
+		carrierEvents = 0
+	} else {
+		carrierEvents -= selfInflictedCarrier
+	}
 	return SideFacts{
 		CRCClassErrors:    sum("rx_crc", "rx_frame", "rx_align", "rx_symbol"),
-		CarrierEvents:     sum("link_resets"),
+		CarrierEvents:     carrierEvents,
 		JabberSizeErrors:  sum("jabber", "oversize", "undersize", "rx_length"),
 		FifoOverrun:       sum("rx_fifo"),
 		DeltaOK:           ok && available,
@@ -520,8 +528,30 @@ func linkUpAtEnd(r *model.Report) bool {
 func renegotiations(r *model.Report) int {
 	n := 0
 	for _, ev := range r.MonitoringEvents {
+		if ev.SelfInflicted {
+			continue
+		}
 		switch ev.Type {
 		case "renegotiation", "speed_changed", "duplex_changed":
+			n++
+		}
+	}
+	return n
+}
+
+// selfInflictedCarrierEvents counts expected carrier transitions observed
+// inside a coordinated cable-test window. The same physical transition is
+// subtracted from each side's link_resets delta (the evaluator already uses
+// the worse side rather than summing the peers).
+func selfInflictedCarrierEvents(r *model.Report, before, after *model.CounterSnapshot) uint64 {
+	if before == nil || after == nil || before.CapturedAt.IsZero() || after.CapturedAt.IsZero() {
+		return 0
+	}
+	var n uint64
+	for _, ev := range r.MonitoringEvents {
+		insideCounters := !ev.At.Before(before.CapturedAt) && !ev.At.After(after.CapturedAt)
+		if insideCounters && ev.SelfInflicted &&
+			(ev.Type == "carrier_lost" || ev.Type == "carrier_restored") {
 			n++
 		}
 	}

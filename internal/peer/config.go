@@ -92,6 +92,11 @@ type Config struct {
 	// OnState, when set, observes every successful session state transition.
 	// It must be fast and must not re-enter the session.
 	OnState func(from, to State)
+	// OnCableTestWindow marks the interval in which link-monitor events are
+	// expected consequences of the disruptive diagnostic. It is called on
+	// the worker before the start request is acknowledged and after the end
+	// result is sent.
+	OnCableTestWindow func(active bool)
 
 	// HeartbeatInterval overrides the 5s heartbeat ticker period; zero
 	// means protocol.HeartbeatInterval. Test-tunable.
@@ -199,6 +204,10 @@ type RemoteCaller interface {
 		onProgress func(protocol.TestProgress)) (*protocol.TestResult, error)
 	// Warn sends a non-fatal warning frame to the peer.
 	Warn(code, text string)
+	// SetIdleTimeout changes the coordinator's local per-frame read timeout.
+	// Cable diagnostics widen it before asking the worker to enter the same
+	// link-loss window, then restore it after recovery.
+	SetIdleTimeout(d time.Duration)
 }
 
 // PlanFunc drives the whole test sequence on the coordinator, including

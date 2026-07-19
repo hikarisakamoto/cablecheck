@@ -43,6 +43,11 @@ const (
 	// peer) before choosing the native --bidir path or the two-phase
 	// fallback.
 	OpIperfCaps = "iperf3_caps"
+	// OpCableTestWindowStart opens the coordinated link-loss window before
+	// the local cable diagnostic runs.
+	OpCableTestWindowStart = protocol.OpCableTestWindowStart
+	// OpCableTestWindowEnd closes the coordinated window after link recovery.
+	OpCableTestWindowEnd = protocol.OpCableTestWindowEnd
 	// OpCancel aborts the in-flight op; it is intercepted by the peer
 	// session layer and never reaches HandleOp.
 	OpCancel = "cancel"
@@ -249,6 +254,8 @@ type Ops struct {
 	Ping *PingTester
 	// Iperf serves the iperf3 server and client ops.
 	Iperf *IperfManager
+	// Cable runs the coordinator-local opt-in ethtool cable diagnostic.
+	Cable *CableTester
 	// MTU is the discovered MTU of the interface under test; the full-size
 	// ping payload and the UDP datagram size are computed from it (MTU-28,
 	// never hardcoded).
@@ -321,6 +328,16 @@ func (o *Ops) HandleOp(ctx context.Context, op string, params json.RawMessage,
 	case OpIperfCaps:
 		caps := o.IperfCaps
 		return &caps, StatusOK, nil
+
+	case OpCableTestWindowStart:
+		var p protocol.CableTestWindowParams
+		if err := decodeParams(params, &p); err != nil || p.IdleTimeoutMs <= 0 {
+			return nil, StatusRejected, fmt.Errorf("testsuite: invalid cable-test window timeout")
+		}
+		return struct{}{}, StatusOK, nil
+
+	case OpCableTestWindowEnd:
+		return struct{}{}, StatusOK, nil
 
 	case OpIperfServerStart:
 		return o.handleServerStart(ctx, params)

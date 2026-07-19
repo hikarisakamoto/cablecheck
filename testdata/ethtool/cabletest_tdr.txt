@@ -1,0 +1,6 @@
+Cable test TDR data for device eth0.
+Pair A, distance: 0.00m amplitude: 0
+Pair A, distance: 12.50m amplitude: -14
+Pair B distance 4.25m amplitude 9
+Pair C, distance: 32.00m amplitude: 47
+Pair D, distance: 32.40m amplitude: 44

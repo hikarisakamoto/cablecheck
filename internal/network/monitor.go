@@ -160,6 +160,9 @@ type LinkEvent struct {
 	Type LinkEventType
 	// Detail is a human-readable description of the change.
 	Detail string
+	// SelfInflicted marks events observed during the coordinated cable-test
+	// window; evaluators exclude them from instability findings.
+	SelfInflicted bool
 	// Before is the previous snapshot.
 	Before LinkSnapshot
 	// After is the snapshot in which the change was detected.
@@ -176,8 +179,9 @@ type Monitor struct {
 	clk       clock.Clock
 	sysfsRoot string
 
-	ch      chan LinkEvent
-	dropped atomic.Uint64
+	ch              chan LinkEvent
+	dropped         atomic.Uint64
+	cableTestWindow atomic.Bool
 
 	mu      sync.Mutex
 	last    *LinkSnapshot
@@ -248,6 +252,12 @@ func (m *Monitor) poll() {
 	var events []LinkEvent
 	if prev != nil {
 		events = detectEvents(*prev, snap)
+		if m.cableTestWindow.Load() {
+			for i := range events {
+				events[i].SelfInflicted = true
+				events[i].Detail += " (self-inflicted cable-test window)"
+			}
+		}
 		m.history = append(m.history, events...)
 	}
 	m.mu.Unlock()
@@ -255,6 +265,12 @@ func (m *Monitor) poll() {
 	for _, ev := range events {
 		m.emit(ev)
 	}
+}
+
+// SetCableTestWindow marks whether newly observed link events are expected
+// consequences of the coordinated disruptive cable diagnostic.
+func (m *Monitor) SetCableTestWindow(active bool) {
+	m.cableTestWindow.Store(active)
 }
 
 // emit delivers an event on the buffered channel; when the buffer is full it

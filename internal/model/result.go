@@ -258,6 +258,17 @@ type CablePairResult struct {
 	HasFault bool `json:"hasFault"`
 }
 
+// TDRSample is one reflection sample reported by
+// `ethtool --cable-test-tdr`.
+type TDRSample struct {
+	// Pair is the pair letter "A" through "D".
+	Pair string `json:"pair"`
+	// DistanceM is the sample's distance from the local NIC, in meters.
+	DistanceM float64 `json:"distanceM"`
+	// Amplitude is the signed reflection amplitude reported by ethtool.
+	Amplitude int `json:"amplitude"`
+}
+
 // CableTestResult is the outcome of `ethtool --cable-test`. Unavailability
 // (unsupported driver, no root, old ethtool) is recorded as Available=false
 // with a reason and never counts as a cable failure.
@@ -268,6 +279,11 @@ type CableTestResult struct {
 	UnavailableReason string `json:"unavailableReason,omitempty"`
 	// Pairs holds the per-pair results when the test ran.
 	Pairs []CablePairResult `json:"pairs,omitempty"`
+	// Samples holds tolerant TDR reflection samples when requested.
+	Samples []TDRSample `json:"samples,omitempty"`
+	// UnparsedLines counts TDR data lines the tolerant parser could not
+	// decode. Headers and blank lines do not count.
+	UnparsedLines int `json:"unparsedLines,omitempty"`
 }
 
 // MonitoringEvent is one timestamped link-state observation from the sysfs
@@ -280,6 +296,9 @@ type MonitoringEvent struct {
 	Type string `json:"type"`
 	// Detail is a human-readable description of the observed change.
 	Detail string `json:"detail,omitempty"`
+	// SelfInflicted is true when the event occurred inside the coordinated
+	// cable-test window and must not count as spontaneous cable instability.
+	SelfInflicted bool `json:"selfInflicted,omitempty"`
 }
 
 // SkippedTest records a test that was planned but did not run.

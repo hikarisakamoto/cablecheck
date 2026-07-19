@@ -157,3 +157,9 @@ func (rc *remoteCaller) Warn(code, text string) {
 		s.log.Warn("send warning frame failed", "code", code, "err", err)
 	}
 }
+
+// SetIdleTimeout implements RemoteCaller by changing the coordinator's
+// local framed-connection deadline for subsequent reads.
+func (rc *remoteCaller) SetIdleTimeout(d time.Duration) {
+	rc.s.conn.SetIdleTimeout(d)
+}
