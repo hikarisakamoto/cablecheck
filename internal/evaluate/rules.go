@@ -619,28 +619,18 @@ func rulePERF03(f *Facts) *model.Finding {
 }
 
 func rulePERF04(f *Facts) *model.Finding {
+	ratio := asymmetryRatio(f)
+	if ratio <= 0.30 {
+		return nil
+	}
 	d0, d1 := &f.Dir[0], &f.Dir[1]
-	if !d0.TCPAvailable || !d1.TCPAvailable {
-		return nil
-	}
-	hi := max(float64(d0.TCPBitrate), float64(d1.TCPBitrate))
-	if hi <= 0 {
-		return nil
-	}
-	diff := float64(d0.TCPBitrate) - float64(d1.TCPBitrate)
-	if diff < 0 {
-		diff = -diff
-	}
-	if diff/hi <= 0.30 {
-		return nil
-	}
 	return &model.Finding{
 		RuleID:   "PERF-04",
 		Category: model.CategoryPerformance,
 		Severity: model.SevWarning,
 		Text:     "TCP throughput is asymmetric between the two directions.",
 		Evidence: []string{fmt.Sprintf("pc1->pc2 %s vs pc2->pc1 %s (%.0f%% difference)",
-			d0.TCPBitrate, d1.TCPBitrate, diff/hi*100)},
+			d0.TCPBitrate, d1.TCPBitrate, ratio*100)},
 		HostSensitive: true,
 	}
 }

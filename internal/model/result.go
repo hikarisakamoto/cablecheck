@@ -126,8 +126,9 @@ type PingResult struct {
 	Spikes []PingSpike `json:"spikes,omitempty"`
 	// MissingSeqRuns localizes which packets vanished.
 	MissingSeqRuns []SeqRun `json:"missingSeqRuns,omitempty"`
-	// LongestSeqGap is the length of the longest missing-sequence run.
-	LongestSeqGap int `json:"longestSeqGap"`
+	// LongestMissingRunLen is the count of consecutive missing icmp_seq values
+	// in the longest missing-sequence run.
+	LongestMissingRunLen int `json:"longestMissingRunLen"`
 	// LongestGapMs is the longest gap between consecutive reply timestamps
 	// (from ping -D), capturing burst loss and stalls.
 	LongestGapMs float64 `json:"longestGapMs"`

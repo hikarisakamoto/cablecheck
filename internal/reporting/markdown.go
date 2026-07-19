@@ -2,7 +2,7 @@ package reporting
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -290,7 +290,7 @@ func sectionCounterDeltas(b *md, r *model.Report) {
 		b.note("Not run: counter deltas were not computed.")
 		return
 	}
-	keys := unionDeltaKeys(pc1, pc2)
+	keys := unionKeys(pc1, pc2)
 	rows := make([][]string, 0, len(keys))
 	for _, k := range keys {
 		rows = append(rows, []string{k, deltaCell(pc1, k), deltaCell(pc2, k)})
@@ -575,7 +575,7 @@ func sectionToolVersions(b *md, r *model.Report) {
 		b.note("Not run: tool versions were not recorded.")
 		return
 	}
-	tools := unionStringKeys(r.PC1.ToolVersions, r.PC2.ToolVersions)
+	tools := unionKeys(r.PC1.ToolVersions, r.PC2.ToolVersions)
 	rows := make([][]string, 0, len(tools))
 	for _, tool := range tools {
 		rows = append(rows, []string{
@@ -704,8 +704,8 @@ func deltaCell(set model.CounterDeltaSet, key string) string {
 	return fmt.Sprintf("+%d", d.Delta)
 }
 
-// unionKeys returns the sorted union of two uint64-map key sets.
-func unionKeys(a, b map[string]uint64) []string {
+// unionKeys returns the sorted union of two map key sets.
+func unionKeys[V any](a, b map[string]V) []string {
 	seen := map[string]bool{}
 	for k := range a {
 		seen[k] = true
@@ -717,40 +717,6 @@ func unionKeys(a, b map[string]uint64) []string {
 	for k := range seen {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
-	return keys
-}
-
-// unionDeltaKeys returns the sorted union of two delta-set key sets.
-func unionDeltaKeys(a, b model.CounterDeltaSet) []string {
-	seen := map[string]bool{}
-	for k := range a {
-		seen[k] = true
-	}
-	for k := range b {
-		seen[k] = true
-	}
-	keys := make([]string, 0, len(seen))
-	for k := range seen {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// unionStringKeys returns the sorted union of two string-map key sets.
-func unionStringKeys(a, b map[string]string) []string {
-	seen := map[string]bool{}
-	for k := range a {
-		seen[k] = true
-	}
-	for k := range b {
-		seen[k] = true
-	}
-	keys := make([]string, 0, len(seen))
-	for k := range seen {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }

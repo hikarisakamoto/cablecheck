@@ -203,6 +203,26 @@ func decodeAs[T any](raw json.RawMessage) (any, error) {
 	return out, nil
 }
 
+func parseLocalPeer(op, localIP, peerIP string) (local, remote netip.Addr, err error) {
+	local, err = netip.ParseAddr(localIP)
+	if err != nil {
+		return netip.Addr{}, netip.Addr{}, fmt.Errorf("testsuite: %s: bad localIp: %w", op, err)
+	}
+	remote, err = parsePeer(op, peerIP)
+	if err != nil {
+		return netip.Addr{}, netip.Addr{}, err
+	}
+	return local, remote, nil
+}
+
+func parsePeer(op, peerIP string) (netip.Addr, error) {
+	addr, err := netip.ParseAddr(peerIP)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("testsuite: %s: bad peerIp: %w", op, err)
+	}
+	return addr, nil
+}
+
 // DecodeOpResult decodes a remote test_result payload into the typed result
 // struct for op, using the fixed decoder table. Unknown ops are an error.
 func DecodeOpResult(op string, raw json.RawMessage) (any, error) {
@@ -273,9 +293,9 @@ func (o *Ops) HandleOp(ctx context.Context, op string, params json.RawMessage,
 		if err := decodeParams(params, &p); err != nil {
 			return nil, StatusRejected, err
 		}
-		addr, err := netip.ParseAddr(p.PeerIP)
+		addr, err := parsePeer(op, p.PeerIP)
 		if err != nil {
-			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad peerIp: %w", op, err)
+			return nil, StatusRejected, err
 		}
 		res, notes, err := o.Ping.Quick(ctx, addr, p.Count)
 		if err != nil {
@@ -288,9 +308,9 @@ func (o *Ops) HandleOp(ctx context.Context, op string, params json.RawMessage,
 		if err := decodeParams(params, &p); err != nil {
 			return nil, StatusRejected, err
 		}
-		addr, err := netip.ParseAddr(p.PeerIP)
+		addr, err := parsePeer(op, p.PeerIP)
 		if err != nil {
-			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad peerIp: %w", op, err)
+			return nil, StatusRejected, err
 		}
 		res, notes, err := o.Ping.FullSize(ctx, addr, o.MTU, p.Count)
 		if err != nil {
@@ -313,13 +333,9 @@ func (o *Ops) HandleOp(ctx context.Context, op string, params json.RawMessage,
 		if err := decodeParams(params, &p); err != nil {
 			return nil, StatusRejected, err
 		}
-		local, err := netip.ParseAddr(p.LocalIP)
+		local, remote, err := parseLocalPeer(op, p.LocalIP, p.PeerIP)
 		if err != nil {
-			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad localIp: %w", op, err)
-		}
-		remote, err := netip.ParseAddr(p.PeerIP)
-		if err != nil {
-			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad peerIp: %w", op, err)
+			return nil, StatusRejected, err
 		}
 		res, err := o.Iperf.RunTCPClient(ctx, local, remote, p.Port,
 			time.Duration(p.DurationSec)*time.Second, p.Streams, p.Bidir)
@@ -333,13 +349,9 @@ func (o *Ops) HandleOp(ctx context.Context, op string, params json.RawMessage,
 		if err := decodeParams(params, &p); err != nil {
 			return nil, StatusRejected, err
 		}
-		local, err := netip.ParseAddr(p.LocalIP)
+		local, remote, err := parseLocalPeer(op, p.LocalIP, p.PeerIP)
 		if err != nil {
-			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad localIp: %w", op, err)
-		}
-		remote, err := netip.ParseAddr(p.PeerIP)
-		if err != nil {
-			return nil, StatusRejected, fmt.Errorf("testsuite: %s: bad peerIp: %w", op, err)
+			return nil, StatusRejected, err
 		}
 		res, err := o.Iperf.RunUDPClient(ctx, local, remote, p.Port,
 			time.Duration(p.DurationSec)*time.Second, p.RateBps, UDPPayloadForMTU(o.MTU))

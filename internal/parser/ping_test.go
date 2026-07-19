@@ -37,8 +37,8 @@ func TestPingPerPacket(t *testing.T) {
 		if len(res.MissingSeqRuns) != 1 || res.MissingSeqRuns[0] != wantRuns[0] {
 			t.Errorf("MissingSeqRuns = %+v, want %+v", res.MissingSeqRuns, wantRuns)
 		}
-		if res.LongestSeqGap != 2 {
-			t.Errorf("LongestSeqGap = %d, want 2", res.LongestSeqGap)
+		if res.LongestMissingRunLen != 2 {
+			t.Errorf("LongestMissingRunLen = %d, want 2", res.LongestMissingRunLen)
 		}
 		if !near(res.LongestGapMs, 59.96, 0.5) {
 			t.Errorf("LongestGapMs = %v, want ~59.96 (three missed 20ms slots)", res.LongestGapMs)
@@ -95,9 +95,9 @@ func TestPingPerPacket(t *testing.T) {
 		if len(res.Spikes) != 0 {
 			t.Errorf("Spikes = %+v, want none", res.Spikes)
 		}
-		if len(res.MissingSeqRuns) != 0 || res.LongestSeqGap != 0 {
-			t.Errorf("MissingSeqRuns/LongestSeqGap = %+v/%d, want none/0",
-				res.MissingSeqRuns, res.LongestSeqGap)
+		if len(res.MissingSeqRuns) != 0 || res.LongestMissingRunLen != 0 {
+			t.Errorf("MissingSeqRuns/LongestMissingRunLen = %+v/%d, want none/0",
+				res.MissingSeqRuns, res.LongestMissingRunLen)
 		}
 		if !near(res.LongestGapMs, 20.0, 0.5) {
 			t.Errorf("LongestGapMs = %v, want ~20 (steady 20ms cadence)", res.LongestGapMs)
@@ -124,8 +124,8 @@ func TestPingPerPacket(t *testing.T) {
 		if len(res.MissingSeqRuns) != 1 || res.MissingSeqRuns[0] != (model.SeqRun{FirstSeq: 1, Len: 20}) {
 			t.Errorf("MissingSeqRuns = %+v, want [{1 20}]", res.MissingSeqRuns)
 		}
-		if res.LongestSeqGap != 20 {
-			t.Errorf("LongestSeqGap = %d, want 20", res.LongestSeqGap)
+		if res.LongestMissingRunLen != 20 {
+			t.Errorf("LongestMissingRunLen = %d, want 20", res.LongestMissingRunLen)
 		}
 		if res.UnparsedLines != 0 {
 			t.Errorf("UnparsedLines = %d, want 0", res.UnparsedLines)

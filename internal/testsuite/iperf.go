@@ -208,15 +208,7 @@ func (h *ServerHandle) Stop(ctx context.Context) error {
 // alongside the error, so partial data survives an abort.
 func (m *IperfManager) RunTCPClient(ctx context.Context, local, peer netip.Addr, port uint16,
 	dur time.Duration, streams int, bidir bool) (*TCPRunResult, error) {
-	args := []string{
-		"-c", peer.String(),
-		"-B", local.String(),
-		"-p", strconv.Itoa(int(port)),
-		"-J",
-		"--connect-timeout", "3000",
-		"-t", strconv.Itoa(int(dur / time.Second)),
-		"-P", strconv.Itoa(streams),
-	}
+	args := append(baseClientArgs(local, peer, port, dur), "-P", strconv.Itoa(streams))
 	if bidir {
 		args = append(args, "--bidir")
 	}
@@ -250,16 +242,8 @@ func (m *IperfManager) RunTCPClient(ctx context.Context, local, peer netip.Addr,
 // result marked Incomplete is returned alongside the error.
 func (m *IperfManager) RunBidirClient(ctx context.Context, local, peer netip.Addr, port uint16,
 	dur time.Duration, streams int) (*BidirRunResult, error) {
-	args := []string{
-		"-c", peer.String(),
-		"-B", local.String(),
-		"-p", strconv.Itoa(int(port)),
-		"-J",
-		"--connect-timeout", "3000",
-		"-t", strconv.Itoa(int(dur / time.Second)),
-		"-P", strconv.Itoa(streams),
-		"--bidir",
-	}
+	args := append(baseClientArgs(local, peer, port, dur),
+		"-P", strconv.Itoa(streams), "--bidir")
 	spec := teeRaw(runner.CommandSpec{
 		Name:    "iperf3",
 		Args:    args,
@@ -288,13 +272,19 @@ func (m *IperfManager) RunBidirClient(ctx context.Context, local, peer netip.Add
 		PC1ToPC2:        bidirDirFromStats(parsed.Bidir.LocalToPeer),
 		PC2ToPC1:        bidirDirFromStats(parsed.Bidir.PeerToLocal),
 	}
-	if parsed.CPU != nil {
-		out.CPUUtilization = model.CPUUsage{
-			HostTotal: parsed.CPU.HostTotal, HostUser: parsed.CPU.HostUser, HostSystem: parsed.CPU.HostSystem,
-			RemoteTotal: parsed.CPU.RemoteTotal, RemoteUser: parsed.CPU.RemoteUser, RemoteSystem: parsed.CPU.RemoteSystem,
-		}
-	}
+	out.CPUUtilization = cpuUsageFrom(parsed.CPU)
 	return &BidirRunResult{Bidir: out}, nil
+}
+
+func baseClientArgs(local, peer netip.Addr, port uint16, dur time.Duration) []string {
+	return []string{
+		"-c", peer.String(),
+		"-B", local.String(),
+		"-p", strconv.Itoa(int(port)),
+		"-J",
+		"--connect-timeout", "3000",
+		"-t", strconv.Itoa(int(dur / time.Second)),
+	}
 }
 
 // bidirDirFromStats maps one stream-derived direction onto the report model.
@@ -341,39 +331,17 @@ func tcpFromIperf(p parser.Iperf3Result, dur time.Duration, streams int) model.T
 			Retransmits:   iv.Retransmits,
 		})
 	}
-	if p.CPU != nil {
-		out.CPUUtilization = model.CPUUsage{
-			HostTotal: p.CPU.HostTotal, HostUser: p.CPU.HostUser, HostSystem: p.CPU.HostSystem,
-			RemoteTotal: p.CPU.RemoteTotal, RemoteUser: p.CPU.RemoteUser, RemoteSystem: p.CPU.RemoteSystem,
-		}
-	}
+	out.CPUUtilization = cpuUsageFrom(p.CPU)
 	return out
 }
 
-// PreflightStaleProcesses scans the pidfile tree under base for survivors of
-// earlier cablecheck runs. Pidfiles whose process is dead (or no longer
-// ownership-verifies) are cleaned silently; a live, ownership-verified
-// survivor fails preflight with remediation text naming the PID, because a
-// leftover iperf3 would occupy the test port and corrupt measurements. It
-// returns the live survivors alongside the error describing them.
-func PreflightStaleProcesses(base string) ([]runner.ProcessInfo, error) {
-	stale, _, err := runner.ScanStale(base)
-	if err != nil {
-		return nil, fmt.Errorf("testsuite: stale-process preflight: %w", err)
+// cpuUsageFrom maps parser CPU utilization onto the report model.
+func cpuUsageFrom(cpu *parser.CPUUtil) model.CPUUsage {
+	if cpu == nil {
+		return model.CPUUsage{}
 	}
-	if len(stale) == 0 {
-		return nil, nil
+	return model.CPUUsage{
+		HostTotal: cpu.HostTotal, HostUser: cpu.HostUser, HostSystem: cpu.HostSystem,
+		RemoteTotal: cpu.RemoteTotal, RemoteUser: cpu.RemoteUser, RemoteSystem: cpu.RemoteSystem,
 	}
-	var b strings.Builder
-	b.WriteString("stale cablecheck-owned processes from an earlier run are still alive:")
-	for _, p := range stale {
-		fmt.Fprintf(&b, "\n  %s (pid %d, session %s)", p.Argv0, p.PID, p.TestID)
-	}
-	b.WriteString("\nterminate them before retrying, e.g.: kill ")
-	pids := make([]string, len(stale))
-	for i, p := range stale {
-		pids[i] = strconv.Itoa(p.PID)
-	}
-	b.WriteString(strings.Join(pids, " "))
-	return stale, fmt.Errorf("testsuite: stale-process preflight: %s", b.String())
 }

@@ -6,8 +6,6 @@ import (
 	"runtime"
 
 	"cablecheck/internal/app"
-	"cablecheck/internal/model"
-	"cablecheck/internal/protocol"
 )
 
 // cmdVersion prints the build identity plus the runtime, protocol and
@@ -17,6 +15,6 @@ func cmdVersion(w io.Writer, build app.BuildInfo) error {
 		"cablecheck %s\ncommit:   %s\nbuilt:    %s\ngo:       %s\nplatform: %s/%s\nprotocol: %s\nschema:   %s\n",
 		build.Version, build.Commit, build.Date,
 		runtime.Version(), runtime.GOOS, runtime.GOARCH,
-		protocol.Version, model.SchemaVersion)
+		app.ProtocolVersion, app.SchemaVersion)
 	return err
 }

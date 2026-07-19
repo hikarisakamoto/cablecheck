@@ -21,9 +21,9 @@ func RenderSummary(r *model.Report) []byte {
 
 	addf("CableCheck summary")
 	addf("==================")
-	addf("Test:     %s  (mode %s)", asciiOrUnknown(r.TestID), asciiOrUnknown(r.Configuration.Mode))
+	addf("Test:     %s  (mode %s)", orUnknown(r.TestID), orUnknown(r.Configuration.Mode))
 	addf("Started:  %s   Duration: %s", fmtTime(r.StartedAt), r.Duration.String())
-	addf("Result:   %s%s%s", asciiOrUnknown(string(r.Classification)), scoreText(r.Score), partialText(r.Partial))
+	addf("Result:   %s%s%s", orUnknown(string(r.Classification)), scoreText(r.Score), partialText(r.Partial))
 	addf("Link:     %s", summaryLinkLine(r))
 	addf("")
 	addf("Ping loss:        %s", perDirection(r.Tests.Ping, func(p model.PingResult) (string, string) {
@@ -46,16 +46,16 @@ func RenderSummary(r *model.Report) []byte {
 	if len(r.Findings) == 0 {
 		addf("Findings: none")
 	} else {
-		addf("Findings (top %d of %d):", minInt(summaryMaxItems, len(r.Findings)), len(r.Findings))
-		for _, fd := range r.Findings[:minInt(summaryMaxItems, len(r.Findings))] {
+		addf("Findings (top %d of %d):", min(summaryMaxItems, len(r.Findings)), len(r.Findings))
+		for _, fd := range r.Findings[:min(summaryMaxItems, len(r.Findings))] {
 			addf("  [%s] %s: %s", fd.Severity, fd.RuleID, fd.Text)
 		}
 	}
 	if len(r.Recommendations) == 0 {
 		addf("Recommendations: none")
 	} else {
-		addf("Recommendations (top %d of %d):", minInt(summaryMaxItems, len(r.Recommendations)), len(r.Recommendations))
-		for _, rec := range r.Recommendations[:minInt(summaryMaxItems, len(r.Recommendations))] {
+		addf("Recommendations (top %d of %d):", min(summaryMaxItems, len(r.Recommendations)), len(r.Recommendations))
+		for _, rec := range r.Recommendations[:min(summaryMaxItems, len(r.Recommendations))] {
 			addf("  - %s", rec)
 		}
 	}
@@ -87,14 +87,14 @@ func summaryLinkLine(r *model.Report) string {
 	speed, duplex := "unknown", "unknown"
 	if r.Link != nil && r.Link.PC1.Before != nil {
 		speed = fmtSpeedMbps(r.Link.PC1.Before.SpeedMbps)
-		duplex = asciiOrUnknown(r.Link.PC1.Before.Duplex)
+		duplex = orUnknown(r.Link.PC1.Before.Duplex)
 	} else if r.PC1.NIC.SpeedMbps > 0 {
 		speed = fmtSpeedMbps(r.PC1.NIC.SpeedMbps)
-		duplex = asciiOrUnknown(r.PC1.NIC.Duplex)
+		duplex = orUnknown(r.PC1.NIC.Duplex)
 	}
 	nics := ""
 	if r.PC1.NIC.Name != "" || r.PC2.NIC.Name != "" {
-		nics = fmt.Sprintf("  (pc1 %s, pc2 %s)", asciiOrUnknown(r.PC1.NIC.Name), asciiOrUnknown(r.PC2.NIC.Name))
+		nics = fmt.Sprintf("  (pc1 %s, pc2 %s)", orUnknown(r.PC1.NIC.Name), orUnknown(r.PC2.NIC.Name))
 	}
 	return fmt.Sprintf("%s %s duplex%s", speed, duplex, nics)
 }
@@ -121,10 +121,6 @@ func perDirection[T any](results []T, extract func(T) (string, string)) string {
 	return cell(model.DirectionPC1ToPC2, "pc1->pc2") + "  |  " + cell(model.DirectionPC2ToPC1, "pc2->pc1")
 }
 
-// asciiOrUnknown is orUnknown for the summary (values are expected ASCII
-// already; toASCII scrubs any stragglers).
-func asciiOrUnknown(s string) string { return orUnknown(s) }
-
 // toASCII transliterates the handful of typographic runes the rule texts use
 // and replaces anything else non-ASCII with '?' — the summary is printed to
 // arbitrary terminals and must stay plain ASCII.
@@ -143,12 +139,4 @@ func toASCII(s string) []byte {
 		}
 	}
 	return out
-}
-
-// minInt returns the smaller of two ints.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

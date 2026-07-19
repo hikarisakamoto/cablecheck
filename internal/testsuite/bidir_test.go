@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
-	"strconv"
 	"testing"
 
 	"cablecheck/internal/model"
@@ -129,7 +128,8 @@ func TestBidirFallbackTwoPorts(t *testing.T) {
 			clientArgs = c.Args
 		}
 	}
-	if serverArgs == nil || !slices.Contains(serverArgs, strconv.Itoa(5202)) {
+	portFlag := slices.Index(serverArgs, "-p")
+	if serverArgs == nil || portFlag < 0 || portFlag+1 >= len(serverArgs) || serverArgs[portFlag+1] != "5202" {
 		t.Errorf("local server args = %q, want a server on port 5202 (iperf-port+1)", serverArgs)
 	}
 	if clientArgs == nil || !slices.Contains(clientArgs, "5201") {

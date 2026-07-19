@@ -33,17 +33,12 @@ func UDPPayloadForMTU(mtu int) int {
 // Incomplete is returned alongside the error, so partial data survives.
 func (m *IperfManager) RunUDPClient(ctx context.Context, local, peer netip.Addr, port uint16,
 	dur time.Duration, rateBps uint64, payload int) (*UDPRunResult, error) {
-	args := []string{
-		"-c", peer.String(),
-		"-B", local.String(),
-		"-p", strconv.Itoa(int(port)),
-		"-J",
-		"--connect-timeout", "3000",
-		"-u",
-		"-b", strconv.FormatUint(rateBps, 10),
-		"-t", strconv.Itoa(int(dur / time.Second)),
-		"-l", strconv.Itoa(payload),
-	}
+	base := baseClientArgs(local, peer, port, dur)
+	args := make([]string, 0, len(base)+6)
+	args = append(args, base[:len(base)-2]...)
+	args = append(args, "-u", "-b", strconv.FormatUint(rateBps, 10))
+	args = append(args, base[len(base)-2:]...)
+	args = append(args, "-l", strconv.Itoa(payload))
 	spec := teeRaw(runner.CommandSpec{
 		Name:    "iperf3",
 		Args:    args,
@@ -85,11 +80,6 @@ func udpFromIperf(p parser.Iperf3Result, rateBps uint64) model.UDPResult {
 		JitterMs:          u.JitterMs,
 		OutOfOrder:        u.OutOfOrder,
 	}
-	if p.CPU != nil {
-		out.CPU = model.CPUUsage{
-			HostTotal: p.CPU.HostTotal, HostUser: p.CPU.HostUser, HostSystem: p.CPU.HostSystem,
-			RemoteTotal: p.CPU.RemoteTotal, RemoteUser: p.CPU.RemoteUser, RemoteSystem: p.CPU.RemoteSystem,
-		}
-	}
+	out.CPU = cpuUsageFrom(p.CPU)
 	return out
 }

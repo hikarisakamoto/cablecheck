@@ -164,7 +164,7 @@ func ParsePing(stdout, stderr []byte, exitCode int) (model.PingResult, error) {
 	flush := func() {
 		if run.Len > 0 {
 			res.MissingSeqRuns = append(res.MissingSeqRuns, run)
-			res.LongestSeqGap = max(res.LongestSeqGap, run.Len)
+			res.LongestMissingRunLen = max(res.LongestMissingRunLen, run.Len)
 			run = model.SeqRun{}
 		}
 	}

@@ -112,14 +112,14 @@ func fullReport() *Report {
 		Transmitted: 500, Received: 499, Duplicates: 1, SendErrors: 0, IcmpErrors: 0,
 		LossPercent: 0.2,
 		RTTMinMs:    0.101, RTTAvgMs: 0.204, RTTMaxMs: 2.5, RTTMdevMs: 0.06,
-		Percentiles:     map[int]float64{50: 0.2, 90: 0.31, 95: 0.4, 99: 1.1},
-		Spikes:          []PingSpike{{Seq: 42, RTTMs: 2.5}},
-		MissingSeqRuns:  []SeqRun{{FirstSeq: 100, Len: 1}},
-		LongestSeqGap:   1,
-		LongestGapMs:    44.5,
-		IntervalUsedSec: 0.02,
-		ExitCode:        1,
-		UnparsedLines:   0,
+		Percentiles:          map[int]float64{50: 0.2, 90: 0.31, 95: 0.4, 99: 1.1},
+		Spikes:               []PingSpike{{Seq: 42, RTTMs: 2.5}},
+		MissingSeqRuns:       []SeqRun{{FirstSeq: 100, Len: 1}},
+		LongestMissingRunLen: 1,
+		LongestGapMs:         44.5,
+		IntervalUsedSec:      0.02,
+		ExitCode:             1,
+		UnparsedLines:        0,
 	}
 
 	cpu := CPUUsage{HostTotal: 12.5, HostUser: 4.5, HostSystem: 8.0, RemoteTotal: 33.1, RemoteUser: 10.0, RemoteSystem: 23.1}

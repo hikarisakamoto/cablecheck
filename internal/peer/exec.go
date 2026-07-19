@@ -10,8 +10,11 @@ import (
 	"cablecheck/internal/protocol"
 )
 
+// opCancel must stay in sync with testsuite.OpCancel.
+const opCancel = "cancel"
+
 // handleTestRequest processes one coordinator RPC on the worker: at most one
-// op runs at a time — an overlapping request (except op "cancel") is
+// op runs at a time — an overlapping request (except opCancel) is
 // answered immediately with status "rejected".
 func (s *session) handleTestRequest(env *protocol.Envelope) {
 	if s.cfg.Role != RolePC2 {
@@ -30,7 +33,7 @@ func (s *session) handleTestRequest(env *protocol.Envelope) {
 	s.opMu.Lock()
 	running := s.activeOp
 	s.opMu.Unlock()
-	if req.Op == "cancel" {
+	if req.Op == opCancel {
 		if running != nil {
 			s.log.Info("cancelling active op on request", "op", running.op)
 			running.cancel()

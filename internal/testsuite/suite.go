@@ -329,31 +329,42 @@ func (q *QuickPlan) tcpTimeout() time.Duration {
 	return q.TCPDuration + clientTimeoutSlack + 20*time.Second
 }
 
+// withRemoteServer runs one client phase against a one-off server on the
+// worker, preserving unavailable-tool skips and always stopping a server that
+// was started. The bool reports whether the client phase ran.
+func (q *QuickPlan) withRemoteServer(ctx context.Context, rc peer.RemoteCaller, stage, skipNote string,
+	runClient func() error) (bool, error) {
+	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, stage)
+	if err != nil {
+		return false, err
+	}
+	if out == nil {
+		q.Results.Notes = append(q.Results.Notes, skipNote)
+		return false, nil
+	}
+	runErr := runClient()
+	_, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
+		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout)
+	if runErr == nil && stopErr != nil {
+		return true, stopErr
+	}
+	return true, runErr
+}
+
 // stepTCPForward measures PC1 → PC2: the worker hosts the one-off server
 // (server always on the receiving side), the local client sends. A failed or
 // aborted client run still contributes its partial result to Results (marked
 // via SessionResults.Incomplete) before the step reports the error.
 func (q *QuickPlan) stepTCPForward(ctx context.Context, rc peer.RemoteCaller) error {
-	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
-		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, "tcp")
-	if err != nil {
-		return err
-	}
-	if out == nil {
-		q.Results.Notes = append(q.Results.Notes,
-			"TCP throughput PC1 → PC2 skipped: peer iperf3 unavailable")
-		return nil
-	}
-	res, runErr := q.Ops.Iperf.RunTCPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
-		q.TCPDuration, q.Streams, false)
-	q.recordTCP(res, model.DirectionPC1ToPC2)
-	// Stop the remote server even after a failed client run, so no one-off
-	// server lingers waiting for a client that will never come.
-	if _, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
-		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout); runErr == nil && stopErr != nil {
-		return stopErr
-	}
-	return runErr
+	_, err := q.withRemoteServer(ctx, rc, "tcp",
+		"TCP throughput PC1 → PC2 skipped: peer iperf3 unavailable", func() error {
+			res, runErr := q.Ops.Iperf.RunTCPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
+				q.TCPDuration, q.Streams, false)
+			q.recordTCP(res, model.DirectionPC1ToPC2)
+			return runErr
+		})
+	return err
 }
 
 // recordTCP appends one TCP run outcome (complete or partial) to Results
@@ -398,30 +409,20 @@ func (q *QuickPlan) stepBidir(ctx context.Context, rc peer.RemoteCaller) error {
 // --bidir on PC1. A failed or aborted client still contributes its partial
 // result before the step reports the error.
 func (q *QuickPlan) bidirNative(ctx context.Context, rc peer.RemoteCaller) error {
-	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
-		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, "bidirectional")
-	if err != nil {
-		return err
-	}
-	if out == nil {
-		q.Results.Notes = append(q.Results.Notes,
-			"bidirectional stress skipped: peer iperf3 unavailable")
-		return nil
-	}
-	res, runErr := q.Ops.Iperf.RunBidirClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
-		q.TCPDuration, q.Streams)
-	if res != nil {
-		bidir := res.Bidir
-		q.Results.Bidir = &bidir
-		if res.Incomplete {
-			q.Results.Incomplete = true
-		}
-	}
-	if _, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
-		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout); runErr == nil && stopErr != nil {
-		return stopErr
-	}
-	return runErr
+	_, err := q.withRemoteServer(ctx, rc, "bidirectional",
+		"bidirectional stress skipped: peer iperf3 unavailable", func() error {
+			res, runErr := q.Ops.Iperf.RunBidirClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
+				q.TCPDuration, q.Streams)
+			if res != nil {
+				bidir := res.Bidir
+				q.Results.Bidir = &bidir
+				if res.Incomplete {
+					q.Results.Incomplete = true
+				}
+			}
+			return runErr
+		})
+	return err
 }
 
 // bidirFallback runs the two-phase bidirectional fallback: both one-way
@@ -541,25 +542,18 @@ func (q *QuickPlan) stepUDP(ctx context.Context, rc peer.RemoteCaller) error {
 	rate := q.udpRate()
 
 	// Forward: server on PC2, local client sends.
-	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
-		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, "udp")
+	ran, err := q.withRemoteServer(ctx, rc, "udp",
+		"UDP loss/jitter skipped: peer iperf3 unavailable", func() error {
+			res, runErr := q.Ops.Iperf.RunUDPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
+				q.UDPDuration, uint64(rate), UDPPayloadForMTU(q.MTU))
+			q.recordUDP(res, model.DirectionPC1ToPC2)
+			return runErr
+		})
 	if err != nil {
 		return err
 	}
-	if out == nil {
-		q.Results.Notes = append(q.Results.Notes,
-			"UDP loss/jitter skipped: peer iperf3 unavailable")
+	if !ran {
 		return nil
-	}
-	res, runErr := q.Ops.Iperf.RunUDPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
-		q.UDPDuration, uint64(rate), UDPPayloadForMTU(q.MTU))
-	q.recordUDP(res, model.DirectionPC1ToPC2)
-	if _, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
-		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout); runErr == nil && stopErr != nil {
-		return stopErr
-	}
-	if runErr != nil {
-		return runErr
 	}
 
 	// Reverse: local server, the worker's client sends toward PC1.
@@ -571,7 +565,7 @@ func (q *QuickPlan) stepUDP(ctx context.Context, rc peer.RemoteCaller) error {
 	if err := h.Ready(ctx); err != nil {
 		return err
 	}
-	out, err = q.callRemoteForTest(ctx, rc, OpIperfUDPRun, UDPRunParams{
+	out, err := q.callRemoteForTest(ctx, rc, OpIperfUDPRun, UDPRunParams{
 		LocalIP:     q.PeerIP.String(),
 		PeerIP:      q.LocalIP.String(),
 		Port:        q.IperfPort,

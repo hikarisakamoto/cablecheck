@@ -3,6 +3,7 @@ package testsuite
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/netip"
 	"slices"
 	"strings"
@@ -56,6 +57,10 @@ func TestUDPClientArgs(t *testing.T) {
 	}
 	if u.ActualSenderBps != 100096000.0 {
 		t.Errorf("ActualSenderBps = %v, want 100096000", u.ActualSenderBps)
+	}
+	wantReceiverBps := u.ActualSenderBps * (100 - u.LossPercent) / 100
+	if math.Abs(u.ActualReceiverBps-wantReceiverBps) > 1e-6 {
+		t.Errorf("ActualReceiverBps = %v, want %v from sender rate and loss", u.ActualReceiverBps, wantReceiverBps)
 	}
 	if u.CPU.HostTotal != 5.104061 {
 		t.Errorf("CPU.HostTotal = %v, want 5.104061", u.CPU.HostTotal)
