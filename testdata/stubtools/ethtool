@@ -1,0 +1,35 @@
+#!/bin/sh
+
+set -eu
+
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+fixture_dir=$dir/../ethtool
+
+case "${1-}" in
+	--version)
+		printf '%s\n' 'ethtool version 6.9'
+		;;
+	-S)
+		cat "$fixture_dir/stats_e1000e_clean.txt"
+		;;
+	--cable-test)
+		cat "$fixture_dir/cabletest_ok.txt"
+		;;
+	-i)
+		cat "$fixture_dir/driverinfo_e1000e.txt"
+		;;
+	--help|-h)
+		printf '%s\n' 'Usage: ethtool [ FLAGS ] DEVNAME'
+		;;
+	"")
+		printf '%s\n' 'ethtool stub: missing interface or option' >&2
+		exit 2
+		;;
+	-*)
+		printf 'ethtool stub: unsupported option: %s\n' "$1" >&2
+		exit 2
+		;;
+	*)
+		cat "$fixture_dir/settings_e1000e_1g.txt"
+		;;
+esac

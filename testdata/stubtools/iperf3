@@ -1,0 +1,45 @@
+#!/bin/sh
+
+set -eu
+
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+fixture_dir=$dir/../iperf
+
+case "${1-}" in
+	--version|-v)
+		cat "$fixture_dir/version_39.txt"
+		exit 0
+		;;
+	--help|-h)
+		cat "$fixture_dir/help_with_bidir.txt"
+		exit 0
+		;;
+esac
+
+server=false
+udp=false
+bidir=false
+for arg do
+	case "$arg" in
+		-s|--server) server=true ;;
+		-u|--udp) udp=true ;;
+		--bidir) bidir=true ;;
+	esac
+done
+
+if "$server"; then
+	cat "$fixture_dir/server_listening.txt"
+	trap 'exit 0' TERM INT
+	while :; do
+		sleep 60
+	done
+fi
+
+sleep 0.3
+if "$udp"; then
+	cat "$fixture_dir/udp_39_loss.json"
+elif "$bidir"; then
+	cat "$fixture_dir/bidir_39.json"
+else
+	cat "$fixture_dir/tcp_39_fwd.json"
+fi
