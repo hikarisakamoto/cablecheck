@@ -18,6 +18,7 @@ import (
 
 	"cablecheck/internal/config"
 	"cablecheck/internal/model"
+	"cablecheck/internal/network"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner"
@@ -852,6 +853,37 @@ func usedIperfPort(side *intSide, port int) bool {
 	return false
 }
 
+// probedFreeIperfPort asks the kernel for an ephemeral loopback TCP port,
+// releases it, then verifies that both it and its successor satisfy the same
+// TCP+UDP availability checks as iperf preflight.
+func probedFreeIperfPort(t *testing.T) uint16 {
+	t.Helper()
+	loopback := netip.MustParseAddr("127.0.0.1")
+	for range 100 {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("allocate ephemeral iperf port: %v", err)
+		}
+		port := uint16(listener.Addr().(*net.TCPAddr).Port)
+		if err := listener.Close(); err != nil {
+			t.Errorf("close ephemeral iperf port probe: %v", err)
+			continue
+		}
+		if port == ^uint16(0) {
+			continue
+		}
+		if network.ProbePortFree(loopback, port) != nil {
+			continue
+		}
+		if network.ProbePortFree(loopback, port+1) != nil {
+			continue
+		}
+		return port
+	}
+	t.Fatalf("could not find two consecutive free loopback ports for iperf")
+	return 0
+}
+
 // warningsMention reports whether any report warning contains sub.
 func warningsMention(rep *model.Report, sub string) bool {
 	for _, w := range rep.Warnings {
@@ -901,7 +933,9 @@ func testStaleIperf3Detection(t *testing.T) {
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	defer cancel1()
 	pc1, port := startCoordinator(t, ctx1, intSpec{iperfPort: 45681})
-	pc2 := startWorker(t, context.Background(), intSpec{iperfPort: 45683, stalePidfile: true}, port)
+	pc2 := startWorker(t, context.Background(), intSpec{
+		iperfPort: probedFreeIperfPort(t), stalePidfile: true,
+	}, port)
 
 	code2, err2 := pc2.app.Wait()
 	if code2 != ExitConfig {
@@ -937,6 +971,18 @@ func testStaleIperf3Detection(t *testing.T) {
 	if code1 == ExitOK {
 		t.Errorf("pc1 = %d, want a non-success shutdown code after the worker never connected\n%s",
 			code1, pc1.out.dump())
+	}
+}
+
+func TestProbedFreeIperfPort(t *testing.T) {
+	port := probedFreeIperfPort(t)
+	if port == 0 || port == ^uint16(0) {
+		t.Errorf("probed iperf port = %d, want a nonzero base with room for port+1", port)
+	}
+	for _, candidate := range []uint16{port, port + 1} {
+		if err := network.ProbePortFree(netip.MustParseAddr("127.0.0.1"), candidate); err != nil {
+			t.Errorf("probed iperf port %d is not free: %v", candidate, err)
+		}
 	}
 }
 
