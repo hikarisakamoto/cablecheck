@@ -2,6 +2,7 @@ package evaluate
 
 import (
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -187,3 +188,42 @@ func TestFactsFromReportDirections(t *testing.T) {
 		t.Errorf("Dir[1].UDPLossPct = %v, want 8", f.Dir[1].UDPLossPct)
 	}
 }
+
+func TestFactsFromReportIgnoresIncompleteTCPDirection(t *testing.T) {
+	r := &model.Report{
+		PC1:     model.PeerReport{NIC: model.NICReport{Name: "eth0", Driver: "e1000e", SpeedMbps: 1000}},
+		PC2:     model.PeerReport{NIC: model.NICReport{Name: "eth0", Driver: "e1000e", SpeedMbps: 1000}},
+		Partial: true,
+		Tests: model.TestsSection{TCP: []model.TCPResult{
+			{
+				Direction:           model.DirectionPC1ToPC2,
+				Incomplete:          true,
+				SenderBitsPerSecond: 0,
+				ThroughputVariation: 0.75,
+				Retransmissions:     uint64Ptr(99),
+				IntervalResults:     []model.TCPInterval{{BitsPerSecond: 0, Retransmits: uint64Ptr(99)}},
+			},
+			{
+				Direction:             model.DirectionPC2ToPC1,
+				ReceiverBitsPerSecond: 941_000_000,
+			},
+		}},
+	}
+
+	f := FactsFromReport(r)
+	if f.Dir[0].TCPAvailable {
+		t.Errorf("incomplete TCP direction marked available: %+v", f.Dir[0])
+	}
+	if f.Dir[0].TCPBitrate != 0 || f.Dir[0].TCPCoV != 0 || f.Dir[0].TCPCollapses != 0 || f.Dir[0].TCPRetransRate != 0 {
+		t.Errorf("incomplete TCP metrics leaked into facts: %+v", f.Dir[0])
+	}
+	res := Evaluate(f)
+	if res.Class != model.HealthInconclusive {
+		t.Errorf("class = %s, want INCONCLUSIVE for partial run (findings %v)", res.Class, findingIDs(res))
+	}
+	if slices.Contains(findingIDs(res), "PERF-01") {
+		t.Errorf("findings %v contain PERF-01 for an incomplete placeholder", findingIDs(res))
+	}
+}
+
+func uint64Ptr(v uint64) *uint64 { return &v }

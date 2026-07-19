@@ -46,6 +46,9 @@ type TCPInterval struct {
 type TCPResult struct {
 	// Direction is DirectionPC1ToPC2 or DirectionPC2ToPC1.
 	Direction string `json:"direction"`
+	// Incomplete marks a placeholder or partial result from a TCP run that
+	// did not finish. Evaluators must not treat its metrics as measurements.
+	Incomplete bool `json:"incomplete,omitempty"`
 	// Duration is the configured test duration.
 	Duration Duration `json:"duration"`
 	// ParallelStreams is the iperf3 -P value.

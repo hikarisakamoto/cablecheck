@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -19,13 +20,10 @@ import (
 	"cablecheck/internal/testsuite"
 )
 
-// TestFinishCoordinatorKeepsExchangedVerdict pins the complete-frame
-// contract: once the verdict has been sent to PC2 in the complete frame, the
-// success-path re-rendering (which merges in the peer capabilities known
-// only after peer.Run returns) must not change the classification, exit code
-// or summary — otherwise PC1's exit code, stdout summary and report.json can
-// disagree with the exit code PC2 exits with for the same run.
-func TestFinishCoordinatorKeepsExchangedVerdict(t *testing.T) {
+// TestFinishCoordinatorRefreshesVerdictAfterPeerCapabilities pins that the
+// success-path rendering merges worker facts before choosing PC1's final
+// classification and exit code.
+func TestFinishCoordinatorRefreshesVerdictAfterPeerCapabilities(t *testing.T) {
 	var out bytes.Buffer
 	cfg := &config.RunConfig{
 		Role:    config.RolePC1,
@@ -50,8 +48,8 @@ func TestFinishCoordinatorKeepsExchangedVerdict(t *testing.T) {
 	v := &verdict{}
 	startedAt := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 
-	// First pass: what the plan wrapper renders before the session sends the
-	// complete frame. The verdict stored here is the one PC2 receives.
+	// First pass: what the plan wrapper can render before the session outcome
+	// exposes the worker capabilities.
 	if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log); err != nil {
 		t.Fatalf("first finalize: %v", err)
 	}
@@ -69,7 +67,8 @@ func TestFinishCoordinatorKeepsExchangedVerdict(t *testing.T) {
 		},
 	}
 	enriched := a.assembleReport(pf, results, startedAt, startedAt, nil, outcome)
-	if fresh := evaluate.Evaluate(evaluate.FactsFromReport(enriched)); string(fresh.Class) == exchanged.Classification {
+	fresh := evaluate.Evaluate(evaluate.FactsFromReport(enriched))
+	if string(fresh.Class) == exchanged.Classification {
 		t.Fatalf("fixture broken: re-evaluating with the peer caps still yields %s", fresh.Class)
 	}
 
@@ -77,11 +76,11 @@ func TestFinishCoordinatorKeepsExchangedVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finishCoordinator: %v", err)
 	}
-	if code != ExitCode(exchanged.ExitCode) {
-		t.Errorf("exit code = %d, want the exchanged %d", code, exchanged.ExitCode)
+	if code != ExitCodeFor(fresh.Class) {
+		t.Errorf("exit code = %d, want %d for refreshed class %s", code, ExitCodeFor(fresh.Class), fresh.Class)
 	}
-	if after := v.complete(); after != exchanged {
-		t.Errorf("verdict changed after enrichment:\nexchanged: %+v\nafter:     %+v", exchanged, after)
+	if after := v.complete(); after.Classification != string(fresh.Class) || after.ExitCode != int(ExitCodeFor(fresh.Class)) {
+		t.Errorf("stored verdict was not refreshed:\nprovisional: %+v\nafter:       %+v", exchanged, after)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
 	if err != nil {
@@ -91,13 +90,85 @@ func TestFinishCoordinatorKeepsExchangedVerdict(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal report.json: %v", err)
 	}
-	if string(got.Classification) != exchanged.Classification {
-		t.Errorf("report.json classification = %s, want the exchanged %s", got.Classification, exchanged.Classification)
+	if got.Classification != fresh.Class {
+		t.Errorf("report.json classification = %s, want refreshed %s", got.Classification, fresh.Class)
 	}
 	// The enrichment still lands: the peer machine description made it in.
 	if got.PC2.NIC.Name != "eth0" {
 		t.Errorf("peer machine description missing after enrichment: PC2.NIC = %+v", got.PC2.NIC)
 	}
+}
+
+func TestFinishCoordinatorReevaluatesAfterPeerCapabilities(t *testing.T) {
+	var out bytes.Buffer
+	cfg := &config.RunConfig{
+		Role: config.RolePC1, LocalIP: netip.MustParseAddr("127.0.0.1"),
+		PeerIP: netip.MustParseAddr("127.0.0.1"), Mode: config.ModeQuick, Token: "testtoken1234",
+	}
+	a, err := New(cfg, Deps{Stdout: &out, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	dir := t.TempDir()
+	rawDir := filepath.Join(dir, "raw")
+	if err := os.MkdirAll(rawDir, 0o700); err != nil {
+		t.Fatalf("mkdir raw: %v", err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pf := &preflightInfo{Link: model.LinkSettings{SpeedMbps: 1000, Duplex: "full", LinkDetected: true}}
+	pf.Iface.Name = "eth0"
+	pf.Iface.Class.Driver = "e1000e"
+	cleanBefore := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	cleanAfter := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	results := &testsuite.SessionResults{
+		InitialCounters: model.PeerCounters{PC1: cleanBefore, PC2: cleanBefore},
+		FinalCounters:   model.PeerCounters{PC1: cleanAfter, PC2: cleanAfter},
+		TCP: []model.TCPResult{
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
+		},
+	}
+	v := &verdict{}
+	startedAt := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log); err != nil {
+		t.Fatalf("provisional finalize: %v", err)
+	}
+	if provisional := v.complete(); provisional.Classification != string(model.HealthExcellent) {
+		t.Fatalf("provisional class = %s, want EXCELLENT", provisional.Classification)
+	}
+
+	outcome := &peer.Outcome{PeerCaps: protocol.Capabilities{
+		NIC: protocol.NICInfo{Name: "veth0", Driver: "", SpeedMbps: 1000, Duplex: "full", MTU: 1500},
+	}}
+	code, err := a.finishCoordinator(dir, rawDir, pf, results, v, startedAt, outcome, nil, log)
+	if err != nil {
+		t.Fatalf("finishCoordinator: %v", err)
+	}
+	if code != ExitInconclusive {
+		t.Errorf("exit code = %d, want %d", code, ExitInconclusive)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	if err != nil {
+		t.Fatalf("read report.json: %v", err)
+	}
+	var rep model.Report
+	if err := json.Unmarshal(data, &rep); err != nil {
+		t.Fatalf("unmarshal report.json: %v", err)
+	}
+	if rep.Classification != model.HealthInconclusive {
+		t.Errorf("classification = %s, want INCONCLUSIVE (findings %v)", rep.Classification, rep.ClassificationReasons)
+	}
+	if !slices.Contains(findingRuleIDs(rep.Findings), "HOST-02") {
+		t.Errorf("findings = %v, want HOST-02", findingRuleIDs(rep.Findings))
+	}
+}
+
+func findingRuleIDs(findings []model.Finding) []string {
+	ids := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		ids = append(ids, finding.RuleID)
+	}
+	return ids
 }
 
 func TestCapabilitiesExchangePropagatesPeerUSB(t *testing.T) {
@@ -129,6 +200,76 @@ func TestCapabilitiesExchangePropagatesPeerUSB(t *testing.T) {
 	if rep.Machines == nil || !rep.Machines.PC2.NIC.USB {
 		t.Errorf("Machines.PC2.NIC.USB was not propagated: %+v", rep.Machines)
 	}
+}
+
+func TestRuntimeSkippedPingCapsEvaluationAtGood(t *testing.T) {
+	cfg := &config.RunConfig{Role: config.RolePC1}
+	a, err := New(cfg, Deps{StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pf := &preflightInfo{}
+	pf.Iface.Name = "eth0"
+	pf.Iface.Class.Driver = "e1000e"
+	pf.Link = model.LinkSettings{SpeedMbps: 1000, Duplex: "full", LinkDetected: true}
+	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	results := &testsuite.SessionResults{
+		InitialCounters: model.PeerCounters{PC1: before, PC2: before},
+		FinalCounters:   model.PeerCounters{PC1: after, PC2: after},
+		TCP: []model.TCPResult{
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
+		},
+		SkippedTests: []model.SkippedTest{{
+			Name: "ping", Reason: "peer could not run ping_run: ping disappeared after preflight",
+		}},
+	}
+	when := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	outcome := &peer.Outcome{PeerCaps: protocol.Capabilities{
+		NIC: protocol.NICInfo{Name: "eth0", Driver: "e1000e", SpeedMbps: 1000, Duplex: "full"},
+	}}
+	rep := a.assembleReport(pf, results, when, when, nil, outcome)
+	if !slices.Contains(rep.SkippedTests, results.SkippedTests[0]) {
+		t.Errorf("report.SkippedTests = %+v, want runtime skip %+v", rep.SkippedTests, results.SkippedTests[0])
+	}
+	res := evaluate.Evaluate(evaluate.FactsFromReport(rep))
+	if res.Class != model.HealthGood {
+		t.Errorf("class = %s, want GOOD when remote ping is unavailable (findings %v)", res.Class, findingIDsForApp(res))
+	}
+	if !slices.Contains(findingIDsForApp(res), "LIM-02") {
+		t.Errorf("findings = %v, want LIM-02", findingIDsForApp(res))
+	}
+}
+
+func TestAssembleReportPropagatesAssumedUDPRate(t *testing.T) {
+	cfg := &config.RunConfig{Role: config.RolePC1}
+	a, err := New(cfg, Deps{StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	when := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	rep := a.assembleReport(&preflightInfo{}, &testsuite.SessionResults{UDPRateAssumed: true},
+		when, when, nil, nil)
+	if !rep.UDPRateAssumed {
+		t.Errorf("report.UDPRateAssumed = false, want true")
+	}
+	facts := evaluate.FactsFromReport(rep)
+	if !facts.UDPRateAssumed {
+		t.Errorf("facts.UDPRateAssumed = false, want true")
+	}
+	res := evaluate.Evaluate(facts)
+	if !slices.Contains(findingIDsForApp(res), "LIM-04") {
+		t.Errorf("findings = %v, want LIM-04", findingIDsForApp(res))
+	}
+}
+
+func findingIDsForApp(res evaluate.Result) []string {
+	ids := make([]string, 0, len(res.Findings))
+	for _, finding := range res.Findings {
+		ids = append(ids, finding.RuleID)
+	}
+	return ids
 }
 
 // newWorkerApp builds a minimal PC2 App for finishWorker tests.

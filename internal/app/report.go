@@ -23,10 +23,9 @@ import (
 
 // verdict is the evaluated outcome shared between the plan goroutine (which
 // stores it after rendering the report) and the session's Complete callback
-// (which reads it to fill the complete frame). It keeps the complete
-// evaluation result so a later re-rendering can reuse it verbatim instead of
-// re-evaluating — once the verdict has been exchanged with the peer it must
-// never change.
+// (which reads it to fill the complete frame). A later rendering replaces the
+// stored result after merging newly available peer capabilities, ensuring the
+// final report and coordinator exit code use the complete evidence set.
 type verdict struct {
 	mu      sync.Mutex
 	set     bool
@@ -74,15 +73,13 @@ func (v *verdict) complete() protocol.Complete {
 	}
 }
 
-// finalize assembles the report from everything measured, renders all three
-// outputs into dir and stores the verdict. When v already holds a verdict —
-// the success-path re-rendering that enriches the report with the peer's
-// machine description — that stored evaluation is reused verbatim: the
-// verdict was already exchanged with the peer in the complete frame, and
-// re-evaluating over the enriched report could change the classification,
-// leaving PC1's exit code and report at odds with the exit code PC2 acted
-// on. failure is nil for a completed plan; outcome enriches the peer side
-// when available. Failures are wrapped in errReportWrite (exit 7).
+// finalize assembles the report from everything measured, evaluates it,
+// renders all three outputs into dir and stores the verdict. Re-rendering with
+// a session outcome intentionally re-evaluates after peer capabilities have
+// been merged: virtual interfaces, USB attachment and peer NIC properties are
+// classification facts, not presentation-only enrichment. failure is nil for
+// a completed plan; outcome enriches the peer side when available. Failures
+// are wrapped in errReportWrite (exit 7).
 func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite.SessionResults,
 	v *verdict, startedAt time.Time, failure *model.FailureDetails, outcome *peer.Outcome,
 	log *slog.Logger) error {
@@ -93,10 +90,7 @@ func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite
 		finishedAt = a.deps.Clock.Now()
 	}
 	rep := a.assembleReport(pf, results, startedAt, finishedAt, failure, outcome)
-	res, _, _, _ := v.get()
-	if !stored {
-		res = evaluate.Evaluate(evaluate.FactsFromReport(rep))
-	}
+	res := evaluate.Evaluate(evaluate.FactsFromReport(rep))
 	rep.Classification = res.Class
 	rep.Score = res.Score
 	rep.Findings = res.Findings
@@ -108,13 +102,11 @@ func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite
 	if err := writeReportFiles(dir, rep); err != nil {
 		return fmt.Errorf("%w: %w", errReportWrite, err)
 	}
-	if !stored {
-		summary := fmt.Sprintf("cable health: %s", res.Class)
-		if len(res.Findings) > 0 {
-			summary += " — " + res.Findings[0].Text
-		}
-		v.store(res, summary, ExitCodeFor(res.Class), finishedAt)
+	summary := fmt.Sprintf("cable health: %s", res.Class)
+	if len(res.Findings) > 0 {
+		summary += " — " + res.Findings[0].Text
 	}
+	v.store(res, summary, ExitCodeFor(res.Class), finishedAt)
 	log.Info("report rendered", "dir", dir, "classification", string(res.Class))
 	return nil
 }
@@ -212,7 +204,8 @@ func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResult
 		FinalCounters:   results.FinalCounters,
 		CounterDeltas:   deltas,
 		Warnings:        warnings,
-		SkippedTests:    a.skippedTests(),
+		SkippedTests:    append(a.skippedTests(), results.SkippedTests...),
+		UDPRateAssumed:  results.UDPRateAssumed,
 		Partial:         partial,
 		Failure:         failure,
 		Link:            link,

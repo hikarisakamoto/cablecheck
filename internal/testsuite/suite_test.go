@@ -295,6 +295,9 @@ func TestQuickPlanPreservesPartialTCPForward(t *testing.T) {
 		t.Fatalf("results.TCP has %d entries %+v, want the 1 partial forward result", len(results.TCP), results.TCP)
 	}
 	got := results.TCP[0]
+	if !got.Incomplete {
+		t.Errorf("partial TCP result Incomplete = false, want true")
+	}
 	if got.Direction != model.DirectionPC1ToPC2 {
 		t.Errorf("partial result direction = %q, want %q", got.Direction, model.DirectionPC1ToPC2)
 	}
@@ -336,10 +339,33 @@ func TestQuickPlanPreservesPartialTCPReverse(t *testing.T) {
 		t.Fatalf("results.TCP has %d entries %+v, want forward + partial reverse", len(results.TCP), results.TCP)
 	}
 	partial := results.TCP[1]
+	if !partial.Incomplete {
+		t.Errorf("partial TCP result Incomplete = false, want true")
+	}
 	if partial.Direction != model.DirectionPC2ToPC1 {
 		t.Errorf("partial result direction = %q, want %q", partial.Direction, model.DirectionPC2ToPC1)
 	}
 	if partial.Duration != model.Duration(30*time.Second) || partial.ParallelStreams != 4 {
 		t.Errorf("partial result lost its run parameters: %+v, want 30s / 4 streams", partial)
+	}
+}
+
+func TestQuickPlanRecordsUnavailableRemotePing(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ping", Result: fixture(t, "ping", "quick_clean_100")})
+	rc := newFakeCaller(t)
+	rc.replyStatus(OpPingRun, StatusUnavailable, "ping disappeared after preflight", nil)
+
+	results := &SessionResults{}
+	plan := newQuickPlan(newTestOps(t, fr), results)
+	if err := plan.stepPing(context.Background(), rc); err != nil {
+		t.Fatalf("stepPing: %v", err)
+	}
+	if len(results.Ping) != 1 {
+		t.Errorf("results.Ping has %d entries, want the completed local direction only", len(results.Ping))
+	}
+	want := model.SkippedTest{Name: "ping", Reason: "peer could not run ping_run: ping disappeared after preflight"}
+	if !slices.Contains(results.SkippedTests, want) {
+		t.Errorf("SkippedTests = %+v, want %+v", results.SkippedTests, want)
 	}
 }

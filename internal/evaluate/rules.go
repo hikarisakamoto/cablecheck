@@ -709,6 +709,7 @@ func ruleLIM01(f *Facts) *model.Finding {
 // noncriticalTests names the tests whose absence caps EXCELLENT to GOOD but
 // never invalidates the run.
 var noncriticalTests = map[string]bool{
+	"ping":           true,
 	"udp":            true,
 	"bidir":          true,
 	"bidirectional":  true,

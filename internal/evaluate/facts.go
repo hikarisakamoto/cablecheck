@@ -127,8 +127,7 @@ type Facts struct {
 	// Partial reports whether the run was interrupted.
 	Partial bool
 	// UDPRateAssumed reports whether the UDP target rate was assumed rather
-	// than derived from a known link speed. FactsFromReport cannot derive
-	// it; the orchestrator sets it before calling Evaluate.
+	// than derived from a known link speed.
 	UDPRateAssumed bool
 	// UDPNearSaturation reports whether the UDP target rate exceeded 95% of
 	// the negotiated link speed (loss there is expected, not evidence).
@@ -215,6 +214,9 @@ func FactsFromReport(r *model.Report) *Facts {
 			continue // evaluate the first run per direction
 		}
 		tcpSeen[i] = true
+		if tr.Incomplete {
+			continue
+		}
 		d := &f.Dir[i]
 		d.TCPAvailable = true
 		bps := tr.ReceiverBitsPerSecond
@@ -259,6 +261,7 @@ func FactsFromReport(r *model.Report) *Facts {
 	f.USBAdapter = r.PC1.NIC.USB || r.PC2.NIC.USB
 	f.VirtualInterface = virtualNIC(r.PC1.NIC) || virtualNIC(r.PC2.NIC)
 	f.Partial = r.Partial
+	f.UDPRateAssumed = r.UDPRateAssumed
 
 	if f.NegotiatedSpeed > 0 {
 		for _, u := range r.Tests.UDP {

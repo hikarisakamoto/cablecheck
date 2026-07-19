@@ -20,9 +20,8 @@ import (
 // returned error only feeds the session's warning path — it never changes
 // classification or exit code.
 //
-// prepare re-renders the report set with the given peer capabilities; it must
-// leave the stored verdict unchanged (the verdict was already exchanged in the
-// complete frame). A prepare failure degrades gracefully: it is logged and the
+// prepare re-renders and re-evaluates the report set with the given peer
+// capabilities before the complete frame is sent. A prepare failure degrades gracefully: it is logged and the
 // transfer proceeds with whatever the plan wrapper already rendered at dir
 // (a valid report set, only missing the peer-machine enrichment). Streaming
 // those bytes is strictly better than aborting the transfer and sending PC2

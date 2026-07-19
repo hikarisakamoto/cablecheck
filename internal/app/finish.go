@@ -15,8 +15,9 @@ import (
 
 // finishCoordinator maps PC1's session outcome onto files and exit codes.
 // On success the report was already rendered by the plan wrapper; the files
-// are re-rendered once more here so the peer's machine description (known
-// only after peer.Run returns) makes it into the record. On failure a
+// are re-rendered and re-evaluated once more here so the peer's machine
+// description (known only after peer.Run returns) participates in the final
+// verdict. On failure a
 // partial report with Partial=true and FailureDetails is written from
 // whatever the plan accumulated.
 func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
@@ -26,10 +27,8 @@ func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
 		if _, _, _, ok := v.get(); !ok {
 			return ExitInternal, errors.New("app: session completed without a verdict")
 		}
-		// Enrich with the peer capabilities. finalize reuses the stored
-		// verdict, so the classification that was already exchanged in the
-		// complete frame — and that PC2's exit code is based on — survives
-		// the re-rendering unchanged.
+		// Enrich with the peer capabilities and replace the provisional
+		// verdict with an evaluation over the complete report.
 		if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, outcome, log); err != nil {
 			log.Warn("re-rendering the final report failed; the pre-complete rendering stands", "err", err)
 		}

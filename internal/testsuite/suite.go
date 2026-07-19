@@ -59,6 +59,9 @@ type SessionResults struct {
 	// Notes records limitations hit during the run (denied ping interval,
 	// unavailable remote tools, ...).
 	Notes []string
+	// SkippedTests records planned measurements that could not run because a
+	// required tool became unavailable at runtime.
+	SkippedTests []model.SkippedTest
 	// Incomplete marks a run that did not finish all steps.
 	Incomplete bool
 }
@@ -162,6 +165,13 @@ func (q *QuickPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 // the error so the caller can preserve the partial data.
 func (q *QuickPlan) callRemote(ctx context.Context, rc peer.RemoteCaller, op string,
 	params any, timeout time.Duration) (any, error) {
+	return q.callRemoteForTest(ctx, rc, op, params, timeout, "")
+}
+
+// callRemoteForTest performs callRemote and associates an unavailable RPC
+// with the planned test whose measurement that RPC was serving.
+func (q *QuickPlan) callRemoteForTest(ctx context.Context, rc peer.RemoteCaller, op string,
+	params any, timeout time.Duration, testName string) (any, error) {
 	res, err := rc.Call(ctx, op, params, timeout, nil)
 	if err != nil {
 		return nil, fmt.Errorf("remote %s: %w", op, err)
@@ -174,8 +184,9 @@ func (q *QuickPlan) callRemote(ctx context.Context, rc peer.RemoteCaller, op str
 		}
 		return out, nil
 	case StatusUnavailable:
-		q.Results.Notes = append(q.Results.Notes,
-			fmt.Sprintf("peer could not run %s: %s", op, res.Error))
+		reason := fmt.Sprintf("peer could not run %s: %s", op, res.Error)
+		q.Results.Notes = append(q.Results.Notes, reason)
+		q.recordSkippedTest(testName, reason)
 		return nil, nil
 	default:
 		var partial any
@@ -188,6 +199,20 @@ func (q *QuickPlan) callRemote(ctx context.Context, rc peer.RemoteCaller, op str
 	}
 }
 
+// recordSkippedTest records one semantic test name, preserving the first
+// runtime reason when multiple RPCs belonging to that test are unavailable.
+func (q *QuickPlan) recordSkippedTest(name, reason string) {
+	if name == "" {
+		return
+	}
+	for _, skipped := range q.Results.SkippedTests {
+		if skipped.Name == name {
+			return
+		}
+	}
+	q.Results.SkippedTests = append(q.Results.SkippedTests, model.SkippedTest{Name: name, Reason: reason})
+}
+
 // stepLink captures both sides' link settings and observations.
 func (q *QuickPlan) stepLink(ctx context.Context, rc peer.RemoteCaller) error {
 	if q.Results.Link == nil {
@@ -198,7 +223,7 @@ func (q *QuickPlan) stepLink(ctx context.Context, rc peer.RemoteCaller) error {
 		return err
 	}
 	q.Results.Link[RolePC1Key] = &LinkSettingsResult{Settings: settings, Observations: obs}
-	out, err := q.callRemote(ctx, rc, OpLinkSettings, nil, opCallTimeout)
+	out, err := q.callRemoteForTest(ctx, rc, OpLinkSettings, nil, opCallTimeout, "link_settings")
 	if err != nil {
 		return err
 	}
@@ -226,7 +251,7 @@ func (q *QuickPlan) snapshotCounters(ctx context.Context, rc peer.RemoteCaller, 
 		return err
 	}
 	into.PC1 = &snap
-	out, err := q.callRemote(ctx, rc, OpCountersSnapshot, nil, opCallTimeout)
+	out, err := q.callRemoteForTest(ctx, rc, OpCountersSnapshot, nil, opCallTimeout, "counters")
 	if err != nil {
 		return err
 	}
@@ -247,8 +272,8 @@ func (q *QuickPlan) stepPing(ctx context.Context, rc peer.RemoteCaller) error {
 	q.Results.Ping = append(q.Results.Ping, local)
 	q.Results.Notes = append(q.Results.Notes, notes...)
 
-	out, err := q.callRemote(ctx, rc, OpPingRun,
-		PingRunParams{PeerIP: q.LocalIP.String(), Count: q.PingCount}, q.pingTimeout())
+	out, err := q.callRemoteForTest(ctx, rc, OpPingRun,
+		PingRunParams{PeerIP: q.LocalIP.String(), Count: q.PingCount}, q.pingTimeout(), "ping")
 	if err != nil {
 		return err
 	}
@@ -273,8 +298,8 @@ func (q *QuickPlan) stepFullSizePing(ctx context.Context, rc peer.RemoteCaller) 
 	q.Results.FullSizePing = append(q.Results.FullSizePing, local)
 	q.Results.Notes = append(q.Results.Notes, notes...)
 
-	out, err := q.callRemote(ctx, rc, OpPingFullSize,
-		PingFullSizeParams{PeerIP: q.LocalIP.String(), Count: fullSizePingCount}, q.fullSizeTimeout())
+	out, err := q.callRemoteForTest(ctx, rc, OpPingFullSize,
+		PingFullSizeParams{PeerIP: q.LocalIP.String(), Count: fullSizePingCount}, q.fullSizeTimeout(), "full_size_ping")
 	if err != nil {
 		return err
 	}
@@ -309,8 +334,8 @@ func (q *QuickPlan) tcpTimeout() time.Duration {
 // aborted client run still contributes its partial result to Results (marked
 // via SessionResults.Incomplete) before the step reports the error.
 func (q *QuickPlan) stepTCPForward(ctx context.Context, rc peer.RemoteCaller) error {
-	out, err := q.callRemote(ctx, rc, OpIperfServerStart,
-		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout)
+	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, "tcp")
 	if err != nil {
 		return err
 	}
@@ -339,6 +364,7 @@ func (q *QuickPlan) recordTCP(res *TCPRunResult, direction string) {
 		return
 	}
 	res.TCP.Direction = direction
+	res.TCP.Incomplete = res.Incomplete
 	q.Results.TCP = append(q.Results.TCP, res.TCP)
 	if res.Incomplete {
 		q.Results.Incomplete = true
@@ -372,8 +398,8 @@ func (q *QuickPlan) stepBidir(ctx context.Context, rc peer.RemoteCaller) error {
 // --bidir on PC1. A failed or aborted client still contributes its partial
 // result before the step reports the error.
 func (q *QuickPlan) bidirNative(ctx context.Context, rc peer.RemoteCaller) error {
-	out, err := q.callRemote(ctx, rc, OpIperfServerStart,
-		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout)
+	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, "bidirectional")
 	if err != nil {
 		return err
 	}
@@ -404,8 +430,8 @@ func (q *QuickPlan) bidirNative(ctx context.Context, rc peer.RemoteCaller) error
 // server on IperfPort+1 (both ports were preflight-probed). The local client
 // runs in its own goroutine while the remote client RPC blocks this one.
 func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, note string) error {
-	out, err := q.callRemote(ctx, rc, OpIperfServerStart,
-		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout)
+	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, "bidirectional")
 	if err != nil {
 		return err
 	}
@@ -431,13 +457,13 @@ func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, not
 		localRes, localErr = q.Ops.Iperf.RunTCPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
 			q.TCPDuration, q.Streams, false)
 	}()
-	remoteOut, remoteErr := q.callRemote(ctx, rc, OpIperfClientRun, IperfClientRunParams{
+	remoteOut, remoteErr := q.callRemoteForTest(ctx, rc, OpIperfClientRun, IperfClientRunParams{
 		LocalIP:     q.PeerIP.String(),
 		PeerIP:      q.LocalIP.String(),
 		Port:        q.IperfPort + 1,
 		DurationSec: int(q.TCPDuration / time.Second),
 		Streams:     q.Streams,
-	}, q.tcpTimeout())
+	}, q.tcpTimeout(), "bidirectional")
 	<-done
 
 	b := &model.BidirResult{
@@ -485,13 +511,13 @@ func (q *QuickPlan) stepTCPReverse(ctx context.Context, rc peer.RemoteCaller) er
 	if err := h.Ready(ctx); err != nil {
 		return err
 	}
-	out, err := q.callRemote(ctx, rc, OpIperfClientRun, IperfClientRunParams{
+	out, err := q.callRemoteForTest(ctx, rc, OpIperfClientRun, IperfClientRunParams{
 		LocalIP:     q.PeerIP.String(),
 		PeerIP:      q.LocalIP.String(),
 		Port:        q.IperfPort,
 		DurationSec: int(q.TCPDuration / time.Second),
 		Streams:     q.Streams,
-	}, q.tcpTimeout())
+	}, q.tcpTimeout(), "tcp")
 	if tr, ok := out.(*TCPRunResult); ok {
 		q.recordTCP(tr, model.DirectionPC2ToPC1)
 	}
@@ -506,8 +532,8 @@ func (q *QuickPlan) stepUDP(ctx context.Context, rc peer.RemoteCaller) error {
 	rate := q.udpRate()
 
 	// Forward: server on PC2, local client sends.
-	out, err := q.callRemote(ctx, rc, OpIperfServerStart,
-		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout)
+	out, err := q.callRemoteForTest(ctx, rc, OpIperfServerStart,
+		IperfServerStartParams{BindIP: q.PeerIP.String(), Port: q.IperfPort}, opCallTimeout, "udp")
 	if err != nil {
 		return err
 	}
@@ -536,13 +562,13 @@ func (q *QuickPlan) stepUDP(ctx context.Context, rc peer.RemoteCaller) error {
 	if err := h.Ready(ctx); err != nil {
 		return err
 	}
-	out, err = q.callRemote(ctx, rc, OpIperfUDPRun, UDPRunParams{
+	out, err = q.callRemoteForTest(ctx, rc, OpIperfUDPRun, UDPRunParams{
 		LocalIP:     q.PeerIP.String(),
 		PeerIP:      q.LocalIP.String(),
 		Port:        q.IperfPort,
 		DurationSec: int(q.UDPDuration / time.Second),
 		RateBps:     uint64(rate),
-	}, q.udpTimeout())
+	}, q.udpTimeout(), "udp")
 	if ur, ok := out.(*UDPRunResult); ok {
 		q.recordUDP(ur, model.DirectionPC2ToPC1)
 	}

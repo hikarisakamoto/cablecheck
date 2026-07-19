@@ -57,6 +57,9 @@ type Report struct {
 	Warnings []string `json:"warnings"`
 	// SkippedTests lists planned tests that did not run, with reasons.
 	SkippedTests []SkippedTest `json:"skippedTests"`
+	// UDPRateAssumed is true when the UDP target rate used the unknown-link
+	// fallback rather than being derived from a negotiated speed.
+	UDPRateAssumed bool `json:"udpRateAssumed,omitempty"`
 	// Classification is the overall health verdict.
 	Classification HealthClass `json:"classification"`
 	// Score is the 0-100 health score; nil (JSON null) for INCONCLUSIVE.

@@ -99,11 +99,9 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	// direction callbacks. PC1 streams its rendered report set to PC2; PC2
 	// receives the verified files into its own report directory.
 	if a.cfg.Role == config.RolePC1 {
-		// prepare re-renders the report enriched with the peer machine
-		// description before the transfer, so PC2 receives exactly the bytes
-		// PC1 keeps as its final report. It reuses the verdict the plan
-		// wrapper already stored (and that was exchanged in the complete
-		// frame), so the classification never changes.
+		// prepare re-renders and re-evaluates the report with the peer machine
+		// description before the transfer, so the complete frame and PC2's
+		// transferred copy use the worker capabilities learned at handshake.
 		prepare := func(peerCaps protocol.Capabilities) error {
 			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
 				&peer.Outcome{PeerCaps: peerCaps, TestID: a.sessionTestID()}, log)
