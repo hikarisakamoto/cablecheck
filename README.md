@@ -45,6 +45,28 @@ make build
 ./cablecheck version
 ```
 
+`make build` produces a single static `cablecheck` binary in the repository root. It has no runtime Go dependency and is portable between Linux machines of the same architecture, so you can build once and copy the binary to the other PC.
+
+### Install it as a command
+
+The rest of this guide invokes the tool as `cablecheck`. For that to work from any directory, put the binary on your `PATH` — do this on **both** PCs:
+
+```bash
+# System-wide (needs root)
+sudo install -m 0755 cablecheck /usr/local/bin/cablecheck
+
+# Or per-user, if ~/.local/bin is on your PATH
+install -m 0755 cablecheck ~/.local/bin/cablecheck
+```
+
+Confirm it is registered:
+
+```bash
+cablecheck version
+```
+
+If you would rather not install it, run it directly from the build directory as `./cablecheck` — substitute `./cablecheck` for `cablecheck` in every command below.
+
 ## Prepare the direct link
 
 Connect the two Ethernet ports directly. Modern NICs normally handle MDI-X automatically; a crossover cable is usually unnecessary.
