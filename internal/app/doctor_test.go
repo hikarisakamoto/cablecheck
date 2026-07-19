@@ -208,15 +208,51 @@ func TestDoctorChecks(t *testing.T) {
 	})
 }
 
+func TestCheckPingPreLaunchFailureReturnsFail(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{
+		Name:  "ping",
+		Match: runnertest.ArgsExact("-V"),
+		Err:   errors.New("start ping: executable disappeared"),
+	})
+
+	got := checkPing(context.Background(), fr)
+	if got.Status != CheckFail {
+		t.Errorf("checkPing status = %s, want FAIL", got.Status)
+	}
+}
+
+func TestCheckInterfacesAllowVirtualDropsRequiresFlagNote(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{
+		Name:   "ip",
+		Match:  runnertest.ArgsExact("-j", "addr", "show"),
+		Result: runner.CommandResult{Stdout: []byte(ipAddrJSON)},
+	})
+
+	checks := checkInterfaces(context.Background(), fr, DoctorOptions{
+		AllowVirtual: true,
+		SysfsRoot:    t.TempDir(),
+	})
+	got, ok := checkByPrefix(checks, "interface eth0")
+	if !ok {
+		t.Errorf("no eth0 interface check present:\n%s", dumpChecks(checks))
+		return
+	}
+	if strings.Contains(got.Detail, "requires --allow-virtual-interface") {
+		t.Errorf("allowed virtual interface detail still requires the flag: %q", got.Detail)
+	}
+}
+
 // assertExitConfig fails unless err carries ExitConfig (4).
 func assertExitConfig(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
-		t.Fatalf("Doctor returned nil error, want an *ExitError with code 4")
+		t.Fatalf("got nil error, want an *ExitError with code 4")
 	}
 	var ee *ExitError
 	if !errors.As(err, &ee) || ee.Code != ExitConfig {
-		t.Fatalf("Doctor error = %v, want an *ExitError{ExitConfig}", err)
+		t.Fatalf("error = %v, want an *ExitError{ExitConfig}", err)
 	}
 }
 

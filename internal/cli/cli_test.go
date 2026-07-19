@@ -147,6 +147,32 @@ func TestCLIDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("report on a non-regular file exits 4", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "report", t.TempDir())
+		if code != 4 {
+			t.Errorf("code = %d, want 4", code)
+		}
+		if !strings.Contains(errOut, "regular file") {
+			t.Errorf("stderr misses the non-regular-file diagnosis:\n%s", errOut)
+		}
+	})
+
+	t.Run("report with an invalid output directory exits 4", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "report.json")
+		if err := os.WriteFile(path, cliValidReportJSON(t), 0o600); err != nil {
+			t.Fatalf("write report.json: %v", err)
+		}
+		outDir := filepath.Join(dir, "does-not-exist")
+		code, _, errOut := runCLI(t, "report", "--output", outDir, path)
+		if code != 4 {
+			t.Errorf("code = %d, want 4", code)
+		}
+		if !strings.Contains(errOut, "report.md") {
+			t.Errorf("stderr misses the output-write diagnosis:\n%s", errOut)
+		}
+	})
+
 	t.Run("report regenerates from a valid report.json exits 0", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "report.json")

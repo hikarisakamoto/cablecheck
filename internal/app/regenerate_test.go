@@ -173,3 +173,26 @@ func TestRegenerateFromJSON(t *testing.T) {
 		assertExitConfig(t, Regenerate(path, dir, &stdout))
 	})
 }
+
+func TestReadRegenerateDataOverCapIsExitConfig(t *testing.T) {
+	_, err := readRegenerateData("report.json", strings.NewReader("123456789"), 8)
+	assertExitConfig(t, err)
+}
+
+func TestRegenerateRejectsNonRegularInput(t *testing.T) {
+	var stdout bytes.Buffer
+	err := Regenerate(t.TempDir(), "", &stdout)
+	assertExitConfig(t, err)
+	if !strings.Contains(err.Error(), "regular file") {
+		t.Errorf("non-regular input error = %q, want it to mention a regular file", err)
+	}
+}
+
+func TestRegenerateOutputWriteFailureIsExitConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := writeReportJSON(t, dir, regenReport())
+	outDir := filepath.Join(dir, "does-not-exist")
+
+	var stdout bytes.Buffer
+	assertExitConfig(t, Regenerate(path, outDir, &stdout))
+}

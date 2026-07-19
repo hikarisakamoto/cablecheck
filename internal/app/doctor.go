@@ -130,12 +130,12 @@ func checkPing(ctx context.Context, r runner.Runner) CheckResult {
 	}
 	res, err := r.Run(ctx, runner.CommandSpec{
 		Name: "ping", Args: []string{"-V"}, Timeout: probeTimeout, Label: "doctor-ping"})
+	if err != nil {
+		return CheckResult{Name: "ping", Status: CheckFail, Detail: "could not probe ping version"}
+	}
 	variant := firstLine(res.Stdout)
 	if variant == "" {
 		variant = firstLine(res.Stderr)
-	}
-	if err != nil {
-		return CheckResult{Name: "ping", Status: CheckFail, Detail: "could not probe ping version"}
 	}
 	if !strings.Contains(variant, "iputils") {
 		return CheckResult{Name: "ping", Status: CheckFail,
@@ -214,8 +214,12 @@ func checkInterfaces(ctx context.Context, r runner.Runner, opts DoctorOptions) [
 		detail := interfaceDetail(l, cls)
 		switch {
 		case cls.Loopback, cls.Virtual, cls.Wireless:
+			annotation := " (virtual; requires --allow-virtual-interface)"
+			if opts.AllowVirtual {
+				annotation = " (virtual; allowed by --allow-virtual-interface)"
+			}
 			out = append(out, CheckResult{Name: name, Status: CheckWarn,
-				Detail: detail + " (virtual; requires --allow-virtual-interface)"})
+				Detail: detail + annotation})
 		default:
 			physical++
 			out = append(out, CheckResult{Name: name, Status: CheckPass, Detail: detail})

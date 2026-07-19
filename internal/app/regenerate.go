@@ -33,20 +33,22 @@ func Regenerate(path, outDir string, stdout io.Writer) error {
 	if err != nil {
 		return &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: %w", path, err)}
 	}
+	if !fi.Mode().IsRegular() {
+		return &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: report input must be a regular file", path)}
+	}
 	if fi.Size() > regenSizeCap {
 		return &ExitError{Code: ExitConfig, Err: fmt.Errorf(
 			"%s is %d bytes, larger than the %d-byte (64 MiB) report size cap", path, fi.Size(), int64(regenSizeCap))}
 	}
 
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: %w", path, err)}
 	}
-	// A regular file can grow between Stat and ReadFile; guard the in-memory
-	// size too, so the cap is not merely advisory.
-	if int64(len(data)) > regenSizeCap {
-		return &ExitError{Code: ExitConfig, Err: fmt.Errorf(
-			"%s exceeds the %d-byte (64 MiB) report size cap", path, int64(regenSizeCap))}
+	defer f.Close()
+	data, err := readRegenerateData(path, f, regenSizeCap)
+	if err != nil {
+		return err
 	}
 
 	var rep model.Report
@@ -70,13 +72,27 @@ func Regenerate(path, outDir string, stdout io.Writer) error {
 	for _, f := range files {
 		dst := filepath.Join(outDir, f.name)
 		if err := os.WriteFile(dst, f.data, 0o600); err != nil {
-			return &ExitError{Code: ExitInternal, Err: fmt.Errorf("write %s: %w", dst, err)}
+			return &ExitError{Code: ExitConfig, Err: fmt.Errorf("write %s: %w", dst, err)}
 		}
 		fmt.Fprintf(stdout, "wrote %s\n", dst)
 	}
 	fmt.Fprintf(stdout, "regenerated report for %s (classification %s) from %s\n",
 		orUnknownStr(rep.TestID), orUnknownStr(string(rep.Classification)), path)
 	return nil
+}
+
+// readRegenerateData reads at most limit+1 bytes so streams and files that
+// grow after Stat cannot bypass the in-memory report size cap.
+func readRegenerateData(path string, r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: %w", path, err)}
+	}
+	if int64(len(data)) > limit {
+		return nil, &ExitError{Code: ExitConfig, Err: fmt.Errorf(
+			"%s exceeds the %d-byte report size cap", path, limit)}
+	}
+	return data, nil
 }
 
 // checkSchemaMajor accepts any schemaVersion sharing the current major
