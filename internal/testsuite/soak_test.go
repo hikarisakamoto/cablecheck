@@ -85,8 +85,10 @@ func TestSoakPeriodicCycles(t *testing.T) {
 	fr := runnertest.New(t)
 	scriptSoakCycle(fr)
 	rc := newFakeCaller(t)
-	// Link settings once at plan start, then per-cycle replies. Three cycles
-	// fit; queue a fourth cycle's worth so a runaway loop is caught, not hung.
+	// Three cycles require eight counter snapshots: the whole-run initial and
+	// final boundaries plus two snapshots for each completed cycle. Four calls
+	// to replySoakCycle provide exactly those eight counter replies, along with
+	// enough non-counter replies for the three cycles that fit in the budget.
 	rc.reply(OpLinkSettings, &LinkSettingsResult{Settings: model.LinkSettings{SpeedMbps: 1000, Duplex: "full"}})
 	for range 4 {
 		replySoakCycle(rc)
@@ -269,6 +271,62 @@ func TestSoakPeriodicGapBoundedByRemainingBudget(t *testing.T) {
 	}
 }
 
+type recordingSoakClock struct {
+	*clocktest.FakeClock
+	afterCalls chan time.Time
+}
+
+func (c *recordingSoakClock) After(d time.Duration) <-chan time.Time {
+	c.afterCalls <- c.Now()
+	return c.FakeClock.After(d)
+}
+
+// TestSoakDurationStartsBeforeInitialSetup gates the initial link inspection
+// while fake wall-clock time advances. The whole-run budget timer must have
+// been registered at plan entry, not after link and counter setup finish.
+func TestSoakDurationStartsBeforeInitialSetup(t *testing.T) {
+	defer testutil.LeakCheck(t)
+
+	fr := runnertest.New(t)
+	scriptSoakCycle(fr)
+	linkStarted := make(chan struct{})
+	linkDelay := make(chan struct{})
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"), Times: 1,
+		StdoutFile: fixturePath("ethtool", "settings_e1000e_1g.txt"), Started: linkStarted, Delay: linkDelay})
+
+	rc := newFakeCaller(t)
+	rc.reply(OpLinkSettings, &LinkSettingsResult{Settings: model.LinkSettings{SpeedMbps: 1000, Duplex: "full"}})
+	for range 3 {
+		rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}})
+	}
+
+	start := time.Unix(1_700_000_000, 0)
+	baseClock := clocktest.New(start)
+	clk := &recordingSoakClock{FakeClock: baseClock, afterCalls: make(chan time.Time, 1)}
+	results := &SessionResults{}
+	plan := newSoakPlan(newTestOps(t, fr), results, clk, 10*time.Second, config.SoakLoadContinuous)
+	plan.UDPDuration = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- plan.Run(ctx, rc) }()
+	testutil.WaitFor(t, linkStarted, "initial soak link inspection")
+
+	// The test-owned waiter lets setup consume deterministic fake wall time
+	// even in the buggy implementation where the plan has no timer yet.
+	baseClock.After(3 * time.Second)
+	baseClock.BlockUntilWaiters(1)
+	baseClock.Advance(3 * time.Second)
+	close(linkDelay)
+
+	registeredAt := <-clk.afterCalls
+	cancel()
+	_ = <-done
+	if !registeredAt.Equal(start) {
+		t.Errorf("soak budget timer registered at %v, want plan start %v", registeredAt, start)
+	}
+}
+
 func TestSoakFinalCountersIncludeLastCycle(t *testing.T) {
 	defer testutil.LeakCheck(t)
 
@@ -276,7 +334,13 @@ func TestSoakFinalCountersIncludeLastCycle(t *testing.T) {
 	scriptSoakCycle(fr)
 	rc := newFakeCaller(t)
 	rc.reply(OpLinkSettings, &LinkSettingsResult{Settings: model.LinkSettings{SpeedMbps: 1000, Duplex: "full"}})
+	// Counter snapshots are consumed in this order: whole-run initial,
+	// cycle-local pre-load, cycle-local post-load, whole-run final. Keep the
+	// intermediate values distinct so the asserted 10 -> 11 boundary delta
+	// proves the deferred final capture consumed the last reply.
 	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 10}})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 20}})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 21}})
 	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 11}})
 	rc.reply(OpPingRun, &PingRunResult{Ping: model.PingResult{Received: 500, IntervalUsedSec: 0.02}})
 	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
@@ -291,6 +355,9 @@ func TestSoakFinalCountersIncludeLastCycle(t *testing.T) {
 	plan := newSoakPlan(newTestOps(t, fr), results, clk, 1500*time.Millisecond, config.SoakLoadPeriodic)
 	done := make(chan error, 1)
 	go func() { done <- plan.Run(context.Background(), rc) }()
+	// The persistent budget timer is waiter one. Waiter two is registered only
+	// after cycle one has consumed both cycle-local snapshots and entered the
+	// periodic gap, making this the deterministic point to expire the budget.
 	clk.BlockUntilWaiters(2)
 	clk.Advance(1500 * time.Millisecond)
 	if err := <-done; err != nil {
@@ -300,6 +367,61 @@ func TestSoakFinalCountersIncludeLastCycle(t *testing.T) {
 	delta, ok := counterDeltaForTest(results.InitialCounters.PC2, results.FinalCounters.PC2, "rx_crc")
 	if !ok || delta != 1 {
 		t.Errorf("whole-run PC2 rx_crc delta = (%d, %v), want (1, true)", delta, ok)
+	}
+}
+
+// TestSoakDeadlineDuringFirstCycleStillBoundsWholeRunCounters advances the
+// soak budget while cycle one's first TCP client is in flight. The cycle's
+// traffic stays transactional, but independent before/after counter captures
+// must still bound counter movement caused by that discarded load.
+func TestSoakDeadlineDuringFirstCycleStillBoundsWholeRunCounters(t *testing.T) {
+	defer testutil.LeakCheck(t)
+
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
+		StdoutFile: fixturePath("ethtool", "settings_e1000e_1g.txt")})
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsPrefix("-S"),
+		StdoutFile: fixturePath("ethtool", "stats_e1000e_clean.txt")})
+	fr.Script(runnertest.Script{Name: "ip", StdoutFile: fixturePath("ip", "linkstats_clean.json")})
+	fr.Script(runnertest.Script{Name: "ping", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("ping", "quick_clean_100.txt")})
+	started := make(chan struct{})
+	hang := make(chan struct{})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_39_fwd.json"), Delay: hang, Started: started})
+
+	rc := newFakeCaller(t)
+	rc.reply(OpLinkSettings, &LinkSettingsResult{Settings: model.LinkSettings{SpeedMbps: 1000, Duplex: "full"}})
+	// Independent initial boundary, cycle-local pre-load snapshot, then the
+	// independent final boundary captured after the deadline cancels traffic.
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 10}})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 10}})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 13}})
+	rc.reply(OpPingRun, &PingRunResult{Ping: model.PingResult{Received: 500, IntervalUsedSec: 0.02}})
+	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+
+	clk := clocktest.New(time.Unix(1_700_000_000, 0))
+	results := &SessionResults{}
+	budget := time.Second
+	plan := newSoakPlan(newTestOps(t, fr), results, clk, budget, config.SoakLoadContinuous)
+	plan.UDPDuration = 0
+
+	done := make(chan error, 1)
+	go func() { done <- plan.Run(context.Background(), rc) }()
+	testutil.WaitFor(t, started, "first soak cycle TCP client never started")
+	clk.BlockUntilWaiters(1)
+	clk.Advance(budget)
+
+	if err := <-done; err != nil {
+		t.Fatalf("soak Run: %v", err)
+	}
+	if results.CyclesCompleted != 0 || len(results.TCP) != 0 {
+		t.Fatalf("discarded cycle leaked results: cycles=%d TCP=%d", results.CyclesCompleted, len(results.TCP))
+	}
+	delta, ok := counterDeltaForTest(results.InitialCounters.PC2, results.FinalCounters.PC2, "rx_crc")
+	if !ok || delta != 3 {
+		t.Errorf("whole-run PC2 rx_crc delta = (%d, %v), want (3, true)", delta, ok)
 	}
 }
 

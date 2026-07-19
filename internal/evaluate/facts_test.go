@@ -184,8 +184,8 @@ func TestFactsFromReportDirections(t *testing.T) {
 	if f.Dir[1].UDPTargetReached {
 		t.Errorf("Dir[1].UDPTargetReached = true, want false (62%% of target)")
 	}
-	if math.Abs(f.Dir[1].UDPLossPct-8) > 1e-9 {
-		t.Errorf("Dir[1].UDPLossPct = %v, want 8", f.Dir[1].UDPLossPct)
+	if math.Abs(f.Dir[1].UDPLossPct) > 1e-9 {
+		t.Errorf("Dir[1].UDPLossPct = %v, want 0 because its only run missed target", f.Dir[1].UDPLossPct)
 	}
 }
 
@@ -251,6 +251,50 @@ func TestFactsFromReportUsesWorstRepeatedTCPResult(t *testing.T) {
 	}
 	if !slices.Contains(findingIDs(res), "PERF-01") {
 		t.Errorf("findings = %v, want PERF-01 from the degraded repeat", findingIDs(res))
+	}
+}
+
+func TestFactsFromReportDoesNotMixLossyThrottledUDPWithCleanTargetRun(t *testing.T) {
+	r := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		PC2: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		Tests: model.TestsSection{UDP: []model.UDPResult{
+			{Direction: model.DirectionPC1ToPC2, TargetBps: 800_000_000, ActualSenderBps: 800_000_000},
+			{Direction: model.DirectionPC1ToPC2, TargetBps: 400_000_000, ActualSenderBps: 200_000_000, LossPercent: 8},
+		}},
+	}
+
+	f := FactsFromReport(r)
+	if !f.Dir[0].UDPTargetReached {
+		t.Fatalf("UDPTargetReached = false, want the clean qualifying run retained")
+	}
+	if got := f.Dir[0].UDPLossPct; got != 0 {
+		t.Errorf("qualifying UDP loss = %v, want 0; throttled run must not contribute", got)
+	}
+	if ids := findingIDs(Evaluate(f)); slices.Contains(ids, "TR-07") {
+		t.Errorf("findings = %v, want no TR-07 from a throttled lossy run", ids)
+	}
+}
+
+func TestFactsFromReportEvaluatesReducedRateUDPWhenPrimaryNearSaturation(t *testing.T) {
+	r := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		PC2: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		Tests: model.TestsSection{UDP: []model.UDPResult{
+			{Direction: model.DirectionPC1ToPC2, TargetBps: 960_000_000, ActualSenderBps: 960_000_000},
+			{Direction: model.DirectionPC1ToPC2, TargetBps: 400_000_000, ActualSenderBps: 400_000_000, LossPercent: 3},
+		}},
+	}
+
+	f := FactsFromReport(r)
+	if !f.UDPNearSaturation {
+		t.Fatalf("UDPNearSaturation = false, want primary run limitation retained")
+	}
+	if !f.Dir[0].UDPTargetReached || f.Dir[0].UDPLossPct != 3 {
+		t.Fatalf("qualifying reduced-rate facts = %+v, want target reached with 3%% loss", f.Dir[0])
+	}
+	if ids := findingIDs(Evaluate(f)); !slices.Contains(ids, "TR-07") {
+		t.Errorf("findings = %v, want TR-07 from qualifying reduced-rate run", ids)
 	}
 }
 

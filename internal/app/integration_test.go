@@ -85,6 +85,8 @@ type intSpec struct {
 	controlPort uint16
 	// iperfPort is this side's configured data port (probed by preflight).
 	iperfPort uint16
+	// mode overrides the default quick mode for this side.
+	mode config.Mode
 	// token overrides the shared intToken (the mismatch scenario).
 	token string
 	// interactive enables the stdin prompt; stdin supplies the reader.
@@ -139,11 +141,15 @@ func newIntSide(t *testing.T, spec intSpec) *intSide {
 	if token == "" {
 		token = intToken
 	}
+	mode := spec.mode
+	if mode == "" {
+		mode = config.ModeQuick
+	}
 	cfg := &config.RunConfig{
 		Role:             spec.role,
 		LocalIP:          netip.MustParseAddr("127.0.0.1"),
 		PeerIP:           netip.MustParseAddr("127.0.0.1"),
-		Mode:             config.ModeQuick,
+		Mode:             mode,
 		ControlPort:      spec.controlPort,
 		IperfPort:        spec.iperfPort,
 		Token:            token,
@@ -293,9 +299,13 @@ func assertHealthyArtifacts(t *testing.T, pc1 *intSide) {
 	if rep.Partial {
 		t.Errorf("report.Partial = true, want false")
 	}
-	if len(rep.Tests.FullSizePing) != 2 || len(rep.Tests.UDP) != 2 {
-		t.Errorf("tests = %d full-size ping / %d UDP, want 2/2",
-			len(rep.Tests.FullSizePing), len(rep.Tests.UDP))
+	wantUDP := 2
+	if pc1.cfg.Mode == config.ModeStandard {
+		wantUDP = 4
+	}
+	if len(rep.Tests.FullSizePing) != 2 || len(rep.Tests.UDP) != wantUDP {
+		t.Errorf("tests = %d full-size ping / %d UDP, want 2/%d",
+			len(rep.Tests.FullSizePing), len(rep.Tests.UDP), wantUDP)
 	}
 	if rep.Tests.Bidirectional == nil {
 		t.Errorf("report carries no bidirectional result")
@@ -728,7 +738,7 @@ func testNoReportTransferFlag(t *testing.T) {
 	ctx := context.Background()
 	gate := make(chan struct{})
 	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45661, planGate: gate,
-		noReportTransfer: true})
+		noReportTransfer: true, mode: config.ModeStandard})
 	pc2 := startWorker(t, ctx, intSpec{iperfPort: 45663}, port)
 
 	waitForState(t, pc2.states, peer.StateTesting)
@@ -758,6 +768,12 @@ func testNoReportTransferFlag(t *testing.T) {
 	}
 	if !strings.Contains(string(sum), "worker") {
 		t.Errorf("PC2 summary.txt is not the local worker fallback:\n%s", sum)
+	}
+	if !strings.Contains(string(sum), "mode:      standard") {
+		t.Errorf("PC2 fallback summary does not use PC1's announced mode:\n%s", sum)
+	}
+	if strings.Contains(string(sum), "mode:      quick") {
+		t.Errorf("PC2 fallback summary uses PC2's local mode:\n%s", sum)
 	}
 }
 

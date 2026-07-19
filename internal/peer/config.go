@@ -230,4 +230,7 @@ type Outcome struct {
 	// TestID is the session's assigned test ID, "" if the handshake never
 	// completed.
 	TestID string
+	// Mode is the test mode announced by the coordinator in
+	// start_confirmation, or the coordinator's configured mode locally.
+	Mode string
 }

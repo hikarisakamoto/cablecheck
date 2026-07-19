@@ -349,6 +349,31 @@ func TestFinishWorkerFallbackWhenSummaryMissing(t *testing.T) {
 	}
 }
 
+// TestFinishWorkerFallbackUsesCoordinatorMode pins that PC2's local fallback
+// reports the mode announced by PC1, not PC2's usually-defaulted local mode.
+func TestFinishWorkerFallbackUsesCoordinatorMode(t *testing.T) {
+	var out bytes.Buffer
+	a := newWorkerApp(t, &out)
+	dir := t.TempDir()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	comp := &protocol.Complete{Classification: "EXCELLENT", Summary: "cable healthy", ExitCode: 0}
+
+	_, err := a.finishWorker(dir, &peer.Outcome{PeerComplete: comp, Mode: "soak"}, nil, log)
+	if err != nil {
+		t.Fatalf("finishWorker: %v", err)
+	}
+	summary, err := os.ReadFile(filepath.Join(dir, "summary.txt"))
+	if err != nil {
+		t.Fatalf("read summary.txt: %v", err)
+	}
+	if !bytes.Contains(summary, []byte("mode:      soak")) {
+		t.Errorf("PC2 fallback summary does not use PC1's announced mode:\n%s", summary)
+	}
+	if bytes.Contains(summary, []byte("mode:      quick")) {
+		t.Errorf("PC2 fallback summary uses PC2's local mode:\n%s", summary)
+	}
+}
+
 // errPeerLost is a stand-in run error for the worker finish tests.
 var errPeerLost = errPeerLostSentinel{}
 

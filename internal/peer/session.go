@@ -101,6 +101,7 @@ type session struct {
 	dedup    *protocol.DuplicateDetector
 	testID   string
 	peerCaps protocol.Capabilities
+	mode     string
 
 	parent context.Context // the caller's ctx: cancellation = local abort
 	ctx    context.Context // session ctx: cancelled first in teardown
@@ -176,7 +177,7 @@ type finishSpec struct {
 
 // newSession builds a session from cfg without touching the network.
 func newSession(cfg Config, plan PlanFunc, ops OpHandler) *session {
-	return &session{
+	s := &session{
 		cfg:     cfg,
 		plan:    plan,
 		ops:     ops,
@@ -185,6 +186,10 @@ func newSession(cfg Config, plan PlanFunc, ops OpHandler) *session {
 		events:  make(chan event, eventBufferSize),
 		pending: make(map[string]*pendingCall),
 	}
+	if cfg.Role == RolePC1 {
+		s.mode = cfg.Mode
+	}
+	return s
 }
 
 // run is Run's body on the constructed session.
@@ -252,6 +257,7 @@ func (s *session) outcome(reason string) Outcome {
 		AbortReason:  reason,
 		PeerCaps:     s.peerCaps,
 		TestID:       s.testID,
+		Mode:         s.mode,
 	}
 }
 

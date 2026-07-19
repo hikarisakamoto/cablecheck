@@ -99,6 +99,7 @@ func (s *session) handleStartConfirmation(env *protocol.Envelope) {
 		s.log.Warn("malformed start_confirmation dropped", "err", err)
 		return
 	}
+	s.mode = sc.Mode
 	s.log.Info("synchronized start scheduled", "startAt", sc.StartAt, "startInMs", sc.StartInMs, "mode", sc.Mode)
 	s.startCountdown(time.Duration(sc.StartInMs) * time.Millisecond)
 }

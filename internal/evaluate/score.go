@@ -30,7 +30,7 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass) *int 
 	}
 
 	// Per-direction transport deductions.
-	udpGated := f.MaxCPUPct <= 90 && !f.UDPNearSaturation
+	udpGated := f.MaxCPUPct <= 90
 	for i := range f.Dir {
 		d := &f.Dir[i]
 		if d.PingLossPct > 0 {

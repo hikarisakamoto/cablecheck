@@ -136,15 +136,26 @@ func (p *SoakPlan) engine(results *SessionResults) *QuickPlan {
 // the context is cancelled. A cycle error (or cancellation) stops the loop with
 // the error, but every cycle already completed stays in Results and the run is
 // marked Incomplete so the partial report covers exactly what ran.
-func (p *SoakPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
+func (p *SoakPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error) {
 	q := p.engine(p.Results)
-	// Link settings once, up front (the negotiated speed feeds the UDP rate
-	// derivation and the report's link section).
-	if err := q.stepLink(ctx, rc); err != nil {
-		p.Results.Incomplete = true
-		return fmt.Errorf("testsuite: soak link settings: %w", err)
-	}
+	// Whole-run boundaries are independent of per-cycle snapshots. In
+	// particular, the final capture must still run after the budget or caller
+	// cancels an in-flight cycle, so use a cleanup context that retains values
+	// without inheriting cancellation.
+	defer func() {
+		if err := q.snapshotCounters(context.WithoutCancel(ctx), rc, &p.Results.FinalCounters); err != nil {
+			p.Results.Incomplete = true
+			finalErr := fmt.Errorf("testsuite: soak final counters: %w", err)
+			if runErr == nil {
+				runErr = finalErr
+			} else {
+				runErr = errors.Join(runErr, finalErr)
+			}
+		}
+	}()
 
+	// Start the wall-clock budget before any link or counter setup so the
+	// configured soak duration bounds the complete plan, not only its cycles.
 	deadline := p.Clock.Now().Add(p.SoakDuration)
 	budgetCtx, cancelBudget := context.WithCancelCause(ctx)
 	stopBudget := make(chan struct{})
@@ -165,6 +176,17 @@ func (p *SoakPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 		<-budgetStopped
 		cancelBudget(context.Canceled)
 	}()
+
+	// Link settings once, up front (the negotiated speed feeds the UDP rate
+	// derivation and the report's link section).
+	if err := q.stepLink(budgetCtx, rc); err != nil {
+		p.Results.Incomplete = true
+		return fmt.Errorf("testsuite: soak link settings: %w", err)
+	}
+	if err := q.snapshotCounters(budgetCtx, rc, &p.Results.InitialCounters); err != nil {
+		p.Results.Incomplete = true
+		return fmt.Errorf("testsuite: soak initial counters: %w", err)
+	}
 
 	for cycle := 1; ; cycle++ {
 		if !p.Clock.Now().Before(deadline) {
@@ -260,10 +282,6 @@ func (p *SoakPlan) runCycle(ctx context.Context, rc peer.RemoteCaller, cycle int
 
 // commitCycle atomically folds one fully completed cycle into the session.
 func (p *SoakPlan) commitCycle(cycle *SessionResults, counters, finalCounters model.PeerCounters) {
-	if p.Results.InitialCounters.PC1 == nil && p.Results.InitialCounters.PC2 == nil {
-		p.Results.InitialCounters = counters
-	}
-	p.Results.FinalCounters = finalCounters
 	p.Results.Ping = append(p.Results.Ping, cycle.Ping...)
 	p.Results.FullSizePing = append(p.Results.FullSizePing, cycle.FullSizePing...)
 	p.Results.TCP = append(p.Results.TCP, cycle.TCP...)

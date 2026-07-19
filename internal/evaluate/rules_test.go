@@ -222,11 +222,11 @@ func TestRuleTR07UDPGating(t *testing.T) {
 			t.Errorf("TR-07 = %+v, want no finding when MaxCPUPct > 90", fd)
 		}
 	})
-	t.Run("no finding near line rate", func(t *testing.T) {
+	t.Run("qualified reduced-rate fact survives a separate near-line-rate run", func(t *testing.T) {
 		f := base(5)
 		f.UDPNearSaturation = true
-		if fd := rule.Evaluate(f); fd != nil {
-			t.Errorf("TR-07 = %+v, want no finding when UDP target nears line rate", fd)
+		if fd := rule.Evaluate(f); fd == nil || fd.Severity != model.SevPoor {
+			t.Errorf("TR-07 = %+v, want qualifying loss evaluated despite a separate near-saturation run", fd)
 		}
 	})
 }

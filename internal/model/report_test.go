@@ -46,6 +46,20 @@ func TestNoRawDurationInReport(t *testing.T) {
 	walk(reflect.TypeOf(Report{}), "Report")
 }
 
+func TestZeroCycleSoakJSONIncludesCycleCount(t *testing.T) {
+	rep := Report{
+		Configuration:       ConfigEcho{Mode: "soak"},
+		SoakCyclesCompleted: 0,
+	}
+	data, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"soakCyclesCompleted":0`)) {
+		t.Errorf("zero-cycle soak JSON omits soakCyclesCompleted: %s", data)
+	}
+}
+
 // fullReport builds a Report with every field populated so the JSON
 // round-trip test exercises the whole type tree. All times are UTC and all
 // durations are whole milliseconds (the JSON surface is millisecond-grained).

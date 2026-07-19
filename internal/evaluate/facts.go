@@ -63,14 +63,16 @@ type DirFacts struct {
 	TCPCollapses int
 	// UDPAvailable reports whether a UDP result exists for this direction.
 	UDPAvailable bool
-	// UDPLossPct is the server-observed datagram loss percentage.
+	// UDPLossPct is the worst server-observed datagram loss percentage among
+	// runs that reached target without requesting a near-saturation rate.
 	UDPLossPct float64
-	// UDPJitterMs is the RFC 1889 jitter in milliseconds.
+	// UDPJitterMs is the worst RFC 1889 jitter among qualifying runs.
 	UDPJitterMs float64
-	// UDPOutOfOrderPct is the out-of-order datagram percentage.
+	// UDPOutOfOrderPct is the worst out-of-order datagram percentage among
+	// qualifying runs.
 	UDPOutOfOrderPct float64
-	// UDPTargetReached reports whether the actual send rate reached at
-	// least 90% of the target rate.
+	// UDPTargetReached reports whether any run reached at least 90% of its
+	// target without that target exceeding 95% of negotiated speed.
 	UDPTargetReached bool
 	// PingLossPct is the standard ping loss percentage.
 	PingLossPct float64
@@ -242,6 +244,7 @@ func FactsFromReport(r *model.Report) *Facts {
 		}
 	}
 
+	f.NegotiatedSpeed = negotiatedSpeed(r)
 	for _, u := range r.Tests.UDP {
 		i := dirIndex(u.Direction)
 		if i < 0 {
@@ -249,17 +252,24 @@ func FactsFromReport(r *model.Report) *Facts {
 		}
 		d := &f.Dir[i]
 		d.UDPAvailable = true
+		targetReached := u.TargetBps > 0 && u.ActualSenderBps >= 0.9*float64(u.TargetBps)
+		nearSaturation := f.NegotiatedSpeed > 0 &&
+			float64(u.TargetBps) > 0.95*float64(f.NegotiatedSpeed)
+		if nearSaturation {
+			f.UDPNearSaturation = true
+		}
+		if !targetReached || nearSaturation {
+			continue
+		}
+		d.UDPTargetReached = true
 		d.UDPLossPct = max(d.UDPLossPct, u.LossPercent)
 		d.UDPJitterMs = max(d.UDPJitterMs, u.JitterMs)
 		if u.OutOfOrder != nil && u.TotalPackets > 0 {
 			pct := float64(*u.OutOfOrder) / float64(u.TotalPackets) * 100
 			d.UDPOutOfOrderPct = max(d.UDPOutOfOrderPct, pct)
 		}
-		d.UDPTargetReached = d.UDPTargetReached ||
-			u.TargetBps > 0 && u.ActualSenderBps >= 0.9*float64(u.TargetBps)
 	}
 
-	f.NegotiatedSpeed = negotiatedSpeed(r)
 	f.ExpectedSpeed = expectedSpeed(r)
 	f.HalfDuplex = halfDuplex(r)
 	f.LinkUpAtEnd = linkUpAtEnd(r)
@@ -275,14 +285,6 @@ func FactsFromReport(r *model.Report) *Facts {
 	f.VirtualInterface = virtualNIC(r.PC1.NIC) || virtualNIC(r.PC2.NIC)
 	f.Partial = r.Partial
 	f.UDPRateAssumed = r.UDPRateAssumed
-
-	if f.NegotiatedSpeed > 0 {
-		for _, u := range r.Tests.UDP {
-			if float64(u.TargetBps) > 0.95*float64(f.NegotiatedSpeed) {
-				f.UDPNearSaturation = true
-			}
-		}
-	}
 
 	f.Unavailable = unavailableTests(r)
 	return f

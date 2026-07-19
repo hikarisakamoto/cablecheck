@@ -8,7 +8,10 @@
 // coupling to each other.
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // SchemaVersion is the current report schema version, written into every
 // report's schemaVersion field. Consumers must check the major component.
@@ -75,7 +78,8 @@ type Report struct {
 	// only the tests that completed.
 	Partial bool `json:"partial"`
 	// SoakCyclesCompleted is the number of soak test cycles that ran to
-	// completion; it is set only for soak-mode runs (omitted otherwise).
+	// completion. MarshalJSON includes it for every soak report, including
+	// zero-cycle runs, while keeping it absent from other modes.
 	SoakCyclesCompleted int `json:"soakCyclesCompleted,omitempty"`
 	// Failure describes what broke, for abnormal endings.
 	Failure *FailureDetails `json:"failure,omitempty"`
@@ -92,6 +96,22 @@ type Report struct {
 	// Machines duplicates the pc1/pc2 machine descriptions as a pair, for
 	// consumers that want them under one key (additive field).
 	Machines *MachinePair `json:"machines,omitempty"`
+}
+
+// MarshalJSON keeps soakCyclesCompleted mode-specific without letting
+// omitempty erase a legitimate zero-cycle soak result.
+func (r Report) MarshalJSON() ([]byte, error) {
+	type reportAlias Report
+	if r.Configuration.Mode != "soak" {
+		return json.Marshal(reportAlias(r))
+	}
+	return json.Marshal(struct {
+		reportAlias
+		SoakCyclesCompleted int `json:"soakCyclesCompleted"`
+	}{
+		reportAlias:         reportAlias(r),
+		SoakCyclesCompleted: r.SoakCyclesCompleted,
+	})
 }
 
 // ConfigEcho echoes the effective run configuration into the report.

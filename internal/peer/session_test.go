@@ -211,6 +211,9 @@ func TestSynchronizedStartCountdown(t *testing.T) {
 	if out.out.FinalState != StateAborted || out.out.AbortReason != "user_interrupt" {
 		t.Errorf("outcome = %s/%q, want aborted/user_interrupt", out.out.FinalState, out.out.AbortReason)
 	}
+	if out.out.Mode != "standard" {
+		t.Errorf("Outcome.Mode = %q, want coordinator-announced standard", out.out.Mode)
+	}
 }
 
 // TestUnknownMessageTolerated sends a bogus message type and a duplicate

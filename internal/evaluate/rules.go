@@ -453,8 +453,8 @@ func ruleTR06(f *Facts) *model.Finding {
 }
 
 func ruleTR07(f *Facts) *model.Finding {
-	if f.MaxCPUPct > 90 || f.UDPNearSaturation {
-		return nil // host or configuration limits speak instead (HOST-01 / LIM rules)
+	if f.MaxCPUPct > 90 {
+		return nil // host limitation rules speak instead (HOST-01)
 	}
 	worst := model.Severity(-1)
 	var ev []string

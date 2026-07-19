@@ -17,6 +17,7 @@ import (
 
 	"cablecheck/internal/clock"
 	"cablecheck/internal/config"
+	"cablecheck/internal/model"
 	"cablecheck/internal/network"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
@@ -99,6 +100,9 @@ type App struct {
 	monitorMu   sync.Mutex
 	monitor     *network.Monitor
 	monitorStop func()
+	// monitorFinalEvents holds changes found by teardown's one final poll,
+	// after the interval goroutine has been cancelled and joined.
+	monitorFinalEvents []model.MonitoringEvent
 	// heartbeatInterval/idleTimeout override the session's protocol timers
 	// in tests; zero means the protocol defaults.
 	heartbeatInterval, idleTimeout time.Duration

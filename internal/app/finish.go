@@ -123,8 +123,12 @@ func reportTransferred(dir string) bool {
 // or --no-report-transfer).
 func (a *App) writeWorkerSummary(dir string, outcome *peer.Outcome, verdictLine string, log *slog.Logger) {
 	testID := a.sessionTestID()
+	mode := string(a.cfg.Mode)
 	if outcome != nil && outcome.TestID != "" {
 		testID = outcome.TestID
+	}
+	if outcome != nil && outcome.Mode != "" {
+		mode = outcome.Mode
 	}
 	body := fmt.Sprintf(`CableCheck summary (pc2 / worker)
 =================================
@@ -137,7 +141,7 @@ peer ip:   %s
 The full report (report.json, report.md, summary.txt) was generated on PC1.
 It was not transferred to PC2 (transfer declined, disabled, or failed).
 `,
-		testID, a.cfg.Mode, a.cfg.LocalIP.Unmap(), a.cfg.PeerIP.Unmap(), verdictLine)
+		testID, mode, a.cfg.LocalIP.Unmap(), a.cfg.PeerIP.Unmap(), verdictLine)
 	if err := os.WriteFile(filepath.Join(dir, "summary.txt"), []byte(body), 0o600); err != nil {
 		log.Warn("writing the worker summary failed", "err", err)
 	}

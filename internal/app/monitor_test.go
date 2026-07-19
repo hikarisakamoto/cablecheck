@@ -173,3 +173,43 @@ func TestStartLinkMonitorNoLeak(t *testing.T) {
 	// Idempotent second stop must be a no-op, not a panic.
 	a.stopLinkMonitor()
 }
+
+func TestStopLinkMonitorCapturesChangeAfterLastInterval(t *testing.T) {
+	root := t.TempDir()
+	const iface = "eth0"
+	writeSysfsAttr(t, root, iface, "operstate", "up")
+	writeSysfsAttr(t, root, iface, "carrier", "1")
+	writeSysfsAttr(t, root, iface, "speed", "1000")
+	writeSysfsAttr(t, root, iface, "duplex", "full")
+	writeSysfsAttr(t, root, iface, "carrier_changes", "4")
+
+	fc := clocktest.New(time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC))
+	cfg := &config.RunConfig{Role: config.RolePC1, MonitorInterval: time.Second}
+	a, err := New(cfg, Deps{Clock: fc, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.sysfsRoot = root
+	a.startLinkMonitor(context.Background(), iface)
+	fc.BlockUntilWaiters(1)
+
+	// The speed change happens after the last interval poll. Teardown's final
+	// snapshot is the only opportunity to retain it.
+	writeSysfsAttr(t, root, iface, "speed", "100")
+	a.stopLinkMonitor()
+
+	when := fc.Now()
+	rep := a.assembleReport(&preflightInfo{}, &testsuite.SessionResults{}, when, when, nil, nil)
+	var speedChanged, renegotiated bool
+	for _, event := range rep.MonitoringEvents {
+		switch event.Type {
+		case "speed_changed":
+			speedChanged = true
+		case "renegotiation":
+			renegotiated = true
+		}
+	}
+	if !speedChanged || !renegotiated {
+		t.Errorf("final monitor events = %+v, want speed_changed and renegotiation", rep.MonitoringEvents)
+	}
+}
