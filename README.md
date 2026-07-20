@@ -120,6 +120,13 @@ Copy the displayed token into the PC2 command:
 cablecheck run --role pc2 --local-ip 192.168.50.2 --peer-ip 192.168.50.1 --token <token shown by PC1>
 ```
 
+To skip looking up the address, name the interface instead and let CableCheck infer `--local-ip` from it (when the interface has exactly one IPv4 address):
+
+```bash
+# --local-ip inferred from the interface's sole IPv4 address
+cablecheck run --role pc1 --interface enpXsY --peer-ip 192.168.50.2
+```
+
 PC2 binds its outgoing control connection to its `--local-ip` and retries connection attempts for up to 60 seconds. PC1 accepts only the configured peer IP.
 
 After the authenticated handshake, each terminal waits for its local operator. Type:
@@ -166,9 +173,9 @@ Flags must follow the subcommand. Boolean flags take no separate value; use `--c
 | Flag | Default and meaning |
 |---|---|
 | `--role pc1\|pc2` | Required. PC1 coordinates; PC2 works. |
-| `--local-ip IPv4` | Required; the local tested-interface address. |
+| `--local-ip IPv4` | Required unless `--interface` is given; the local tested-interface address. |
 | `--peer-ip IPv4` | Required; the other PC's tested-interface address. |
-| `--interface name` | Empty: discover by exact ownership of `--local-ip`. |
+| `--interface name` | Empty: discover by exact ownership of `--local-ip`. When given, `--local-ip` may be omitted and is inferred from this interface's sole IPv4 address (zero or several IPv4 addresses require an explicit `--local-ip`). |
 | `--control-port N` | `44300`; control TCP port, range 1024–65535. It must not equal either iperf port. |
 | `--iperf-port N` | `44301`; range 1024–65534. `N+1` is also reserved for bidirectional fallback. |
 | `--token string` | Empty on PC1 means generate one; required on PC2. |
@@ -215,7 +222,7 @@ The cable-test step widens both peers' control-channel idle timeout before the d
 | `WARNING` | A warning-level physical, transport, or performance deviation—such as modest counter movement, reduced speed, low loss, or throughput below 70% of link rate; score 51–79. |
 | `POOR` | Strong physical evidence or a poor transport/performance result not explained solely by a host limit; score 26–50. |
 | `FAILED` | Failure-level physical evidence, such as link down, at least three carrier events, severe CRC movement, an open/short cable-test result, or correlated UDP loss and physical errors; score 0–25. |
-| `INCONCLUSIVE` | The evidence cannot support a cable verdict: virtual interface, critical evidence missing, an otherwise clean partial run, or poor performance explained by CPU/USB host limitation. Score is JSON `null`. |
+| `INCONCLUSIVE` | The evidence cannot support a cable verdict: virtual interface, critical evidence missing, an otherwise clean partial run, poor performance explained by CPU/USB host limitation, or a throughput test that could not reach the peer's data port (firewall/routing on the receiving side). Score is JSON `null`. |
 
 Physical evidence dominates. CPU saturation can soften poor performance to `INCONCLUSIVE`, but it never hides physical `POOR` or `FAILED` evidence. Read [docs/health-rules.md](docs/health-rules.md) for the complete thresholds and scoring rules.
 
@@ -232,12 +239,16 @@ cablecheck-report-YYYY-MM-DD_HH-MM-SS/
 └── raw/              command output and CableCheck debug evidence
 ```
 
-PC2 creates its own `raw/` evidence while the run is active. By default PC1
-then transfers `report.json`, `report.md`, and `summary.txt` into PC2's report
-directory. If transfer is disabled or fails, PC2 retains its local raw data
-and writes a local summary fallback instead. `raw/` is never transferred, so
-inspect both machines' local raw directories when diagnosing parser or driver
-behavior.
+PC2 creates its own `raw/` evidence while the run is active and always writes a
+local `diagnostic.json` on exit — its role, test ID, mode, IPs, final state, any
+error, the reason and detail of a peer abort, PC1's verdict, and an index of its
+own raw files. `diagnostic.json` is not a full report (no classification) and is
+never transferred; it exists so a failed run is debuggable from PC2 alone. By
+default PC1 then transfers `report.json`, `report.md`, and `summary.txt` into
+PC2's report directory. If transfer is disabled or fails, PC2 retains its local
+raw data and writes a local summary fallback instead. `raw/` and
+`diagnostic.json` are never transferred, so inspect both machines' local report
+directories when diagnosing parser or driver behavior.
 
 The transfer manifest carries each file's size and SHA-256. PC2 accepts only the three fixed filenames, caps each file at 8 MiB and the set at 16 MiB, writes to a `.part` file, verifies size and digest, then renames it. A failed file is retried once. Transfer failure is a warning and does not change the health classification or exit code. Set `--no-report-transfer` on either peer to disable or decline transfer.
 
@@ -323,8 +334,14 @@ Run `ip -j addr`, check the exact address and interface name, bring the interfac
 **Interface is down or no carrier appears**  
 Check both connectors and NIC LEDs, run `ip link show dev enpXsY`, and verify that both interfaces are up before starting CableCheck.
 
+**PC2 seems to hang at “ready — waiting for peer”**  
+This is normal, not a hang: the synchronized start waits until *both* sides are ready. Type `start` in each terminal, or pass `--non-interactive` to auto-ready. PC2 proceeds the moment PC1 confirms the start.
+
 **PC2 cannot connect**  
 Start PC1 first, confirm both control commands use mirrored IPs, verify TCP port 44300 is not filtered, and check that each machine can reach the other's direct-link address. PC2 retries for up to 60 seconds.
+
+**Throughput test cannot connect / result is INCONCLUSIVE citing a firewall**  
+The control channel only needs the dialing side to reach the listener, but the throughput tests also need the *receiving* side to accept an inbound iperf3 connection on the data ports (`--iperf-port` and base+1). A host firewall (ufw, firewalld) that denies inbound traffic drops those connections even though the control channel worked, so the throughput test is recorded as `INCONCLUSIVE` with a firewall recommendation instead of a cable verdict. Allow the peer on both machines — for a trusted direct link, `sudo ufw allow from <peer-ip>` — or open the data ports, then rerun.
 
 **Token rejected**  
 Copy the current token printed by PC1 exactly. Restart PC2 with that token. PC1 allows three wrong-token handshake attempts before it exits 5.

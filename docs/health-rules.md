@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck evaluates a fixed, deterministic rule set (`1.0.0`) after the test
+CableCheck evaluates a fixed, deterministic rule set (`1.1.0`) after the test
 plan finishes. Rules inspect physical, transport, performance, host, and
 coverage evidence. The final class is not a simple average: credible physical
 fault evidence deliberately dominates host-sensitive performance symptoms.
@@ -106,14 +106,16 @@ run.
 | `LIM-02` | limitation | Exactly one TCP direction is unavailable, or an unavailable test is named `ping`, `udp`, `bidir`, `bidirectional`, `full_size_ping`, `fullsize_ping`, `cable_test`, or `cable_test_tdr`. | marker | Caps tentative `EXCELLENT` at `GOOD`. |
 | `LIM-03` | limitation | The report is partial because the run was interrupted or aborted. | marker | Changes a tentative `EXCELLENT` or `GOOD` to `INCONCLUSIVE`. |
 | `LIM-04` | limitation | Link speed was unknown, so the UDP target rate was assumed. | info | Does not by itself change the classification. |
+| `LIM-05` | limitation | A throughput test could not connect to the peer's data port (firewall/routing on the receiving side). | marker | Changes a tentative `EXCELLENT` or `GOOD` to `INCONCLUSIVE`; adds a firewall-check recommendation. |
 
 Limitations only downgrade clean-looking outcomes. They never hide warning,
-poor, or failed evidence.
+poor, or failed evidence — a real physical `POOR`/`FAILED` still wins over
+`LIM-05`.
 
 ## Classification fold
 
 Rules are evaluated in ID order: `PHY-01..10`, `TR-01..09`, `PERF-01..04`,
-`HOST-01..03`, then `LIM-01..04`. The findings are folded as follows:
+`HOST-01..03`, then `LIM-01..05`. The findings are folded as follows:
 
 1. Any physical `failed` finding yields `FAILED`.
 2. Otherwise, any physical `poor` finding yields `POOR`.
@@ -126,10 +128,10 @@ Rules are evaluated in ID order: `PHY-01..10`, `TR-01..09`, `PERF-01..04`,
    `WARNING`.
 5. Otherwise, an informational physical, transport, or performance deviation
    yields `GOOD`; a completely clean run is `EXCELLENT`.
-6. `HOST-02`, `LIM-01`, `LIM-02`, and `LIM-03` then apply their caps described
-   above. `HOST-02` forces `INCONCLUSIVE` at this stage; `LIM-01`/`LIM-03`
-   affect only tentative `EXCELLENT`/`GOOD`; `LIM-02` changes only
-   `EXCELLENT` to `GOOD`.
+6. `HOST-02`, `LIM-01`, `LIM-02`, `LIM-03`, and `LIM-05` then apply their caps
+   described above. `HOST-02` forces `INCONCLUSIVE` at this stage;
+   `LIM-01`/`LIM-03`/`LIM-05` affect only tentative `EXCELLENT`/`GOOD`;
+   `LIM-02` changes only `EXCELLENT` to `GOOD`.
 
 This ordering is why a hot CPU can make low throughput inconclusive, but it
 cannot excuse CRC errors, ping loss, or another non-host-sensitive failure.

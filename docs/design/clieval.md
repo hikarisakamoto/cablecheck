@@ -109,7 +109,7 @@ All registered on the `run` FlagSet. Sentinel defaults (0 / "") mean "mode prese
 | Flag | Type | Registered default | Notes |
 |---|---|---|---|
 | `--role` | string | `""` | required; `pc1`\|`pc2` |
-| `--local-ip` | string | `""` | required; IPv4 |
+| `--local-ip` | string | `""` | required unless `--interface` is given (then inferred at preflight); IPv4 |
 | `--peer-ip` | string | `""` | required; IPv4 |
 | `--interface` | string | `""` | override auto-discovery |
 | `--mode` | string | `"quick"` | `quick`\|`standard`\|`soak` |
@@ -214,7 +214,7 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 
 1. `--mode` valid (needed before presets).
 2. `--role` present and valid.
-3. `--local-ip`: `netip.ParseAddr`; then `addr = addr.Unmap()`; require `addr.Is4()` — reject IPv6 with `"IPv6 is not supported yet; use the interface's IPv4 address"`; reject `IsUnspecified()` (0.0.0.0), `IsMulticast()`; reject `IsLoopback()` **unless** `--allow-virtual-interface` (enables the 127.0.0.1/127.0.0.2 single-machine demo). Reject addrs with zones.
+3. `--local-ip`: may be empty when `--interface` is given, in which case preflight infers it from that interface's sole IPv4 address (zero or several IPv4 addresses is an error asking for an explicit `--local-ip`), and on PC1 this inference runs before the listener bind. When present: `netip.ParseAddr`; then `addr = addr.Unmap()`; require `addr.Is4()` — reject IPv6 with `"IPv6 is not supported yet; use the interface's IPv4 address"`; reject `IsUnspecified()` (0.0.0.0), `IsMulticast()`; reject `IsLoopback()` **unless** `--allow-virtual-interface` (enables the 127.0.0.1/127.0.0.2 single-machine demo). Reject addrs with zones.
 4. `--peer-ip`: same rules.
 5. `local != peer`.
 6. Ports: each in 1024–65535 (below 1024 rejected: "privileged ports are not supported"), `iperf-port <= 65534` (bidir fallback uses port+1), `control-port ∉ {iperf-port, iperf-port+1}`.

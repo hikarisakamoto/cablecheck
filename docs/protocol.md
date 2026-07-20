@@ -289,7 +289,7 @@ receives `rejected` immediately.
 
 `Warning` contains `code`, human `text`, and `stage`.
 
-`Abort` contains `reason`, `stage`, optional `detail`, and `initiator` (`pc1` or `pc2`). Defined reasons are `user_interrupt`, `auth_failed`, `version_mismatch`, `protocol_error`, `request_timeout`, `capability_missing`, and `internal_error`.
+`Abort` contains `reason`, `stage`, optional `detail`, and `initiator` (`pc1` or `pc2`). Defined reasons are `user_interrupt`, `auth_failed`, `version_mismatch`, `protocol_error`, `request_timeout`, `capability_missing`, and `internal_error`. `detail` carries a token-redacted elaboration on the `internal_error` (plan-failure) and handshake paths so the receiver can see why; it is always empty for `auth_failed` to avoid leaking token-guessing hints.
 
 `Heartbeat` contains monotonic `seq`, session `state`, and optional `activeOp`.
 
@@ -451,9 +451,9 @@ For local Ctrl+C/SIGTERM, `quit`, or interactive stdin EOF, the session:
 4. Closes the connection, failing pending RPCs and unblocking the reader.
 5. Joins session goroutines and enters `aborted`.
 
-The local side exits 6. PC1 attempts to write a partial report from completed measurements. PC2 writes its local failure summary unless a verified transferred report set already exists.
+The local side exits 6. PC1 attempts to write a partial report from completed measurements. PC2 always writes its local `diagnostic.json` (and a failure summary unless a verified transferred report set already exists).
 
-On a received `abort`, the peer prints the reason/stage, cancels work, and exits 5. There is no abort acknowledgement and no wait for one. A raw TCP drop follows the peer-lost path without attempting a farewell on the dead connection.
+On a received `abort`, the peer prints the reason, stage, and `detail` when present, logs the same, folds `detail` into its returned error and `diagnostic.json`, cancels work, and exits 5. There is no abort acknowledgement and no wait for one. A raw TCP drop follows the peer-lost path without attempting a farewell on the dead connection.
 
 ## Report-transfer sub-protocol
 

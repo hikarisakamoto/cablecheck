@@ -73,7 +73,7 @@ Any nonterminal state can end in aborted or failed.
 
 On PC1, entering `testing` starts the plan driver and the application-owned sysfs monitor. The plan performs local operations directly and remote operations through `RemoteCaller.Call`. On success, PC1 freezes monitoring data, assembles and evaluates the report, optionally transfers the rendered files, exchanges `complete`, and maps the classification to an exit code. On abnormal termination, completed measurements are retained in a partial report when possible.
 
-PC2 runs the same preflight and peer machinery but supplies an `OpHandler` instead of a plan. It executes one operation at a time until report/complete or abort.
+PC2 runs the same preflight and peer machinery but supplies an `OpHandler` instead of a plan. It executes one operation at a time until report/complete or abort, and on every exit writes a local `diagnostic.json` — its role, test ID, mode, IPs, final state, any error, the reason and detail of a peer abort, PC1's verdict, and an index of its raw files. The diagnostic is not a `model.Report` (PC2 runs no evaluation) and is never transferred; it makes a failed run debuggable from PC2 alone.
 
 ## The session event loop
 

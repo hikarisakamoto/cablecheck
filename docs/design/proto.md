@@ -209,7 +209,7 @@ type Warning struct { Code string `json:"code"`; Text string `json:"text"`; Stag
 type Abort struct {
     Reason    string `json:"reason"` // "user_interrupt","auth_failed","version_mismatch","protocol_error","request_timeout","capability_missing","internal_error"
     Stage     string `json:"stage"`  // state or op name at abort time
-    Detail    string `json:"detail,omitempty"`
+    Detail    string `json:"detail,omitempty"` // token-redacted; populated on internal_error/handshake, empty for auth_failed
     Initiator string `json:"initiator"` // "pc1"|"pc2"
 }
 

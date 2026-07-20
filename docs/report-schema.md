@@ -255,8 +255,17 @@ A `MonitoringEvent` contains `at`, `type`, `detail`, and `selfInflicted`.
 Events caused by the coordinated cable-test window are annotated with
 `selfInflicted: true` so they are not treated as ordinary link instability.
 
-A `SkippedTest` contains `name` and `reason`. `FailureDetails` contains
+A `SkippedTest` contains `name` and `reason`. A throughput test whose data
+connection could not reach the peer (firewall/routing) is recorded here with a
+`peer data port unreachable` reason, which drives the `LIM-05` limitation and
+the `INCONCLUSIVE` verdict rather than a run failure. `FailureDetails` contains
 `stage` and `error`.
+
+PC2 additionally writes a `diagnostic.json` beside the report. It is a separate
+worker-local artifact — not covered by this schema, carrying no `schemaVersion`,
+and never transferred — recording what PC2 observed (state, any peer abort
+reason/detail, PC1's verdict, and a raw-file index) so a failed run is
+debuggable from PC2 alone.
 
 A `RawFileRef` contains `name`, `sha256`, `bytes`, and `description`. It is a
 reference to an artifact under the report's `raw/` directory; raw artifacts
