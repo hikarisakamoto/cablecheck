@@ -6,12 +6,27 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 )
 
 // ErrIperfClient reports that the iperf3 client wrote a JSON document with a
 // non-empty "error" field (it does so even with -J and exit code 1). The
 // accompanying Iperf3Result still carries everything that decoded.
 var ErrIperfClient = errors.New("iperf3 client error")
+
+// ErrIperfUnreachable wraps an ErrIperfClient failure whose cause is a data
+// connection that never established (refused/timed out/no route) — a firewall
+// or routing problem, not a cable fault, so callers skip the test instead of
+// aborting. It always also wraps ErrIperfClient.
+var ErrIperfUnreachable = errors.New("iperf3 client could not reach the server")
+
+// IsUnreachableMessage classifies an iperf3 client error as a data-connect
+// failure. It matches only iperf3's connect-phase wording so real mid-test
+// errors keep failing the run; higher layers use it to reclassify a remote
+// error flattened to a status string, where the typed sentinel is lost.
+func IsUnreachableMessage(msg string) bool {
+	return strings.Contains(strings.ToLower(msg), "unable to connect to server")
+}
 
 // decodePrefixLen is how many raw bytes a DecodeError preserves.
 const decodePrefixLen = 256
@@ -285,6 +300,9 @@ func ParseIperf3(out []byte) (Iperf3Result, error) {
 		Error:        w.Error,
 	}
 	if w.Error != "" {
+		if IsUnreachableMessage(w.Error) {
+			return res, fmt.Errorf("%w: %w: %s", ErrIperfClient, ErrIperfUnreachable, w.Error)
+		}
 		return res, fmt.Errorf("%w: %s", ErrIperfClient, w.Error)
 	}
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/parser"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner"
@@ -471,6 +472,10 @@ func statusFor(err error) string {
 	case err == nil:
 		return StatusOK
 	case errors.Is(err, exec.ErrNotFound):
+		return StatusUnavailable
+	case errors.Is(err, parser.ErrIperfUnreachable):
+		// Not a cable fault; unavailable keeps the run alive to finalize as a
+		// SkippedTest + INCONCLUSIVE instead of a fatal abort.
 		return StatusUnavailable
 	case errors.Is(err, runner.ErrTimeout), errors.Is(err, context.DeadlineExceeded):
 		return StatusTimeout

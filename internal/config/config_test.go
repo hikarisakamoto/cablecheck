@@ -143,6 +143,22 @@ func TestValidateIPs(t *testing.T) {
 		wantValidationError(t, err, "--local-ip", "required")
 	})
 
+	t.Run("empty local-ip allowed with interface", func(t *testing.T) {
+		raw := validRaw(t)
+		raw.LocalIP = ""
+		raw.Interface = "enp3s0"
+		cfg, err := Resolve(raw, nil)
+		if err != nil {
+			t.Fatalf("Resolve with --interface and no --local-ip: %v", err)
+		}
+		if cfg.LocalIP.IsValid() {
+			t.Errorf("LocalIP = %v, want the zero addr (inferred at preflight)", cfg.LocalIP)
+		}
+		if cfg.Interface != "enp3s0" {
+			t.Errorf("Interface = %q, want enp3s0", cfg.Interface)
+		}
+	})
+
 	t.Run("loopback rejected without allow-virtual-interface", func(t *testing.T) {
 		raw := validRaw(t)
 		raw.LocalIP = "127.0.0.1"

@@ -24,7 +24,7 @@ type Rule struct {
 var dirNames = [2]string{"pc1->pc2", "pc2->pc1"}
 
 // Rules returns the full rule list in its fixed, deterministic evaluation
-// order: PHY-01..10, TR-01..09, PERF-01..04, HOST-01..03, LIM-01..04.
+// order: PHY-01..10, TR-01..09, PERF-01..04, HOST-01..03, LIM-01..05.
 func Rules() []Rule {
 	return []Rule{
 		{ID: "PHY-01", Category: model.CategoryPhysical, Evaluate: rulePHY01},
@@ -57,6 +57,7 @@ func Rules() []Rule {
 		{ID: "LIM-02", Category: model.CategoryLimitation, Evaluate: ruleLIM02},
 		{ID: "LIM-03", Category: model.CategoryLimitation, Evaluate: ruleLIM03},
 		{ID: "LIM-04", Category: model.CategoryLimitation, Evaluate: ruleLIM04},
+		{ID: "LIM-05", Category: model.CategoryLimitation, Evaluate: ruleLIM05},
 	}
 }
 
@@ -758,5 +759,18 @@ func ruleLIM04(f *Facts) *model.Finding {
 		Severity: model.SevInfo,
 		Text:     "The UDP target rate was assumed (link speed unknown) — UDP findings are relative to that assumption.",
 		Evidence: []string{"UDP tested at an assumed rate"},
+	}
+}
+
+func ruleLIM05(f *Facts) *model.Finding {
+	if !f.ThroughputUnreachable {
+		return nil
+	}
+	return &model.Finding{
+		RuleID:   "LIM-05",
+		Category: model.CategoryLimitation,
+		Severity: model.SevMarker,
+		Text:     "The throughput test could not connect to the peer's data port — the cable cannot be judged from this run.",
+		Evidence: []string{"iperf3 could not establish a data connection to the peer"},
 	}
 }

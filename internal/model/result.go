@@ -323,6 +323,11 @@ type SkippedTest struct {
 	Reason string `json:"reason"`
 }
 
+// SkipReasonUnreachable prefixes a SkippedTest.Reason when a throughput test
+// was skipped because the peer's data port was unreachable. The testsuite and
+// the evaluator (LIM-05) share the marker here to avoid matching iperf3 wording.
+const SkipReasonUnreachable = "peer data port unreachable"
+
 // FailureDetails describes what broke when a run ends abnormally.
 type FailureDetails struct {
 	// Stage is where the failure occurred, e.g. "handshake", "tcp_test".

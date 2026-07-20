@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -311,7 +312,7 @@ func TestFinishWorkerPreservesTransferredSummaryOnRunErr(t *testing.T) {
 	writeTransferredSet(t, dir, "report.json", "report.md", "summary.txt")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	_, err := a.finishWorker(dir, &peer.Outcome{}, errPeerLost, log)
+	_, err := a.finishWorker(dir, filepath.Join(dir, "raw"), &peer.Outcome{}, errPeerLost, log)
 	if err == nil {
 		t.Fatalf("finishWorker err = nil, want the run error propagated")
 	}
@@ -337,7 +338,7 @@ func TestFinishWorkerFallbackWhenSummaryMissing(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	comp := &protocol.Complete{Classification: "EXCELLENT", Summary: "cable healthy", ExitCode: 0}
-	code, err := a.finishWorker(dir, &peer.Outcome{PeerComplete: comp}, nil, log)
+	code, err := a.finishWorker(dir, filepath.Join(dir, "raw"), &peer.Outcome{PeerComplete: comp}, nil, log)
 	if err != nil {
 		t.Fatalf("finishWorker: %v", err)
 	}
@@ -358,7 +359,7 @@ func TestFinishWorkerFallbackUsesCoordinatorMode(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	comp := &protocol.Complete{Classification: "EXCELLENT", Summary: "cable healthy", ExitCode: 0}
 
-	_, err := a.finishWorker(dir, &peer.Outcome{PeerComplete: comp, Mode: "soak"}, nil, log)
+	_, err := a.finishWorker(dir, filepath.Join(dir, "raw"), &peer.Outcome{PeerComplete: comp, Mode: "soak"}, nil, log)
 	if err != nil {
 		t.Fatalf("finishWorker: %v", err)
 	}
@@ -372,6 +373,70 @@ func TestFinishWorkerFallbackUsesCoordinatorMode(t *testing.T) {
 	if bytes.Contains(summary, []byte("mode:      quick")) {
 		t.Errorf("PC2 fallback summary uses PC2's local mode:\n%s", summary)
 	}
+}
+
+// TestWorkerDiagnosticAlwaysWritten pins requirement (2): PC2 always leaves a
+// parseable diagnostic.json — carrying the peer's abort detail on failure —
+// without clobbering PC1's transferred files on success.
+func TestWorkerDiagnosticAlwaysWritten(t *testing.T) {
+	readDiag := func(t *testing.T, dir string) map[string]any {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, "diagnostic.json"))
+		if err != nil {
+			t.Fatalf("diagnostic.json missing: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatalf("diagnostic.json is not valid JSON: %v", err)
+		}
+		return m
+	}
+
+	t.Run("on abort it surfaces the peer detail", func(t *testing.T) {
+		var out bytes.Buffer
+		a := newWorkerApp(t, &out)
+		dir := t.TempDir()
+		log := slog.New(slog.NewTextHandler(io.Discard, nil))
+		outcome := &peer.Outcome{
+			FinalState:  peer.StateAborted,
+			AbortReason: "internal_error",
+			AbortStage:  "testing",
+			AbortDetail: "peer: test plan failed: iperf3 could not reach the server",
+			TestID:      "ct-diag-1",
+		}
+		if _, err := a.finishWorker(dir, filepath.Join(dir, "raw"), outcome, errPeerLost, log); err == nil {
+			t.Fatal("finishWorker err = nil, want the run error propagated")
+		}
+		m := readDiag(t, dir)
+		if m["role"] != "pc2" || m["finalState"] != "aborted" || m["abortReason"] != "internal_error" {
+			t.Errorf("diagnostic core fields = %+v, want pc2/aborted/internal_error", m)
+		}
+		if m["completed"] != false {
+			t.Errorf("completed = %v, want false", m["completed"])
+		}
+		if d, _ := m["abortDetail"].(string); !strings.Contains(d, "could not reach the server") {
+			t.Errorf("abortDetail = %q, want the peer's detail surfaced", d)
+		}
+	})
+
+	t.Run("on success it does not clobber the transferred set", func(t *testing.T) {
+		var out bytes.Buffer
+		a := newWorkerApp(t, &out)
+		dir := t.TempDir()
+		writeTransferredSet(t, dir, "report.json", "report.md", "summary.txt")
+		log := slog.New(slog.NewTextHandler(io.Discard, nil))
+		comp := &protocol.Complete{Classification: "EXCELLENT", ExitCode: 0}
+		if _, err := a.finishWorker(dir, filepath.Join(dir, "raw"), &peer.Outcome{PeerComplete: comp}, nil, log); err != nil {
+			t.Fatalf("finishWorker: %v", err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, "summary.txt")); string(got) != "PC1 summary.txt\n" {
+			t.Errorf("transferred summary.txt was clobbered: %q", got)
+		}
+		m := readDiag(t, dir)
+		if m["completed"] != true || m["peerVerdict"] != "EXCELLENT" {
+			t.Errorf("diagnostic = %+v, want completed=true, peerVerdict=EXCELLENT", m)
+		}
+	})
 }
 
 // errPeerLost is a stand-in run error for the worker finish tests.

@@ -154,16 +154,26 @@ func New(cfg *config.RunConfig, deps Deps) (*App, error) {
 	}, nil
 }
 
-// Start begins the run. On PC1 it binds the control listener — including
-// --control-port 0, whose real port ControlAddr then reports — before
-// returning; every later phase (preflight, session, reporting) runs in a
-// background goroutine joined by Wait.
+// Start begins the run. On PC1 it resolves an omitted --local-ip from
+// --interface and binds the control listener — including --control-port 0,
+// whose real port ControlAddr then reports — before returning; every later
+// phase (preflight, session, reporting) runs in a background goroutine joined
+// by Wait.
 func (a *App) Start(ctx context.Context) error {
 	if a.started {
 		return errors.New("app: Start called twice")
 	}
 	a.started = true
 	if a.cfg.Role == config.RolePC1 {
+		// The listener binds LocalIP, so an omitted --local-ip must be
+		// inferred from --interface here, before the bind — not later in
+		// preflight.
+		if err := a.ensureLocalIP(ctx); err != nil {
+			ee := &ExitError{Code: ExitConfig, Err: err}
+			a.code, a.err = ExitConfig, ee
+			close(a.done)
+			return ee
+		}
 		addr := net.JoinHostPort(a.cfg.LocalIP.Unmap().String(), strconv.Itoa(int(a.cfg.ControlPort)))
 		var lc net.ListenConfig
 		ln, err := lc.Listen(ctx, "tcp", addr)

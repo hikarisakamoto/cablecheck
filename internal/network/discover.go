@@ -212,6 +212,40 @@ func selectByName(links []parser.IPLink, name string, ip netip.Addr, allowVirtua
 	return parser.IPLink{}, 0, fmt.Errorf("%s: %w to interface %s (%s)", ip, ErrIPNotAssigned, l.Ifname, detail)
 }
 
+// InferInterfaceIPv4 returns the sole IPv4 address of the named interface,
+// used to fill --local-ip when only --interface was given. Zero or
+// multiple IPv4 addresses are an error so the choice never becomes ambiguous —
+// the operator then passes --local-ip explicitly.
+func InferInterfaceIPv4(ctx context.Context, r runner.Runner, name string) (netip.Addr, error) {
+	links, err := listLinks(ctx, r)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	idx := slices.IndexFunc(links, func(l parser.IPLink) bool {
+		return l.Ifname == name || slices.Contains(l.Altnames, name)
+	})
+	if idx < 0 {
+		return netip.Addr{}, fmt.Errorf("interface %q: %w", name, ErrInterfaceNotFound)
+	}
+	var addrs []netip.Addr
+	for _, ai := range links[idx].AddrInfo {
+		if ai.Family != "inet" {
+			continue
+		}
+		if addr, perr := netip.ParseAddr(ai.Local); perr == nil {
+			addrs = append(addrs, addr.Unmap())
+		}
+	}
+	switch len(addrs) {
+	case 0:
+		return netip.Addr{}, fmt.Errorf("interface %q has no IPv4 address; assign one or pass --local-ip", name)
+	case 1:
+		return addrs[0], nil
+	default:
+		return netip.Addr{}, fmt.Errorf("interface %q has %d IPv4 addresses; pass --local-ip to choose", name, len(addrs))
+	}
+}
+
 // ownsIP reports whether l has ip assigned (exact IPv4 addr_info match) and
 // returns the assignment's prefix length.
 func ownsIP(l parser.IPLink, ip netip.Addr) (int, bool) {

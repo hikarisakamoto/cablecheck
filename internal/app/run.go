@@ -170,7 +170,7 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	}
 
 	if a.cfg.Role == config.RolePC2 {
-		return a.finishWorker(dir, &outcome, runErr, log)
+		return a.finishWorker(dir, rawDir, &outcome, runErr, log)
 	}
 	return a.finishCoordinator(dir, rawDir, pf, s.results, v, startedAt, &outcome, runErr, log)
 }

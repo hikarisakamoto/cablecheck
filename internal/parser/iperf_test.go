@@ -312,6 +312,39 @@ func TestIperf3ErrorObject(t *testing.T) {
 	}
 }
 
+// TestIperf3Unreachable pins the connect/reachability classification: a
+// "unable to connect to server" error wraps BOTH ErrIperfClient and the
+// ErrIperfUnreachable subclass (so it can be handled non-fatally), while a
+// genuine mid-test client error wraps ErrIperfClient only and must keep
+// failing the run.
+func TestIperf3Unreachable(t *testing.T) {
+	t.Run("refused", func(t *testing.T) {
+		res, err := ParseIperf3(fixture(t, "iperf", "client_error_refused.stdout"))
+		if !errors.Is(err, ErrIperfClient) || !errors.Is(err, ErrIperfUnreachable) {
+			t.Fatalf("err = %v, want it to wrap both ErrIperfClient and ErrIperfUnreachable", err)
+		}
+		if res.Error != "unable to connect to server: Connection refused" {
+			t.Errorf("Error = %q, want the full client message preserved", res.Error)
+		}
+	})
+	t.Run("timed_out_proves_firewall_drop", func(t *testing.T) {
+		_, err := ParseIperf3(fixture(t, "iperf", "client_error_timedout.stdout"))
+		if !errors.Is(err, ErrIperfUnreachable) {
+			t.Errorf("err = %v, want errors.Is(err, ErrIperfUnreachable) for a timed-out connect", err)
+		}
+	})
+	t.Run("midtest_error_is_not_unreachable", func(t *testing.T) {
+		raw := []byte(`{"start":{"version":"iperf 3.16"},"intervals":[],"end":{},"error":"error - control socket has closed unexpectedly, is the other side up?"}`)
+		err := func() error { _, e := ParseIperf3(raw); return e }()
+		if !errors.Is(err, ErrIperfClient) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrIperfClient)", err)
+		}
+		if errors.Is(err, ErrIperfUnreachable) {
+			t.Errorf("mid-test error wrongly classified as unreachable: %v", err)
+		}
+	})
+}
+
 func TestIperf3Truncated(t *testing.T) {
 	raw := fixture(t, "iperf", "tcp_39_fwd.json")[:300]
 	_, err := ParseIperf3(raw)

@@ -33,6 +33,7 @@ var recTexts = map[string]string{
 	"HOST-03": "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.",
 	"HOST-02": "Rerun on the physical interface — a virtual interface cannot exercise the cable.",
 	"LIM-01":  "Install the missing tools (iperf3/ethtool) and rerun for a conclusive result.",
+	"LIM-05":  "iperf3 could not connect to the peer on the data port — check the host firewall (ufw/firewalld) on the receiving side and confirm the data port is open.",
 }
 
 // recommend walks the findings in order, collects their mapped

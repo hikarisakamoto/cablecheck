@@ -1,11 +1,13 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cablecheck/internal/model"
@@ -54,14 +56,18 @@ func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
 // exit code. The worker's verdict comes from PC1's complete frame; when the
 // report transfer delivered PC1's full report set, those verified files are
 // kept as-is and the local fallback summary is not written over them.
-func (a *App) finishWorker(dir string, outcome *peer.Outcome, runErr error,
+func (a *App) finishWorker(dir, rawDir string, outcome *peer.Outcome, runErr error,
 	log *slog.Logger) (ExitCode, error) {
+	// PC2 always leaves its own machine-readable record, so a run is
+	// debuggable from the worker side even when PC1's report never transferred.
+	a.writeWorkerDiagnostic(dir, rawDir, outcome, runErr, log)
 	if runErr != nil {
 		code := exitCodeForRunError(runErr)
+		msg := redactSecret(runErr.Error(), a.cfg.Token)
 		// The failure must reach stderr, not only the returned error: for a
 		// rejected token this line is the worker operator's one actionable
 		// diagnostic ("token rejected by coordinator").
-		log.Error("run did not complete", "err", runErr)
+		log.Error("run did not complete", "err", msg)
 		if reportTransferred(dir) {
 			// The full report set — including PC1's own summary.txt — already
 			// arrived and was digest-verified before the session failed (a lost
@@ -69,9 +75,9 @@ func (a *App) finishWorker(dir string, outcome *peer.Outcome, runErr error,
 			// summary.txt with a fallback claiming it "was not transferred"
 			// would be false, so preserve the verified files and record the
 			// failure under a separate name instead.
-			a.writeWorkerFailureNote(dir, fmt.Sprintf("run did not complete: %v", runErr), log)
+			a.writeWorkerFailureNote(dir, "run did not complete: "+msg, log)
 		} else {
-			a.writeWorkerSummary(dir, outcome, fmt.Sprintf("run did not complete: %v", runErr), log)
+			a.writeWorkerSummary(dir, outcome, "run did not complete: "+msg, log)
 		}
 		return code, runErr
 	}
@@ -156,6 +162,82 @@ func (a *App) writeWorkerFailureNote(dir, note string, log *slog.Logger) {
 	if err := os.WriteFile(filepath.Join(dir, "transfer-note.txt"), []byte(body), 0o600); err != nil {
 		log.Warn("writing the worker failure note failed", "err", err)
 	}
+}
+
+// workerDiagnostic is PC2's own record of a run. It is deliberately not a
+// model.Report: the worker runs no evaluation, so it records what it observed
+// (final state, any peer abort, PC1's verdict, its own raw op outputs) rather
+// than fabricating a classification. It carries its own shape and no schema
+// version so regeneration never mistakes it for a full report.
+type workerDiagnostic struct {
+	Role        string             `json:"role"`
+	GeneratedAt time.Time          `json:"generatedAt"`
+	TestID      string             `json:"testId"`
+	Mode        string             `json:"mode"`
+	LocalIP     string             `json:"localIp"`
+	PeerIP      string             `json:"peerIp"`
+	FinalState  string             `json:"finalState"`
+	Completed   bool               `json:"completed"`
+	Error       string             `json:"error,omitempty"`
+	AbortReason string             `json:"abortReason,omitempty"`
+	AbortStage  string             `json:"abortStage,omitempty"`
+	AbortDetail string             `json:"abortDetail,omitempty"`
+	PeerVerdict string             `json:"peerVerdict,omitempty"`
+	RawFiles    []model.RawFileRef `json:"rawFiles,omitempty"`
+}
+
+// writeWorkerDiagnostic writes diagnostic.json from the local outcome. It never
+// changes the exit code and never touches PC1's transferred files (distinct
+// filename), so it is safe on every exit path.
+func (a *App) writeWorkerDiagnostic(dir, rawDir string, outcome *peer.Outcome, runErr error, log *slog.Logger) {
+	d := workerDiagnostic{
+		Role:        string(a.cfg.Role),
+		GeneratedAt: a.deps.Clock.Now(),
+		TestID:      a.sessionTestID(),
+		Mode:        string(a.cfg.Mode),
+		LocalIP:     a.cfg.LocalIP.Unmap().String(),
+		PeerIP:      a.cfg.PeerIP.Unmap().String(),
+		Completed:   runErr == nil,
+		RawFiles:    indexRawFiles(dir, rawDir),
+	}
+	if outcome != nil {
+		if outcome.TestID != "" {
+			d.TestID = outcome.TestID
+		}
+		if outcome.Mode != "" {
+			d.Mode = outcome.Mode
+		}
+		d.FinalState = string(outcome.FinalState)
+		d.AbortReason = outcome.AbortReason
+		d.AbortStage = outcome.AbortStage
+		// Already redacted by the sender, but redact defensively in case a
+		// buggy peer echoed the shared token.
+		d.AbortDetail = redactSecret(outcome.AbortDetail, a.cfg.Token)
+		if outcome.PeerComplete != nil {
+			d.PeerVerdict = outcome.PeerComplete.Classification
+		}
+	}
+	if runErr != nil {
+		// A peer-abort detail is already redacted by PC1; redact again so a
+		// local error string can never persist the trusted-link token.
+		d.Error = redactSecret(runErr.Error(), a.cfg.Token)
+	}
+	body, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		log.Warn("building the worker diagnostic failed", "err", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, "diagnostic.json"), append(body, '\n'), 0o600); err != nil {
+		log.Warn("writing the worker diagnostic failed", "err", err)
+	}
+}
+
+// redactSecret strips the session token from a string before it is persisted.
+func redactSecret(s, token string) string {
+	if token == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, token, "[REDACTED]")
 }
 
 // failureStage derives the FailureDetails stage from the session outcome.

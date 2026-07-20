@@ -230,14 +230,20 @@ func (s *session) handlePlanDone(err error) {
 			s.log.Info("test plan ended by cancellation", "err", err)
 			return
 		}
-		s.log.Error("test plan failed", "err", err)
+		// The plan error is logged, sent in Abort.Detail, and (on PC1) rendered
+		// into the report and stdout, so redact any token once at the source.
+		// Exit classification is sentinel-based (exitCodeForRunError), so the
+		// flattened %s wrap loses nothing it relied on.
+		detail := redactToken(err.Error(), s.cfg.Token)
+		s.log.Error("test plan failed", "err", detail)
 		s.fin = &finishSpec{
 			state:          StateFailed,
 			reason:         reasonInternalError,
 			farewell:       true,
 			farewellReason: reasonInternalError,
 			farewellStage:  string(s.sm.Current()),
-			err:            fmt.Errorf("peer: test plan failed: %w", err),
+			farewellDetail: detail,
+			err:            fmt.Errorf("peer: test plan failed: %s", detail),
 		}
 		return
 	}

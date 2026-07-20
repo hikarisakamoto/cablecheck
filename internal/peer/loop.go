@@ -189,12 +189,26 @@ func (s *session) handlePeerAbort(env *protocol.Envelope) {
 	if err != nil {
 		ab = &protocol.Abort{Reason: "unknown"}
 	}
-	fmt.Fprintf(s.stdout(), "peer aborted: %s at %s\n", ab.Reason, ab.Stage)
+	// The detail arrives already token-redacted by the sender. Surface it on
+	// the operator line and in the returned error so the reason for a
+	// peer-initiated abort is visible from this side too, and capture it into
+	// the Outcome for PC2's local diagnostic.
+	if ab.Detail != "" {
+		fmt.Fprintf(s.stdout(), "peer aborted: %s at %s: %s\n", ab.Reason, ab.Stage, ab.Detail)
+	} else {
+		fmt.Fprintf(s.stdout(), "peer aborted: %s at %s\n", ab.Reason, ab.Stage)
+	}
 	s.log.Warn("peer aborted", "reason", ab.Reason, "stage", ab.Stage, "detail", ab.Detail)
+	s.peerAbortStage = ab.Stage
+	s.peerAbortDetail = ab.Detail
+	err = fmt.Errorf("%w: %s at %s", ErrPeerAborted, ab.Reason, ab.Stage)
+	if ab.Detail != "" {
+		err = fmt.Errorf("%w: %s", err, ab.Detail)
+	}
 	s.fin = &finishSpec{
 		state:  StateAborted,
 		reason: ab.Reason,
-		err:    fmt.Errorf("%w: %s at %s", ErrPeerAborted, ab.Reason, ab.Stage),
+		err:    err,
 	}
 }
 

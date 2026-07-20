@@ -7,7 +7,7 @@ import (
 // RulesVersion identifies the rule set implemented by this package; it is
 // recorded in every evaluation so reports stay interpretable when thresholds
 // change.
-const RulesVersion = "1.0.0"
+const RulesVersion = "1.1.0"
 
 // Result is the complete output of the evaluation engine.
 type Result struct {
@@ -78,7 +78,9 @@ func classify(findings []model.Finding, f *Facts) model.HealthClass {
 	if hasFinding(findings, "HOST-02") {
 		return model.HealthInconclusive
 	}
-	if hasFinding(findings, "LIM-01") || hasFinding(findings, "LIM-03") {
+	// LIM-05 joins the cap, not a hard gate, so a real physical failure (which
+	// short-circuits above) still wins over an unreachable data port.
+	if hasFinding(findings, "LIM-01") || hasFinding(findings, "LIM-03") || hasFinding(findings, "LIM-05") {
 		if tentative == model.HealthExcellent || tentative == model.HealthGood {
 			return model.HealthInconclusive
 		}

@@ -150,6 +150,12 @@ type session struct {
 	transferOn        bool
 	transferRan       bool
 	fin               *finishSpec
+
+	// peerAbortStage/peerAbortDetail record a peer-initiated abort's stage and
+	// (already-redacted) detail for the Outcome and PC2's diagnostic; empty for
+	// a locally initiated abort (whose stage comes from the abortStage method).
+	peerAbortStage  string
+	peerAbortDetail string
 }
 
 // activeOp is the handle of the worker's in-flight operation.
@@ -173,7 +179,8 @@ type finishSpec struct {
 	farewell       bool   // send a best-effort abort frame
 	farewellReason string
 	farewellStage  string
-	err            error // Run's returned error
+	farewellDetail string // Abort.Detail — token-redacted; never set for auth_failed
+	err            error  // Run's returned error
 }
 
 // newSession builds a session from cfg without touching the network.
@@ -256,6 +263,8 @@ func (s *session) outcome(reason string) Outcome {
 		FinalState:   s.sm.Current(),
 		PeerComplete: s.peerComplete,
 		AbortReason:  reason,
+		AbortStage:   s.peerAbortStage,
+		AbortDetail:  s.peerAbortDetail,
 		PeerCaps:     s.peerCaps,
 		TestID:       s.testID,
 		Mode:         s.mode,
@@ -570,7 +579,7 @@ func (s *session) shutdown(spec finishSpec) (Outcome, error) {
 		<-op.done
 	}
 	if spec.farewell {
-		s.sendFarewell(spec.farewellReason, spec.farewellStage)
+		s.sendFarewell(spec.farewellReason, spec.farewellStage, spec.farewellDetail)
 	}
 	if s.cableWindowActive {
 		if s.cfg.OnCableTestWindow != nil {
@@ -594,12 +603,13 @@ func (s *session) shutdown(spec finishSpec) (Outcome, error) {
 // — closing unblocks a stalled write (including one still holding the write
 // lock ahead of the helper), so the helper always exits promptly and
 // shutdown is never delayed by a dead peer (proto.md pitfall 10).
-func (s *session) sendFarewell(reason, stage string) {
+func (s *session) sendFarewell(reason, stage, detail string) {
 	done := make(chan error, 1)
 	go func() {
 		_, err := s.send(protocol.TypeAbort, "", protocol.Abort{
 			Reason:    reason,
 			Stage:     stage,
+			Detail:    detail,
 			Initiator: string(s.cfg.Role),
 		})
 		done <- err

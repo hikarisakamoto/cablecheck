@@ -69,18 +69,24 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		return nil, &ValidationError{"--role", fmt.Sprintf("invalid role %q: must be pc1 or pc2", raw.Role)}
 	}
 
-	// 3-4. IP addresses.
-	localIP, err := parseIPv4("--local-ip", raw.LocalIP, raw.AllowVirtualInterface)
-	if err != nil {
-		return nil, err
+	// 3-4. IP addresses. --local-ip may be omitted when --interface names the
+	// test interface; preflight then infers the address from that interface.
+	var localIP netip.Addr
+	if raw.LocalIP != "" || raw.Interface == "" {
+		var err error
+		localIP, err = parseIPv4("--local-ip", raw.LocalIP, raw.AllowVirtualInterface)
+		if err != nil {
+			return nil, err
+		}
 	}
 	peerIP, err := parseIPv4("--peer-ip", raw.PeerIP, raw.AllowVirtualInterface)
 	if err != nil {
 		return nil, err
 	}
 
-	// 5. The two ends must differ.
-	if localIP == peerIP {
+	// 5. The two ends must differ (deferred to preflight when local-ip is
+	// inferred from the interface).
+	if localIP.IsValid() && localIP == peerIP {
 		return nil, &ValidationError{"--peer-ip", fmt.Sprintf("must differ from --local-ip (both are %q)", localIP)}
 	}
 

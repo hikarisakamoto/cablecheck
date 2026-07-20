@@ -104,8 +104,11 @@ func runUsage(w io.Writer) {
 Connection:
   --role string             pc1 (coordinator) or pc2 (worker); required
   --local-ip string         IPv4 of the test interface on this machine; required
+                            unless --interface is given (then inferred from it)
   --peer-ip string          IPv4 of the test interface on the other machine; required
-  --interface string        interface name override (default: auto-discover by IP)
+  --interface string        interface name (default: auto-discover by --local-ip);
+                            when given, --local-ip may be omitted and is inferred
+                            from this interface's sole IPv4 address
   --control-port int        control channel TCP port (default 44300)
   --iperf-port int          iperf3 data port; port+1 is reserved too (default 44301)
   --token string            shared session token; pc1 generates one when empty,

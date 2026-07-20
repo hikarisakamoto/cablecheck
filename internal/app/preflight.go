@@ -63,6 +63,25 @@ const probeTimeout = 10 * time.Second
 // stale-process scan, output directory writable, sudo probe, iperf3
 // capability detection. The results feed protocol.Capabilities. Every
 // returned error is a configuration/dependency failure (exit 4).
+// ensureLocalIP fills a.cfg.LocalIP from --interface when --local-ip was
+// omitted. It must run before PC1 binds its listener and before interface
+// discovery; it is idempotent so both callers are safe.
+func (a *App) ensureLocalIP(ctx context.Context) error {
+	if a.cfg.LocalIP.IsValid() || a.cfg.Interface == "" {
+		return nil
+	}
+	ip, err := network.InferInterfaceIPv4(ctx, a.deps.Runner, a.cfg.Interface)
+	if err != nil {
+		return err
+	}
+	if ip == a.cfg.PeerIP {
+		return fmt.Errorf("--interface %s address %s equals --peer-ip; the two ends must differ",
+			a.cfg.Interface, ip)
+	}
+	a.cfg.LocalIP = ip
+	return nil
+}
+
 func (a *App) preflight(ctx context.Context) (*preflightInfo, error) {
 	r := a.deps.Runner
 	pf := &preflightInfo{ToolVersions: map[string]string{}}
@@ -93,6 +112,11 @@ func (a *App) preflight(ctx context.Context) (*preflightInfo, error) {
 	pf.ToolVersions["ping"] = pingVariant
 
 	// 3. Local IP on this machine + interface discovery and classification.
+	// On PC1 the address was already resolved before the listener bind; PC2
+	// resolves it here. Idempotent, so calling it in both places is safe.
+	if err := a.ensureLocalIP(ctx); err != nil {
+		return nil, err
+	}
 	iface, err := network.Discover(ctx, r, a.cfg.LocalIP, network.DiscoverOptions{
 		Interface:    a.cfg.Interface,
 		AllowVirtual: a.cfg.AllowVirtualInterface,

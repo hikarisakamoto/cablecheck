@@ -136,6 +136,10 @@ type Facts struct {
 	UDPNearSaturation bool
 	// Unavailable lists the names of planned tests that could not run.
 	Unavailable []string
+	// ThroughputUnreachable reports that a throughput test was skipped
+	// because iperf3 could not reach the peer's data port, so the cable was
+	// never exercised — a firewall/routing problem, not a cable verdict.
+	ThroughputUnreachable bool
 }
 
 // CounterDelta returns the change of a single counter across the run. A
@@ -293,6 +297,7 @@ func FactsFromReport(r *model.Report) *Facts {
 	f.UDPRateAssumed = r.UDPRateAssumed
 
 	f.Unavailable = unavailableTests(r)
+	f.ThroughputUnreachable = throughputUnreachable(r)
 	return f
 }
 
@@ -572,6 +577,18 @@ func maxCPUPct(r *model.Report) float64 {
 // interface without one is virtual (veth, bridge, loopback, ...).
 func virtualNIC(nic model.NICReport) bool {
 	return nic.Name != "" && nic.Driver == ""
+}
+
+// throughputUnreachable reports whether a throughput test was skipped because
+// iperf3 could not reach the peer's data port, keyed off the marker the
+// testsuite shares via model.SkipReasonUnreachable.
+func throughputUnreachable(r *model.Report) bool {
+	for _, st := range r.SkippedTests {
+		if strings.HasPrefix(st.Reason, model.SkipReasonUnreachable) {
+			return true
+		}
+	}
+	return false
 }
 
 // unavailableTests collects the names of planned tests that could not run.

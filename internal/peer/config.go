@@ -235,6 +235,11 @@ type Outcome struct {
 	PeerComplete *protocol.Complete
 	// AbortReason is the abort reason when the session aborted, else "".
 	AbortReason string
+	// AbortStage is the stage a peer-initiated abort named, else "".
+	AbortStage string
+	// AbortDetail is the (token-redacted) elaboration a peer-initiated abort
+	// carried, else "". Empty when we initiated the abort ourselves.
+	AbortDetail string
 	// PeerCaps is the peer's capabilities from the handshake.
 	PeerCaps protocol.Capabilities
 	// TestID is the session's assigned test ID, "" if the handshake never

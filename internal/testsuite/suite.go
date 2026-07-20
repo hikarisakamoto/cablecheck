@@ -2,12 +2,14 @@ package testsuite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"time"
 
 	"cablecheck/internal/config"
 	"cablecheck/internal/model"
+	"cablecheck/internal/parser"
 	"cablecheck/internal/peer"
 )
 
@@ -200,6 +202,12 @@ func (q *QuickPlan) callRemoteForTest(ctx context.Context, rc peer.RemoteCaller,
 		return out, nil
 	case StatusUnavailable:
 		reason := fmt.Sprintf("peer could not run %s: %s", op, res.Error)
+		if parser.IsUnreachableMessage(res.Error) {
+			// The typed sentinel does not survive the RPC boundary; recover
+			// the classification from the message so LIM-05 still fires.
+			reason = fmt.Sprintf("%s: peer's %s client could not connect: %s",
+				model.SkipReasonUnreachable, op, res.Error)
+		}
 		q.Results.Notes = append(q.Results.Notes, reason)
 		q.recordSkippedTest(testName, reason)
 		return nil, nil
@@ -361,6 +369,19 @@ func (q *QuickPlan) withRemoteServer(ctx context.Context, rc peer.RemoteCaller, 
 	runErr := runClient()
 	_, stopErr := q.callRemote(ctx, rc, OpIperfServerStop,
 		IperfServerStopParams{Port: q.IperfPort}, opCallTimeout)
+	if errors.Is(runErr, parser.ErrIperfUnreachable) {
+		// The data port is firewalled/unrouteable, not the cable's fault:
+		// record a skip and finalize rather than aborting the whole run.
+		reason := fmt.Sprintf("%s: %s throughput client could not connect: %v",
+			model.SkipReasonUnreachable, stage, runErr)
+		q.Results.Notes = append(q.Results.Notes, reason)
+		q.recordSkippedTest(stage, reason)
+		if stopErr != nil {
+			q.Results.Notes = append(q.Results.Notes,
+				fmt.Sprintf("stopping the %s server also failed: %v", stage, stopErr))
+		}
+		return true, nil
+	}
 	if runErr == nil && stopErr != nil {
 		return true, stopErr
 	}
@@ -376,7 +397,9 @@ func (q *QuickPlan) stepTCPForward(ctx context.Context, rc peer.RemoteCaller) er
 		"TCP throughput PC1 → PC2 skipped: peer iperf3 unavailable", func() error {
 			res, runErr := q.Ops.Iperf.RunTCPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
 				q.TCPDuration, q.Streams, false)
-			q.recordTCP(res, model.DirectionPC1ToPC2)
+			if !errors.Is(runErr, parser.ErrIperfUnreachable) {
+				q.recordTCP(res, model.DirectionPC1ToPC2)
+			}
 			return runErr
 		})
 	return err
@@ -428,7 +451,7 @@ func (q *QuickPlan) bidirNative(ctx context.Context, rc peer.RemoteCaller) error
 		"bidirectional stress skipped: peer iperf3 unavailable", func() error {
 			res, runErr := q.Ops.Iperf.RunBidirClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
 				q.TCPDuration, q.Streams)
-			if res != nil {
+			if res != nil && !errors.Is(runErr, parser.ErrIperfUnreachable) {
 				bidir := res.Bidir
 				q.Results.Bidir = &bidir
 				if res.Incomplete {
@@ -488,6 +511,17 @@ func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, not
 		Streams:     q.Streams,
 	}, q.tcpTimeout(), "bidirectional")
 	<-done
+
+	// An unreachable local client is the same non-fatal skip the other
+	// throughput paths already record; its empty partial carries no data, so
+	// drop it rather than flag the run partial.
+	if errors.Is(localErr, parser.ErrIperfUnreachable) {
+		reason := fmt.Sprintf("%s: bidirectional throughput client could not connect: %v",
+			model.SkipReasonUnreachable, localErr)
+		q.Results.Notes = append(q.Results.Notes, reason)
+		q.recordSkippedTest("bidirectional", reason)
+		localErr, localRes = nil, nil
+	}
 
 	b := &model.BidirResult{
 		Duration:         model.Duration(q.TCPDuration),
@@ -566,7 +600,9 @@ func (q *QuickPlan) stepUDPAtRate(ctx context.Context, rc peer.RemoteCaller, rat
 		"UDP loss/jitter skipped: peer iperf3 unavailable", func() error {
 			res, runErr := q.Ops.Iperf.RunUDPClient(ctx, q.LocalIP, q.PeerIP, q.IperfPort,
 				q.UDPDuration, uint64(rate), UDPPayloadForMTU(q.MTU))
-			q.recordUDP(res, model.DirectionPC1ToPC2)
+			if !errors.Is(runErr, parser.ErrIperfUnreachable) {
+				q.recordUDP(res, model.DirectionPC1ToPC2)
+			}
 			return runErr
 		})
 	if err != nil {
