@@ -5,7 +5,7 @@ schema version is `1.0.0`.
 
 For a concrete document, see
 [`examples/healthy/report.json`](../examples/healthy/report.json). The other
-committed example reports show reduced-speed, CRC-error, and host-limited
+committed example reports cover reduced-speed, CRC-error, and host-limited
 outcomes.
 
 ## Conventions
@@ -14,7 +14,7 @@ outcomes.
   explicitly documented as snake case.
 - Timestamps are Go `time.Time` values encoded as RFC 3339/RFC 3339Nano JSON
   strings.
-- Optional fields marked `omitempty` may be absent. Absence is not the same as
+- Optional fields marked `omitempty` may be absent. Absence isn't the same as
   a measured zero.
 - A duration is an object with both an integer millisecond value and a display
   string:
@@ -34,7 +34,7 @@ outcomes.
 - SHA-256 values are lowercase hexadecimal strings.
 
 The decoder also accepts legacy numeric-millisecond and Go-duration-string
-forms for a duration. CableCheck itself emits the object form above.
+forms for a duration. CableCheck emits the object form above.
 
 ## Top-level `Report`
 
@@ -71,9 +71,9 @@ forms for a duration. CableCheck itself emits the object form above.
 | `link` | LinkSection, optional | Before/after link settings for both peers. |
 | `machines` | MachinePair, optional | Paired PC1/PC2 machine metadata used by current reports. |
 
-The report does not contain the authentication token. Although the evaluator
-has an internal rules-version constant, `Report` has no `rulesVersion` JSON
-field in schema 1.0.0.
+The report never contains the authentication token. The evaluator has an
+internal rules-version constant, but `Report` has no `rulesVersion` JSON field
+in schema 1.0.0.
 
 ## Configuration
 
@@ -114,13 +114,12 @@ defaults have been resolved.
 | `toolVersions` | object of string values | Detected external-tool versions. |
 
 `NICReport` contains `name`, `driver`, `speedMbps`, `duplex`, `mtu`, `mac`, and
-`usb`. A negative `speedMbps` means that speed could not be determined.
-`MachinePair` has `pc1` and `pc2` fields containing the same `PeerReport`
-shape.
+`usb`. A negative `speedMbps` means the speed couldn't be determined.
+`MachinePair` has `pc1` and `pc2` fields with the same `PeerReport` shape.
 
 `link` is a `LinkSection` with `pc1` and `pc2` endpoints. Each `LinkEndpoint`
-has optional `before` and `after` `LinkSettings` objects.
-`LinkSettings` contains:
+has optional `before` and `after` `LinkSettings` objects. `LinkSettings`
+contains:
 
 - `speedMbps`, `duplex`, `linkDetected`, `autoNeg`, and `port`;
 - `supportedPorts`, `supportedModes`, `advertisedModes`, and `partnerModes`;
@@ -130,7 +129,7 @@ has optional `before` and `after` `LinkSettings` objects.
 ## Test results
 
 `tests` is a `TestsSection` with these fields. Array fields are omitted when
-empty; pointer fields are omitted when not run.
+empty, and pointer fields are omitted when the test didn't run.
 
 Directional ping, TCP, and UDP results use `pc1_to_pc2` or `pc2_to_pc1` in
 their `direction` field.
@@ -226,7 +225,7 @@ bytes, packets, errors, dropped, carrier_errors, collisions, aborted_errors,
 fifo_errors, window_errors, heartbeat_errors, carrier_changes
 ```
 
-These typed RX/TX objects are separate from the flat normalized `standard`
+These typed RX/TX objects are separate from both the flat normalized `standard`
 map and the untouched driver-specific `driver` map.
 
 `counterDeltas` is a `PeerCounterDeltas` with optional `pc1` and `pc2`
@@ -240,44 +239,44 @@ counter name. A `CounterDelta` is:
 }
 ```
 
-`ok: true` means the delta was reliable. `ok: false` means that counter went
-backwards because of a reset or wrap; its `delta` is then zero and must not be
-used as evidence. A key missing from either capture is omitted rather than
-represented as zero, and the report carries a counter-reliability warning.
+`ok: true` means the delta was reliable. `ok: false` means the counter went
+backwards because of a reset or wrap. Its `delta` is then zero and must not be
+used as evidence. A key missing from either capture is omitted rather than set
+to zero, and the report carries a counter-reliability warning.
 
-In soak mode, `cycleCounters` contains the pre-load snapshots retained for
-completed cycles. It is not a replacement for the overall initial/final
-snapshots and deltas.
+In soak mode, `cycleCounters` holds the pre-load snapshots retained for
+completed cycles. It doesn't replace the overall initial/final snapshots and
+deltas.
 
 ## Monitoring, failure, and raw-file references
 
 A `MonitoringEvent` contains `at`, `type`, `detail`, and `selfInflicted`.
-Events caused by the coordinated cable-test window are annotated with
-`selfInflicted: true` so they are not treated as ordinary link instability.
+Events caused by the coordinated cable-test window are marked
+`selfInflicted: true` so they aren't treated as ordinary link instability.
 
-A `SkippedTest` contains `name` and `reason`. A throughput test whose data
-connection could not reach the peer (firewall/routing) is recorded here with a
-`peer data port unreachable` reason, which drives the `LIM-05` limitation and
+A `SkippedTest` contains `name` and `reason`. When a throughput test's data
+connection can't reach the peer (firewall or routing), it's recorded here with
+a `peer data port unreachable` reason. That drives the `LIM-05` limitation and
 the `INCONCLUSIVE` verdict rather than a run failure. `FailureDetails` contains
 `stage` and `error`.
 
-PC2 additionally writes a `diagnostic.json` beside the report. It is a separate
-worker-local artifact — not covered by this schema, carrying no `schemaVersion`,
-and never transferred — recording what PC2 observed (state, any peer abort
-reason/detail, PC1's verdict, and a raw-file index) so a failed run is
-debuggable from PC2 alone.
+PC2 also writes a `diagnostic.json` beside the report. This is a separate
+worker-local artifact: it's not covered by this schema, carries no
+`schemaVersion`, and is never transferred. It records what PC2 observed (state,
+any peer abort reason/detail, PC1's verdict, and a raw-file index) so a failed
+run is debuggable from PC2 alone.
 
-A `RawFileRef` contains `name`, `sha256`, `bytes`, and `description`. It is a
-reference to an artifact under the report's `raw/` directory; raw artifacts
-are not embedded in `report.json`.
+A `RawFileRef` contains `name`, `sha256`, `bytes`, and `description`. It points
+to an artifact under the report's `raw/` directory; raw artifacts aren't
+embedded in `report.json`.
 
 ## Classification block
 
 The result block is spread across these top-level fields:
 
 - `classification` and nullable `score` give the final outcome;
-- `classificationReasons` contains the human-readable texts of the findings;
-- `recommendations` contains follow-up advice; and
+- `classificationReasons` holds the human-readable finding texts;
+- `recommendations` holds follow-up advice; and
 - `findings` preserves the structured rule results.
 
 Each `Finding` contains:
@@ -300,14 +299,14 @@ Schema 1.x follows these rules:
 
 1. Existing JSON field names and meanings remain stable.
 2. New optional fields may be added. Consumers should ignore unknown fields.
-3. An omitted optional field means unavailable/not applicable; it must not be
-   silently interpreted as a measured zero.
-4. Consumers should inspect `schemaVersion` before interpreting a report.
+3. An omitted optional field means unavailable or not applicable. It must not
+   be silently interpreted as a measured zero.
+4. Consumers should check `schemaVersion` before interpreting a report.
    CableCheck's `report` command accepts the current major schema and rejects
    a different major version.
 5. Existing enum meanings are part of the stable contract. A change that old
-   1.x readers cannot safely interpret requires a schema-major change rather
-   than silently redefining an existing value.
+   1.x readers can't safely interpret requires a schema-major bump; existing
+   values are never silently redefined.
 
 Use `cablecheck report path/to/report.json` to render a compatible JSON report
 into `report.md` and `summary.txt` without rerunning any tests.

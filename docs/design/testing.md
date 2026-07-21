@@ -16,7 +16,7 @@ testdata/{ip,ethtool,ping,iperf,golden,stubtools}/
 tools/genexamples/            hermetic example-report generator (main pkg, run by make)
 ```
 
-Test helpers live in normal internal packages (importable by every `_test.go`, never imported by the binary — verified by `go vet` + the fact that `cmd/cablecheck` compiles without them). `testdata/` holds only fixtures, never Go code.
+Test helpers live in normal internal packages, importable by every `_test.go` but never imported by the binary. `go vet` and the fact that `cmd/cablecheck` compiles without them enforce that. `testdata/` holds only fixtures, never Go code.
 
 ---
 
@@ -66,7 +66,7 @@ type Clock interface {
 type Ticker interface{ C() <-chan time.Time; Stop() }
 ```
 
-**Interface requirement flagged to other design agents (load-bearing for testability):** iperf3-server readiness must be observable through the `Process` handle (started + has-not-exited) plus a `Clock.After` grace period — *not* by scraping server stdout mid-run and *not* by dialing the iperf port. Otherwise the FakeProcess cannot express readiness and every TCP-test unit test needs a real listener.
+**Interface requirement flagged to other design agents (load-bearing for testability):** iperf3-server readiness must be observable through the `Process` handle (started + has-not-exited) plus a `Clock.After` grace period. It must not depend on scraping server stdout mid-run or dialing the iperf port. Otherwise the FakeProcess can't express readiness and every TCP-test unit test needs a real listener.
 
 ### 1.2 FakeRunner (`internal/runner/runnertest`)
 
@@ -105,10 +105,10 @@ func (f *FakeRunner) Processes() []*FakeProcess              // in Start order
 ```
 
 Semantics (decided):
-- **Unmatched call ⇒ test failure**, via `t.Errorf` + returned `error` — never `t.Fatalf`, because FakeRunner is called from app goroutines and `Fatal` off the test goroutine is undefined behavior.
+- **Unmatched call ⇒ test failure**, via `t.Errorf` + returned `error`. Never `t.Fatalf`: FakeRunner is called from app goroutines, and `Fatal` off the test goroutine is undefined behavior.
 - Matching order: most-recently-added `Script` wins for equal specificity; `Times`-limited scripts are consumed FIFO. This is how before/after counter snapshots are scripted: two `Times:1` scripts for `ethtool -S eth0` returning different fixtures.
-- All state mutex-guarded — the runner is hit from multiple app goroutines under `-race`.
-- `Delay` + `Started` channels are the cancellation-test mechanism: test waits on `Started` (knows we're mid-iperf3), cancels ctx, asserts kill; **no sleeps**.
+- All state is mutex-guarded, since the runner is hit from multiple app goroutines under `-race`.
+- `Delay` + `Started` channels are the cancellation-test mechanism. The test waits on `Started` (knows we're mid-iperf3), cancels ctx, and asserts the kill. **No sleeps.**
 
 ### 1.3 FakeProcess
 
@@ -141,12 +141,12 @@ func (c *FakeClock) Advance(d time.Duration)      // fires all due waiters/ticks
 func (c *FakeClock) BlockUntilWaiters(n int)      // parks until ≥n goroutines wait on After/tick
 ```
 
-`BlockUntilWaiters` is mandatory before every `Advance` that is supposed to wake a goroutine — it eliminates the classic lost-wakeup race (advance runs before the goroutine calls `After`). Implemented with a condvar over the waiter count.
+`BlockUntilWaiters` is mandatory before every `Advance` that's supposed to wake a goroutine. It eliminates the classic lost-wakeup race, where the advance runs before the goroutine calls `After`. Implemented with a condvar over the waiter count.
 
 **Where real time is tolerated (decided rule):**
-- `net.Conn` Set{Read,Write}Deadline are kernel/runtime-enforced absolute times — unfakeable. Rule: deadlines exist to catch genuine hangs; in tests they are set generously (≥30s or derived from `t.Deadline`), and no test *waits* for one to fire. The one test that verifies deadline behavior (`protocol` read-deadline test) uses a real 50ms deadline on `net.Pipe` (which supports deadlines) and asserts a timeout error — bounded, not a sync sleep.
-- `exec` timeouts (real runner) use real `context.WithTimeout`; the real-runner timeout test uses a helper process that blocks and a 100ms timeout — bounded by design, isolated to one test.
-- Everything else — heartbeat scheduling, monitor polling, countdown, report timestamps, "longest gap" math — goes through `Clock` and is faked.
+- `net.Conn` Set{Read,Write}Deadline are kernel/runtime-enforced absolute times, so they're unfakeable. Deadlines exist to catch genuine hangs; tests set them generously (≥30s or derived from `t.Deadline`), and no test *waits* for one to fire. The one test that verifies deadline behavior (`protocol` read-deadline test) uses a real 50ms deadline on `net.Pipe`, which supports deadlines, and asserts a timeout error. That's a bounded wait, not a sync sleep.
+- `exec` timeouts (real runner) use real `context.WithTimeout`. The real-runner timeout test uses a helper process that blocks and a 100ms timeout, bounded by design and isolated to one test.
+- Everything else goes through `Clock` and is faked: heartbeat scheduling, monitor polling, countdown, report timestamps, "longest gap" math.
 
 ### 1.5 Scripted stdin / Prompt
 
@@ -161,7 +161,7 @@ func (p *Prompt) ReadCommand(ctx context.Context) (PromptCmd, error) // EOF ⇒ 
 func (p *Prompt) Close() error
 ```
 
-Implementation note that tests depend on: a blocked `Read` is not ctx-cancellable, so `Prompt` runs one pump goroutine feeding a line channel; `ReadCommand` selects on ctx + channel. Tests inject either `strings.NewReader("start\n")` (EOF ends the pump ⇒ no leak) or an `io.Pipe` when arrival *timing* matters (test closes the pipe writer in cleanup so the pump exits and leakcheck passes). `testutil.ScriptStdin(t, lines ...string) io.Reader` wraps the pipe pattern with automatic cleanup.
+Implementation note that tests depend on: a blocked `Read` isn't ctx-cancellable, so `Prompt` runs one pump goroutine feeding a line channel and `ReadCommand` selects on ctx + channel. Tests inject either `strings.NewReader("start\n")` (EOF ends the pump, so no leak) or an `io.Pipe` when arrival *timing* matters (the test closes the pipe writer in cleanup so the pump exits and leakcheck passes). `testutil.ScriptStdin(t, lines ...string) io.Reader` wraps the pipe pattern with automatic cleanup.
 
 ### 1.6 testutil
 
@@ -284,7 +284,7 @@ All from `testdata/ip/*.json` fixtures through FakeRunner — never the real `ip
 
 ## 3. Integration harness
 
-**Location/decision:** `internal/app/integration_test.go`, **`package app` (white-box)** — required so tests can set unexported fault-injection hooks and read the bound control address. Runs under plain `go test ./...` (no build tag); total suite budget < 10s (all external durations are FakeRunner-instant).
+**Location/decision:** `internal/app/integration_test.go`, **`package app` (white-box)**. White-box is required so tests can set unexported fault-injection hooks and read the bound control address. Runs under plain `go test ./...` (no build tag); total suite budget < 10s, since all external durations are FakeRunner-instant.
 
 App seam (pins the app package API):
 
@@ -310,34 +310,34 @@ func (a *App) ControlAddr() net.Addr                  // real bound addr (port 0
 func (a *App) Wait() (ExitCode, error)
 ```
 
-**Harness skeleton per scenario:** coordinator `New` with `--control-port 0` → `Start` → read `ControlAddr()` → worker `New` with that port → both `Wait` in goroutines → assert exit codes + report dirs in each side's `t.TempDir()`. Each side gets its **own FakeRunner** scripted from a named fixture set (`fixtures.Healthy(t, fr)` helper composing Scripts). **Real clock** in integration (decided): golden/timestamp determinism is a unit-level concern; sharing/advancing one FakeClock across two concurrently-running apps deadlocks in practice. Heartbeat/monitor intervals configured short (100ms) via config for integration only. Non-interactive mode everywhere except one scripted-stdin scenario. `testutil.LeakCheck(t)` in every subtest.
+**Harness skeleton per scenario:** coordinator `New` with `--control-port 0` → `Start` → read `ControlAddr()` → worker `New` with that port → both `Wait` in goroutines → assert exit codes + report dirs in each side's `t.TempDir()`. Each side gets its **own FakeRunner** scripted from a named fixture set (`fixtures.Healthy(t, fr)` helper composing Scripts). Integration uses a **real clock** (decided): golden/timestamp determinism is a unit-level concern, and sharing one FakeClock across two concurrently-running apps deadlocks in practice. Heartbeat/monitor intervals are configured short (100ms) via config for integration only. Non-interactive mode everywhere except one scripted-stdin scenario. `testutil.LeakCheck(t)` in every subtest.
 
 Scenarios (each a subtest of `TestIntegration`):
 
-1. **HappyPathQuick** — full quick run. Asserts: both exit 0; PC1 dir contains report.json (unmarshals into model.Report, classification ∈ {GOOD, EXCELLENT}), report.md with all 23 headers, summary.txt, raw/ populated; PC2 dir contains transferred report.json/report.md/summary.txt whose SHA-256 equal PC1's files; interactive variant: stdin `io.Pipe`, test writes "start\n" to both after observing state `waiting_for_local_start` via `onState` channel — proves start-sync ordering without sleeps.
+1. **HappyPathQuick** — full quick run. Asserts: both exit 0; PC1 dir contains report.json (unmarshals into model.Report, classification ∈ {GOOD, EXCELLENT}), report.md with all 23 headers, summary.txt, raw/ populated; PC2 dir contains transferred report.json/report.md/summary.txt whose SHA-256 equal PC1's files. Interactive variant: stdin `io.Pipe`, test writes "start\n" to both after observing state `waiting_for_local_start` via `onState` channel. This proves start-sync ordering without sleeps.
 2. **PeerDisconnectMidTest** — worker's iperf3 client Script has `Delay`+`Started`; on `Started`, test hard-cancels the worker's ctx (simulates death). Coordinator: partial report written (report.json has `"partial": true` / incomplete test entries), exit **5**.
-3. **SIGINTSimulation** — coordinator ctx cancelled mid-TCP-test (gated on `Started`). Asserts: abort message received by worker (worker `onState` reaches aborted; worker exits 5), coordinator's receiving-side FakeProcess `Killed()` true, partial report present, coordinator exit **6**. Real signals are *not* sent in tests; `signal.NotifyContext` lives only in `main.go` (thin, review-gated).
-4. **MalformedFrameInjection** — raw `net.Dial` to control port sends header `0xFFFFFFFF` + garbage; coordinator closes that conn without panic and (still pre-handshake) keeps listening; then legit worker completes normally. Mid-session malformed frames are covered at protocol unit level.
+3. **SIGINTSimulation** — coordinator ctx cancelled mid-TCP-test (gated on `Started`). Asserts: abort message received by worker (worker `onState` reaches aborted; worker exits 5), coordinator's receiving-side FakeProcess `Killed()` true, partial report present, coordinator exit **6**. Tests don't send real signals; `signal.NotifyContext` lives only in `main.go` (thin, review-gated).
+4. **MalformedFrameInjection** — raw `net.Dial` to control port sends header `0xFFFFFFFF` + garbage; coordinator closes that conn without panic and, still pre-handshake, keeps listening; then a legit worker completes normally. Mid-session malformed frames are covered at protocol unit level.
 5. **TokenMismatch** — worker wrong token ⇒ handshake rejected; worker exits 5 with "token" in stderr; coordinator behavior per peer design asserted (rejects and continues listening).
 6. **NoBidirFallback** — worker capability fixture lacks bidir ⇒ two one-way stress runs; asserted via both sides' recorded iperf3 args (no `--bidir`, two port-distinct sessions) and report limitation note.
-7. **ReportTransferCorruption** — coordinator's `mangleReportChunk` flips one byte in chunk 2 ⇒ PC2 detects SHA mismatch, logs warning, run still *completes* on PC1 side with exit driven by health (transfer failure ⇒ warning, not orchestration failure — decided); PC2 has no partial corrupt files.
+7. **ReportTransferCorruption** — coordinator's `mangleReportChunk` flips one byte in chunk 2 ⇒ PC2 detects SHA mismatch, logs warning, run still *completes* on PC1 side with exit driven by health. Transfer failure is a warning, not an orchestration failure (decided). PC2 has no partial corrupt files.
 8. **StaleIperf3Detection** — pre-write live-looking pidfile into worker `StateDir`; preflight fails, exit **4**, remediation hint in output; coordinator times out its wait gracefully (bounded by short heartbeat config).
 
 ---
 
 ## 4. Determinism rules (enforced conventions)
 
-1. **No `time.Sleep` for synchronization** — sync via: `Script.Started`/`Delay` channels, `onState` channel, `FakeClock.BlockUntilWaiters`+`Advance`, `testutil.WaitFor`. The only loops with sleeps are bounded *convergence polls* inside `LeakCheck` and `TestProcessGroupKill` (10ms polls capped by `TestTimeout`), which wait for shutdown, not for scheduling luck.
-2. **Base context** = `t.Context()` (Go 1.24) everywhere; long operations bounded by `testutil.TestTimeout(t)` derived from `t.Deadline()` minus 2s grace — tests degrade gracefully under `-timeout` overrides and slow `-race` runs.
-3. **Goroutine leak check — hand-rolled (goleak rejected: stdlib-only mandate).** `testutil.LeakCheck(t)`: capture `runtime.Stack(buf, true)` at defer time, count goroutines whose stack contains the module path (`cablecheck/internal`), retry-poll up to 2s for the count to reach the entry snapshot, else `t.Errorf` with the offending stacks. Filtering by module path sidesteps testing-framework and `os/signal` background goroutines. Applied in: every integration subtest, every peer/protocol/testsuite test that starts goroutines.
-4. `go test -shuffle=on` in the gate (catches order coupling); `t.Parallel()` on independent unit tests; zero mutable package-level state in production packages (report-gen map iteration sorted — enforced by byte-exact goldens).
+1. **No `time.Sleep` for synchronization** — sync via `Script.Started`/`Delay` channels, `onState` channel, `FakeClock.BlockUntilWaiters`+`Advance`, and `testutil.WaitFor`. The only loops with sleeps are bounded *convergence polls* inside `LeakCheck` and `TestProcessGroupKill` (10ms polls capped by `TestTimeout`). Those wait for shutdown, not for scheduling luck.
+2. **Base context** = `t.Context()` (Go 1.24) everywhere; long operations bounded by `testutil.TestTimeout(t)`, derived from `t.Deadline()` minus 2s grace. Tests degrade gracefully under `-timeout` overrides and slow `-race` runs.
+3. **Goroutine leak check — hand-rolled (goleak rejected: stdlib-only mandate).** `testutil.LeakCheck(t)`: capture `runtime.Stack(buf, true)` at defer time, count goroutines whose stack contains the module path (`cablecheck/internal`), retry-poll up to 2s for the count to reach the entry snapshot, else `t.Errorf` with the offending stacks. Filtering by module path sidesteps testing-framework and `os/signal` background goroutines. Applied in every integration subtest and every peer/protocol/testsuite test that starts goroutines.
+4. `go test -shuffle=on` in the gate (catches order coupling); `t.Parallel()` on independent unit tests; zero mutable package-level state in production packages (report-gen map iteration sorted, enforced by byte-exact goldens).
 5. Randomness injected: token via config in tests (crypto/rand only in prod path), testId injectable through `Deps`/config.
 
 ---
 
 ## 5. Local e2e demo (manual verification, this machine)
 
-**Decision: stub-tools on PATH. `demo` build tag REJECTED** — a build tag forks product behavior and the demo would no longer exercise the real `LookPath → exec → parse` pipeline; PATH stubs run the *production binary byte-for-byte* through its real command plumbing. Stubs are sh scripts (fixtures, not product code — product never uses a shell).
+**Decision: stub-tools on PATH. `demo` build tag REJECTED.** A build tag forks product behavior, so the demo would no longer exercise the real `LookPath → exec → parse` pipeline. PATH stubs run the *production binary byte-for-byte* through its real command plumbing. Stubs are sh scripts: fixtures, not product code (the product never uses a shell).
 
 `testdata/stubtools/` (executable, committed):
 
@@ -348,7 +348,7 @@ testdata/stubtools/ethtool    # "-S" → stats fixture; "--cable-test" → ok fi
 testdata/stubtools/fixtures/  # copies of the same testdata/iperf + testdata/ethtool files
 ```
 
-Stubs resolve fixtures relative to `$0` (`dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)`), so they work from any cwd. `ping` and `ip` are the real binaries (loopback ping to 127.0.0.2 works on Linux; `ip -j addr` is real). Unit/integration tests never touch stubtools.
+Stubs resolve fixtures relative to `$0` (`dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)`), so they work from any cwd. `ping` and `ip` are the real binaries (loopback ping to 127.0.0.2 works on Linux; `ip -j addr` is real). Unit and integration tests never touch stubtools.
 
 Demo (no sudo needed — relies on the §2 network rule: loopback prefix-match under `--allow-virtual-interface`; if the network design ends up requiring exact match, fallback documented: `sudo ip addr add 127.0.0.2/8 dev lo` + `ip addr del` cleanup):
 
@@ -367,7 +367,7 @@ export PATH="$PWD/testdata/stubtools:$PATH"
 
 **Success proof:** virtual-interface warning printed; 3-2-1 countdown on both; `[n/8]` progress lines; both exit 0 (`echo $?`); `cablecheck-report-*/` on both sides with summary.txt/report.md/report.json/raw/; `sha256sum` of PC1 vs PC2 report.json identical; `./cablecheck report <pc1-dir>/report.json` regenerates md+summary (proves `report` subcommand); `./cablecheck doctor --local-ip 127.0.0.1 --allow-virtual-interface` all-green with stub PATH, and *without* stub PATH shows iperf3/ethtool missing with `pacman -S iperf3 ethtool` hint (negative demo). Interrupt demo: Ctrl-C in terminal 1 mid-test ⇒ exit 6, partial report, terminal 2 reports peer abort.
 
-Because `--non-interactive` exists, this is also scriptable: `scripts/demo-e2e.sh` runs PC1 in background with port 0→fixed demo port, PC2 foreground, asserts exit codes + report artifacts + hash equality — wired as `make demo-e2e` so the "demo" gate is push-button.
+Because `--non-interactive` exists, this is also scriptable. `scripts/demo-e2e.sh` runs PC1 in background with port 0→fixed demo port, PC2 foreground, and asserts exit codes + report artifacts + hash equality. It's wired as `make demo-e2e` so the "demo" gate is push-button.
 
 ---
 
@@ -413,7 +413,7 @@ make demo-e2e                                # scripted loopback run, exit 0 bot
 # manual once per release: two-terminal interactive demo (§5) incl. Ctrl-C partial-report check
 ```
 
-Examples are regenerated (not hand-written) so they can never drift from reporting code; the `cablecheck report` loop proves forward-consumability of every shipped report.json.
+Examples are regenerated rather than hand-written, so they can never drift from reporting code. The `cablecheck report` loop proves forward-consumability of every shipped report.json.
 
 ---
 
@@ -436,24 +436,24 @@ Examples are regenerated (not hand-written) so they can never drift from reporti
 
 **P4:** anchor: `parser.TestCableTestParse` (ok/open/unsupported→UNAVAILABLE), then testsuite coordination test with scripted link-loss→recovery fixture sequence (FakeClock-driven poll observing down→up fixtures).
 
-Rule for the executing engineer: never write a fixture-consuming parser before committing its fixture; never write orchestration before its FakeRunner script compiles; the phase's integration anchor stays red until the phase's last unit lands.
+Rule for the executing engineer: never write a fixture-consuming parser before committing its fixture, and never write orchestration before its FakeRunner script compiles. The phase's integration anchor stays red until the phase's last unit lands.
 
 ---
 
 ## Pitfalls (things that break in practice)
 
-1. **`t.Fatal` off the test goroutine** — FakeRunner/FakeProcess/leakcheck are called from app goroutines; they must use `t.Errorf` + returned errors. `Fatalf` there silently corrupts the test run.
+1. **`t.Fatal` off the test goroutine** — FakeRunner/FakeProcess/leakcheck are called from app goroutines, so they must use `t.Errorf` + returned errors. `Fatalf` there silently corrupts the test run.
 2. **FakeClock lost wakeup** — `Advance` before the code-under-test calls `After` hangs forever. `BlockUntilWaiters(n)` before every Advance is non-negotiable; bake it into test helpers.
-3. **`net.Pipe` is synchronous** — a frame write blocks until the peer reads. Any test writing then reading on one goroutine deadlocks; always run the counterpart in a goroutine (helper: `testutil.PipePeer`). Conversely this property is *useful* for backpressure tests.
-4. **4-byte length header DoS in tests and prod** — decode must validate length against max *before* `make([]byte, n)`; the `0xFFFFFFFF` test exists to catch an OOM-crash, don't drop it.
-5. **Stdin pump goroutine leaks** — `io.Pipe`-backed prompts leak the pump unless the test closes the writer; `testutil.ScriptStdin` registers `t.Cleanup(w.Close)`. Real `os.Stdin` pump can't be unblocked — acceptable only in `main.go`, which the leakchecker never sees.
-6. **Ephemeral-port race** — never "find free port then listen later". Coordinator binds `:0`, tests read `ControlAddr()`. Same rule inside the product for the iperf-port-free preflight (check by binding, then release immediately before handing to iperf3 — window documented).
-7. **Shared FakeClock across two in-process apps deadlocks** — one app waits for an advance the other's assertion path never triggers. Hence: integration uses real time with short configured intervals; FakeClock is unit-scope only.
-8. **`flag.CommandLine` reuse panics** on second parse in one test binary — config must use `flag.NewFlagSet` per invocation (test `TestFlagSetIsolated` pins it).
-9. **Golden-file mangling** — editors strip trailing whitespace / convert line endings in `testdata/golden/*.md`; add `.gitattributes` (`testdata/** -text`) and `.editorconfig` exclusion, compare exact bytes, regenerate only via `-update`.
-10. **Map iteration + `time.Now()` in report generation** — non-deterministic goldens. Sort every ranged map; all timestamps via injected `Clock`. Guard: goldens fail loudly, plus a grep in review for `time.Now()` outside `internal/clock` and `main.go`.
-11. **Sh stubs spawn `sleep` children** — `Terminate` on the stub kills `sh`, orphaning a `sleep`. Runner's process-group kill (`Setpgid` + `kill(-pgid)`) covers it; stubs also `trap ... TERM INT`. Without pgid-kill the demo leaves zombies — this is why `TestProcessGroupKill` exists.
+3. **`net.Pipe` is synchronous** — a frame write blocks until the peer reads. Any test writing then reading on one goroutine deadlocks, so always run the counterpart in a goroutine (helper: `testutil.PipePeer`). The same property is *useful* for backpressure tests.
+4. **4-byte length header DoS in tests and prod** — decode must validate length against max *before* `make([]byte, n)`. The `0xFFFFFFFF` test exists to catch an OOM-crash, so don't drop it.
+5. **Stdin pump goroutine leaks** — `io.Pipe`-backed prompts leak the pump unless the test closes the writer, so `testutil.ScriptStdin` registers `t.Cleanup(w.Close)`. The real `os.Stdin` pump can't be unblocked; that's acceptable only in `main.go`, which the leakchecker never sees.
+6. **Ephemeral-port race** — never "find free port then listen later". Coordinator binds `:0`, tests read `ControlAddr()`. Same rule inside the product for the iperf-port-free preflight: check by binding, then release immediately before handing to iperf3 (window documented).
+7. **Shared FakeClock across two in-process apps deadlocks** — one app waits for an advance the other's assertion path never triggers. So integration uses real time with short configured intervals, and FakeClock is unit-scope only.
+8. **`flag.CommandLine` reuse panics** on second parse in one test binary. Config must use `flag.NewFlagSet` per invocation (test `TestFlagSetIsolated` pins it).
+9. **Golden-file mangling** — editors strip trailing whitespace and convert line endings in `testdata/golden/*.md`. Add `.gitattributes` (`testdata/** -text`) and `.editorconfig` exclusion, compare exact bytes, regenerate only via `-update`.
+10. **Map iteration + `time.Now()` in report generation** — non-deterministic goldens. Sort every ranged map; route all timestamps through the injected `Clock`. Guard: goldens fail loudly, plus a grep in review for `time.Now()` outside `internal/clock` and `main.go`.
+11. **Sh stubs spawn `sleep` children** — `Terminate` on the stub kills `sh`, orphaning a `sleep`. Runner's process-group kill (`Setpgid` + `kill(-pgid)`) covers it, and stubs also `trap ... TERM INT`. Without pgid-kill the demo leaves zombies, which is why `TestProcessGroupKill` exists.
 12. **Absent counters ≠ zero counters** — treating a missing `rx_crc_errors` as 0 in the *before* snapshot fabricates a huge delta when the driver reports it *after* (or vice versa). Delta requires presence in both; otherwise `(0, ok=false)`. The parser tests pin absence semantics.
 13. **`-race` slows everything ~5–20×** — any hardcoded 1–2s test timeout that passes plain will flake under race in CI. All waits go through `testutil.TestTimeout(t)`.
-14. **Real signals in tests** — sending SIGINT to the test process interferes with `go test` itself. Signal handling stays in `main.go` (`signal.NotifyContext`), tests cancel contexts; do not "improve" this with an os.Process.Signal self-test.
+14. **Real signals in tests** — sending SIGINT to the test process interferes with `go test` itself. Signal handling stays in `main.go` (`signal.NotifyContext`) and tests cancel contexts; don't "improve" this with an os.Process.Signal self-test.
 15. **iperf3 server readiness by stdout-scrape or port-dial** breaks hermetic tests (FakeProcess has no live socket). Readiness must be Process-handle + Clock-grace + protocol-level ready ack (§1.1 requirement to the runner/testsuite designers).

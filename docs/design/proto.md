@@ -1,6 +1,6 @@
 # CableCheck — Design: `internal/protocol` and `internal/peer`
 
-Protocol version constant: `protocol.Version = 1` (int). Exact match required; no negotiation in v1. All numbers below are decided constants, not suggestions.
+Protocol version constant: `protocol.Version = 1` (int). Exact match required; no negotiation in v1. The numbers below are decided constants.
 
 ---
 
@@ -22,7 +22,7 @@ const (
 )
 ```
 
-Report chunks fit inside `MaxFrameSize` by construction (§8); there is **no negotiated larger cap** — one limit everywhere means one code path and no desync risk.
+Report chunks fit inside `MaxFrameSize` by construction (§8). There's **no negotiated larger cap**: one limit everywhere means one code path and no desync risk.
 
 **Conn wrapper**
 
@@ -65,8 +65,8 @@ func (c *Conn) ReadEnvelope() (*Envelope, error) {
 }
 ```
 
-- **Oversized/zero frame**: fatal. Do NOT attempt to discard-and-resync (a bogus length means the stream is corrupt or hostile); return `FrameError`, caller closes the connection and transitions to `failed`/`aborted`.
-- Unknown JSON fields in the envelope are tolerated (forward compat) — plain `json.Unmarshal`, no `DisallowUnknownFields` at envelope level.
+- **Oversized/zero frame**: fatal. Don't try to discard-and-resync; a bogus length means the stream is corrupt or hostile. Return `FrameError`, caller closes the connection and transitions to `failed`/`aborted`.
+- Unknown JSON fields in the envelope are tolerated for forward compat: plain `json.Unmarshal`, no `DisallowUnknownFields` at envelope level.
 
 **Write contract**:
 
@@ -85,7 +85,7 @@ func (c *Conn) WriteEnvelope(env *Envelope) error {
 }
 ```
 
-Header+body in **one buffer, one `Write`** — no bufio.Writer (no flush bugs), no interleaving under the mutex. Any write error is fatal to the session. Enable TCP keepalive as backup liveness: `tcpConn.SetKeepAliveConfig(net.KeepAliveConfig{Enable: true, Idle: 5s, Interval: 5s, Count: 3})` (Go 1.23+).
+Header+body go out in **one buffer, one `Write`**. No bufio.Writer means no flush bugs, and nothing interleaves under the mutex. Any write error is fatal to the session. Enable TCP keepalive as backup liveness: `tcpConn.SetKeepAliveConfig(net.KeepAliveConfig{Enable: true, Idle: 5s, Interval: 5s, Count: 3})` (Go 1.23+).
 
 ---
 
@@ -127,7 +127,7 @@ func NewEnvelope(t MessageType, testID, msgID string, payload any) (*Envelope, e
 func DecodePayload[T any](env *Envelope) (*T, error) // errors on nil/absent payload; DisallowUnknownFields OFF
 ```
 
-MessageIDs are role-prefixed monotonic counters (atomic uint64 per session) — cheap, sortable in logs, and enables duplicate detection (§6). Payload decoding is **always into these explicit structs** — never `map[string]any`, never arbitrary types.
+MessageIDs are role-prefixed monotonic counters (atomic uint64 per session): cheap, sortable in logs, and enough for duplicate detection (§6). Payload decoding always goes **into these explicit structs**, never `map[string]any` or arbitrary types.
 
 **Payload structs** (all in `protocol`, all with json tags):
 
@@ -243,7 +243,7 @@ type Complete struct {
 
 ## 3. Handshake
 
-PC1 binds `net.Listen("tcp", net.JoinHostPort(localIP, port))` — **only** the supplied local IP, never `0.0.0.0`. PC2 dials with 5 s per-attempt timeout, retrying every 2 s for up to 60 s total (covers "PC1 started second").
+PC1 binds `net.Listen("tcp", net.JoinHostPort(localIP, port))` on **only** the supplied local IP, never `0.0.0.0`. PC2 dials with a 5 s per-attempt timeout, retrying every 2 s for up to 60 s total (covers "PC1 started second").
 
 Sequence (all within `HandshakeTimeout` = 30 s, measured from accept/connect):
 
@@ -267,7 +267,7 @@ func TokenEqual(a, b string) bool {
 }
 ```
 
-Hash first because `subtle.ConstantTimeCompare` short-circuits (returns 0) on unequal lengths, leaking token length. Never log the token; log its SHA-256 prefix (8 hex) for correlation.
+Hash first because `subtle.ConstantTimeCompare` short-circuits (returns 0) on unequal lengths, which leaks token length. Never log the token; log its SHA-256 prefix (8 hex) for correlation.
 
 **TestID**: `"ct-" + time.Now().UTC().Format("20060102-150405") + "-" + hex(4 random bytes)` from `crypto/rand`. After `hello_ack`, any envelope with a non-matching, non-empty `testId` is a protocol error → `abort(protocol_error)`.
 
@@ -282,7 +282,7 @@ Hash first because `subtle.ConstantTimeCompare` short-circuits (returns 0) on un
 | Required capability missing (no iperf3 JSON) | `abort(capability_missing, detail)`, exit | exit | 4 both |
 | Handshake exceeds 30 s | close, keep listening (once), then exit | retry window applies pre-connect only; post-connect stall → exit | 5 |
 
-After a successful handshake PC1 **closes the listener** — exactly one session per process, no second-connection ambiguity.
+After a successful handshake PC1 **closes the listener**: exactly one session per process, no second-connection ambiguity.
 
 ---
 
@@ -331,7 +331,7 @@ func (m *StateMachine) Transition(to State) error       // ErrInvalidTransition{
 func (m *StateMachine) Require(states ...State) error   // ErrWrongState{Cur, Want} — op guards
 ```
 
-Unit-testable in isolation: table-driven test walks every `(from,to)` pair asserting allowed/denied. **Invalid operation rejection**: every inbound-message handler and stdin command starts with `Require(...)`; a network-triggered violation (e.g. `test_request` before `ready`) sends `warning{code:"invalid_state"}` and is dropped — repeated 3× → `abort(protocol_error)`. Stdin violations just print (`"cannot start: still in handshake"`). Peer's `ready` arriving while we are in `waiting_for_local_start` does **not** transition — it sets a `peerReady bool` flag in the session; the transition table stays honest.
+Unit-testable in isolation: a table-driven test walks every `(from,to)` pair asserting allowed/denied. **Invalid operation rejection**: every inbound-message handler and stdin command starts with `Require(...)`. A network-triggered violation (say `test_request` before `ready`) sends `warning{code:"invalid_state"}` and drops the frame; 3 in a row triggers `abort(protocol_error)`. Stdin violations just print (`"cannot start: still in handshake"`). A peer's `ready` arriving while we're in `waiting_for_local_start` does **not** transition; it sets a `peerReady bool` flag in the session, keeping the transition table honest.
 
 ---
 
@@ -352,14 +352,14 @@ func stdinLoop(ctx context.Context, events chan<- event) {
 }
 ```
 
-stdin reads are not portably interruptible. Design around it, in order:
-1. On shutdown call `os.Stdin.SetReadDeadline(time.Now())` — works on Linux ttys and pipes (os.File deadline support), unblocking the pending `Read` with `os.ErrDeadlineExceeded`, letting the goroutine exit cleanly.
-2. If `SetReadDeadline` returns `os.ErrNoDeadline` (stdin is a regular file), the goroutine is **deliberately orphaned**: it can never block the session (its only sends select on `ctx.Done()`), it is excluded from the session WaitGroup, and process exit reaps it. Document this as the one sanctioned "leak".
-3. `evStdinEOF` maps to `quit` — prevents an infinite hang when someone runs interactive mode with `< /dev/null`.
+stdin reads aren't portably interruptible. Design around it, in order:
+1. On shutdown, call `os.Stdin.SetReadDeadline(time.Now())`. This works on Linux ttys and pipes (os.File deadline support), unblocking the pending `Read` with `os.ErrDeadlineExceeded` so the goroutine exits cleanly.
+2. If `SetReadDeadline` returns `os.ErrNoDeadline` (stdin is a regular file), the goroutine is orphaned. It can't block the session, since its only sends select on `ctx.Done()`; it's excluded from the session WaitGroup, and process exit reaps it. This is the one sanctioned "leak".
+3. `evStdinEOF` maps to `quit`, which prevents an infinite hang when someone runs interactive mode with `< /dev/null`.
 
 Commands: `start` → if `Require(waiting_for_local_start)` ok: send `ready`, transition (`→ ready` if `peerReady`, else `→ waiting_for_peer_start`); duplicate `start` is idempotent (prints "already ready"). `status` → print own state, peer's last-heartbeat state, and time since last frame. `quit` → abort flow (§7). Anything else → one help line.
 
-**Synchronized start**: when PC1 is in a state where both readies are known (its own `ready` + peer's `ready`), it sends `start_confirmation{StartAt: now+3500ms, StartInMs: 3500, Mode, Steps}` and both sides transition `ready → testing` at countdown end. **Countdown anchor = local receipt time (`StartInMs`)**, not `StartAt` — wall clocks on two air-gapped PCs are not trusted; one-way latency on a direct cable is sub-ms, so both countdowns align within display precision. Each side prints `3… 2… 1… GO` on 1 s ticks from `Clock.After`. `StartAt` exists only to be recorded in the report. In `--non-interactive`, `ready` is sent automatically upon entering `waiting_for_local_start`.
+**Synchronized start**: once PC1 knows both readies (its own `ready` plus the peer's), it sends `start_confirmation{StartAt: now+3500ms, StartInMs: 3500, Mode, Steps}` and both sides transition `ready → testing` at countdown end. **Countdown anchor = local receipt time (`StartInMs`)**, not `StartAt`. Wall clocks on two air-gapped PCs aren't trusted, and one-way latency on a direct cable is sub-ms, so both countdowns align within display precision. Each side prints `3… 2… 1… GO` on 1 s ticks from `Clock.After`. `StartAt` exists only to be recorded in the report. Under `--non-interactive`, `ready` is sent automatically on entering `waiting_for_local_start`.
 
 ---
 
@@ -379,31 +379,31 @@ type RemoteCaller interface {
 }
 ```
 
-Internally: `Call` allocates messageID, registers `pending[msgID] = &call{done: make(chan *protocol.TestResult, 1), onProgress: ...}` (the pending map is owned by the event loop; registration goes through a small command channel or a mutex — use a mutex, it's two goroutines), writes the frame, waits on `done`/`ctx`/timer.
+Internally, `Call` allocates a messageID, registers `pending[msgID] = &call{done: make(chan *protocol.TestResult, 1), onProgress: ...}`, writes the frame, and waits on `done`/`ctx`/timer. The pending map is owned by the event loop; registration could go through a command channel or a mutex, and with only two goroutines a mutex wins.
 
-**Timeout budget**: `request.TimeoutMs` = expected op duration + 20 s (worker enforces via op ctx and reports `status:"timeout"` — a *result*, not a failure of the protocol). Coordinator waits `TimeoutMs + 10s` grace. If even that expires (worker didn't report at all despite heartbeats, i.e. wedged executor): coordinator sends `abort(request_timeout, stage=op)` and fails the session — a worker that heartbeats but can't answer is not trustworthy for remaining steps. Partial results are preserved (§7).
+**Timeout budget**: `request.TimeoutMs` = expected op duration + 20 s. The worker enforces it via the op ctx and reports `status:"timeout"`, which is a *result*, not a protocol failure. The coordinator waits `TimeoutMs + 10s` grace. If even that expires, the worker hasn't reported at all despite heartbeats (a wedged executor), so the coordinator sends `abort(request_timeout, stage=op)` and fails the session. A worker that heartbeats but can't answer isn't trustworthy for the remaining steps. Partial results are preserved (§7).
 
-**Duplicate protection**: messageIDs are `"<role>-%08d"`; receiver keeps `maxSeq[role]` plus a ring of the last 128 seen IDs. A duplicate or non-increasing ID → log warn, drop frame. (TCP already guarantees this; the check catches application bugs and costs nothing.)
+**Duplicate protection**: messageIDs are `"<role>-%08d"`; the receiver keeps `maxSeq[role]` plus a ring of the last 128 seen IDs. A duplicate or non-increasing ID gets logged as a warning and dropped. TCP already guarantees ordering, but the check catches application bugs and costs nothing.
 
-**Unknown message types**: log at `slog.Warn` with type + messageId, ignore, continue. Same for a `test_result` whose `InReplyTo` matches no pending call (late result after timeout-abort race): log + drop.
+**Unknown message types**: log at `slog.Warn` with type + messageId, ignore, continue. Same for a `test_result` whose `InReplyTo` matches no pending call, which happens when a late result loses the timeout-abort race: log and drop.
 
-**Heartbeats**: **both** sides run a heartbeat goroutine from handshake completion until session end: ticker at `HeartbeatInterval = 5s`; on each tick, if `time.Since(conn.LastSend()) >= 4s`, send `heartbeat{seq++, state, activeOp}` (any recent frame counts as liveness, so busy periods don't double-send). Read side enforces `IdleTimeout = 20s` (≈4 missed intervals) via the per-frame read deadline in §1. Heartbeats are valid in every post-handshake state including `generating_report` (report generation on PC1 can take seconds; transfer keeps the line busy anyway).
+**Heartbeats**: **both** sides run a heartbeat goroutine from handshake completion until session end. The ticker fires at `HeartbeatInterval = 5s`; on each tick, if `time.Since(conn.LastSend()) >= 4s`, it sends `heartbeat{seq++, state, activeOp}`. Any recent frame counts as liveness, so busy periods don't double-send. The read side enforces `IdleTimeout = 20s` (≈4 missed intervals) via the per-frame read deadline in §1. Heartbeats are valid in every post-handshake state, including `generating_report`: report generation on PC1 can take seconds, and transfer keeps the line busy anyway.
 
-**Disconnect detection**: reader goroutine returns error (EOF, RST, `FrameError`, deadline) → emits `evConnErr` → event loop: if state ∈ {testing, generating_report} → treat as peer-lost abort: preserve partials, partial report, transition `→ aborted`, exit 5; if `completed` already reached → benign, ignore.
+**Disconnect detection**: the reader goroutine returns an error (EOF, RST, `FrameError`, deadline) and emits `evConnErr`. If the state is `testing` or `generating_report`, the event loop treats it as a peer-lost abort: preserve partials, write the partial report, transition `→ aborted`, exit 5. If `completed` was already reached, it's benign and ignored.
 
 ---
 
 ## 7. Abort flow
 
-**Local Ctrl+C / `quit`**: app uses `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)`; cancellation reaches the session event loop as `<-ctx.Done()`. Sequence, strictly ordered inside the loop:
+**Local Ctrl+C / `quit`**: the app uses `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)`, so cancellation reaches the session event loop as `<-ctx.Done()`. Sequence, strictly ordered inside the loop:
 1. Cancel any active op ctx (kills child processes via CommandRunner; stops iperf3 servers).
-2. Best-effort `abort{reason:"user_interrupt", stage: current state or activeOp, initiator: role}` — the frame write already has a 10 s deadline, but shrink it: use a dedicated 2 s write deadline for the farewell (write failure is logged, never blocks shutdown).
+2. Best-effort `abort{reason:"user_interrupt", stage: current state or activeOp, initiator: role}`. The frame write already has a 10 s deadline, but the farewell uses a shorter dedicated 2 s deadline. A write failure is logged and never blocks shutdown.
 3. `conn.Close()` (unblocks reader), wait WaitGroup, unblock stdin (§5).
 4. Transition `→ aborted`; write partial report (whatever results exist, marked `"aborted": true`); exit 6.
 
-**Peer-initiated abort** (received `abort` frame): cancel active ops, print `"peer aborted: <reason> at <stage>"`, transition `→ aborted`, write own partial report from local data, exit 5. No abort-ack message — after sending abort each side closes; the closing side does not wait for a reply.
+**Peer-initiated abort** (received `abort` frame): cancel active ops, print `"peer aborted: <reason> at <stage>"`, transition `→ aborted`, write own partial report from local data, exit 5. There's no abort-ack message: after sending abort each side closes, and the closing side doesn't wait for a reply.
 
-**TCP drop mid-test** (no abort frame): identical to peer abort but reason `peer_lost`; each side independently preserves partials and produces a partial report. PC2 additionally stops any iperf3 server it was hosting. Neither side retries the connection in v1 — reconnect/recover logic is scoped only to the P4 cable-test feature, which pre-arranges a link-loss window by calling `conn.SetIdleTimeout(recoveryWindow)` on both sides **before** the link goes down.
+**TCP drop mid-test** (no abort frame): identical to peer abort but with reason `peer_lost`. Each side independently preserves partials and produces a partial report. PC2 also stops any iperf3 server it was hosting. Neither side retries the connection in v1. Reconnect/recover logic is scoped only to the P4 cable-test feature, which pre-arranges a link-loss window by calling `conn.SetIdleTimeout(recoveryWindow)` on both sides **before** the link goes down.
 
 ---
 
@@ -411,16 +411,16 @@ Internally: `Call` allocates messageID, registers `pending[msgID] = &call{done: 
 
 Direction PC1 → PC2, only in `generating_report`, only if **both** `!cfg.NoReportTransfer` and peer's `Capabilities.AcceptReportTransfer`.
 
-**Numbers**: `ChunkSize = 256 KiB` raw (base64 → ~342 KiB, envelope ≤ ~350 KiB ≪ 1 MiB frame cap). `MaxFileSize = 8 MiB` per file, `MaxTotalSize = 16 MiB` (soak-mode report.json with interval series stays well under; `raw/` is never transferred). Allowed names — exact allowlist `{"report.json","report.md","summary.txt"}`; PC2 rejects anything else, and independently rejects any name containing `/`, `\`, or `..` (path traversal).
+**Numbers**: `ChunkSize = 256 KiB` raw (base64 → ~342 KiB, envelope ≤ ~350 KiB ≪ 1 MiB frame cap). `MaxFileSize = 8 MiB` per file, `MaxTotalSize = 16 MiB`. A soak-mode report.json with interval series stays well under that, and `raw/` is never transferred. Names use the exact allowlist `{"report.json","report.md","summary.txt"}`; PC2 rejects anything else, and independently rejects any name containing `/`, `\`, or `..` (path traversal).
 
 Flow, per session:
 1. PC1 → `report` manifest (names, sizes, sha256). PC2 validates names/caps; if it can't accept (disk, caps exceeded) replies `report_ack{Name:"", Declined:true, Error}` → PC1 logs warning, skips to `complete`.
 2. Per file, in manifest order: PC1 streams chunks `seq=0..n` (`Offset` must equal bytes-received; any gap/mismatch → `report_ack{OK:false}`); PC2 writes to `<name>.part` in its report dir, feeding an incremental `sha256.New()`.
 3. On `Last:true`: PC2 compares digest to manifest; match → rename `.part` → final name, send `report_ack{Name, OK:true}`; mismatch → delete `.part`, `report_ack{OK:false, Error:"sha256 mismatch"}`.
-4. On a failed ack PC1 retries that file **once**; second failure → `warning{code:"report_transfer_failed"}`, continue. Transfer failure never changes health classification or exit code — PC2 already has its own locally-generated summary of its side.
+4. On a failed ack PC1 retries that file **once**; a second failure sends `warning{code:"report_transfer_failed"}` and continues. Transfer failure never changes health classification or exit code, since PC2 already has its own locally-generated summary of its side.
 5. PC1 → `complete{classification, summary, exitCode-class}`; PC2 replies `complete` (its own view); PC1 closes conn; both → `completed`.
 
-Acking is **per file, not per chunk** — TCP provides flow control; the per-frame write deadline (10 s) bounds a stalled receiver. 8 MiB at even 10 Mbps is ~7 s/file worst case per chunk budget — fine.
+Acking is **per file, not per chunk**. TCP provides flow control, and the per-frame write deadline (10 s) bounds a stalled receiver. 8 MiB at even 10 Mbps is ~7 s/file worst case per chunk budget, which is fine.
 
 ---
 
@@ -440,7 +440,7 @@ type evOpProgress struct{ reqID string; p protocol.TestProgress }               
 
 `events := make(chan event, 64)`. **Every** producer send selects on `ctx.Done()` so no producer can block after the loop exits.
 
-**Goroutine inventory** — owner is `Session.Run`; ownership tree and stop mechanism:
+**Goroutine inventory** (owner is `Session.Run`), with ownership tree and stop mechanism:
 
 | # | Goroutine | Role | Started | Stopped by | In WaitGroup |
 |---|---|---|---|---|---|
@@ -451,11 +451,11 @@ type evOpProgress struct{ reqID string; p protocol.TestProgress }               
 | 4 | Plan driver: runs `PlanFunc(ctx, remoteCaller)` — the test sequence, including PC1's local ops | PC1 | on `testing` entry | ctx cancel; every pending `Call` chan is closed by the loop on teardown so `Call` returns `ErrSessionClosed` | yes |
 | 5 | Op executor: **at most one** — spawned per accepted `test_request`, runs `OpHandler.HandleOp` with per-op ctx (`context.WithTimeout(sessionCtx, TimeoutMs)`) | PC2 | per request | op ctx cancel (session abort, or `op:"cancel"` request) | yes (tracked via `activeOp` handle) |
 
-A second `test_request` while one is active (except `op:"cancel"`) → immediate `test_result{Status:"rejected"}`; the coordinator never legitimately overlaps requests, so this only fires on bugs.
+A second `test_request` while one is active (except `op:"cancel"`) gets an immediate `test_result{Status:"rejected"}`. The coordinator never legitimately overlaps requests, so this only fires on bugs.
 
-**Writes**: `Conn.WriteEnvelope` is mutex-guarded; sanctioned writers are exactly the event loop, the heartbeater, and (PC2) the executor's progress path — actually route executor progress/results through `events` (`evOpProgress`/`evOpDone`) so the **loop** performs those writes; the executor itself never touches the conn. Net writers: loop + heartbeater only. This keeps `pending`/state mutation single-threaded.
+**Writes**: `Conn.WriteEnvelope` is mutex-guarded. The sanctioned writers are the event loop, the heartbeater, and (PC2) the executor's progress path. Executor progress and results route through `events` (`evOpProgress`/`evOpDone`) so the **loop** performs those writes and the executor itself never touches the conn. So the net writers are loop and heartbeater only, which keeps `pending`/state mutation single-threaded.
 
-**Shutdown order** (one function, one order, always): cancel session ctx → cancel/wait active op → farewell abort frame if appropriate (2 s deadline) → `conn.Close()` → `wg.Wait()` → unblock stdin → final state transition → report writing. `go test -race` plus a goroutine-count assertion in integration tests (before/after `Run`, tolerating the one documented stdin orphan) enforce this.
+**Shutdown order** (one function, one order, always): cancel session ctx → cancel/wait active op → farewell abort frame if appropriate (2 s deadline) → `conn.Close()` → `wg.Wait()` → unblock stdin → final state transition → report writing. `go test -race` plus a goroutine-count assertion in integration tests (before/after `Run`, tolerating the one documented stdin orphan) enforces this.
 
 **Session surface** (`internal/peer/session.go`):
 
@@ -499,31 +499,31 @@ type Outcome struct {
 func Run(ctx context.Context, cfg Config, plan PlanFunc, ops OpHandler) (Outcome, error)
 ```
 
-PC1 passes both `plan` and `ops` (it executes its own local steps directly inside `plan`, so its `ops` is unused/nil); PC2 passes `ops` only (`plan == nil` ⇒ worker mode: the loop services `test_request`s until `complete`/`abort`).
+PC1 passes both `plan` and `ops`, though it runs its own local steps directly inside `plan`, so its `ops` is unused/nil. PC2 passes `ops` only: `plan == nil` means worker mode, where the loop services `test_request`s until `complete`/`abort`.
 
 ---
 
 ## 10. PC2 concurrent execution & PC1 aggregation
 
-**PC2**: the executor goroutine runs exactly one op via `OpHandler` (which wraps `internal/runner.CommandRunner`). Progress callbacks are throttled inside the executor to ≥ 1/s before emitting `evOpProgress`. The heartbeater is independent of the executor, so a silent 60 s iperf3 run still shows liveness (`heartbeat.activeOp = "iperf3_client_run"`). Long-lived server ops split into paired requests: `iperf3_server_start` (returns `ok` only after the worker has confirmed the server is listening — poll the port) and `iperf3_server_stop` (collects server-side JSON if `--get-server-output` was unavailable). The worker keeps a per-testID process registry so `stop`, `cancel`, and abort teardown target only CableCheck-owned PIDs.
+**PC2**: the executor goroutine runs exactly one op via `OpHandler` (which wraps `internal/runner.CommandRunner`). Progress callbacks are throttled inside the executor to ≥ 1/s before emitting `evOpProgress`. The heartbeater is independent of the executor, so a silent 60 s iperf3 run still shows liveness (`heartbeat.activeOp = "iperf3_client_run"`). Long-lived server ops split into paired requests: `iperf3_server_start` returns `ok` only after the worker confirms the server is listening (it polls the port), and `iperf3_server_stop` collects server-side JSON if `--get-server-output` was unavailable. The worker keeps a per-testID process registry so `stop`, `cancel`, and abort teardown target only CableCheck-owned PIDs.
 
-**PC1 aggregation**: the plan driver owns a `model.SessionResults` accumulator. Every direction-sensitive result is stored under an explicit direction key `"pc1_to_pc2"` / `"pc2_to_pc1"`. Local steps append directly; remote steps decode `TestResult.Result` into the same `internal/model` structs (`DecodePayload[model.PingResult]` etc. — the op name determines the concrete type via a fixed `map[op]decoder` table, never reflection on arbitrary input). Counter snapshots are requested from both sides at the same plan points (`counters_snapshot` op remote, direct call local) so deltas are computed per side with aligned boundaries. `TestResult.Status == "unavailable"` propagates into the model as UNAVAILABLE — the evaluator, not the peer layer, decides what that means. Raw command output **never** crosses the control channel: each side writes its own `raw/` dir; PC2's raw artifacts stay on PC2 (referenced in its local summary).
+**PC1 aggregation**: the plan driver owns a `model.SessionResults` accumulator. Every direction-sensitive result is stored under an explicit direction key `"pc1_to_pc2"` / `"pc2_to_pc1"`. Local steps append directly; remote steps decode `TestResult.Result` into the same `internal/model` structs (`DecodePayload[model.PingResult]` etc.). The op name picks the concrete type via a fixed `map[op]decoder` table, never reflection on arbitrary input. Counter snapshots are requested from both sides at the same plan points (`counters_snapshot` op remote, direct call local) so deltas are computed per side with aligned boundaries. `TestResult.Status == "unavailable"` propagates into the model as UNAVAILABLE, and the evaluator, not the peer layer, decides what that means. Raw command output **never** crosses the control channel: each side writes its own `raw/` dir, and PC2's raw artifacts stay on PC2 (referenced in its local summary).
 
 ---
 
 ## Pitfalls
 
-1. **`subtle.ConstantTimeCompare` length short-circuit** — comparing raw token bytes leaks token length via timing and returns 0 instantly on length mismatch. Always compare SHA-256 digests (§3).
-2. **Blocked `net.Conn.Read` ignores context** — the reader goroutine can only be freed by `conn.Close()`. Closing must happen *before* `wg.Wait()` or shutdown deadlocks. Same class of bug: forgetting `ticker.Stop()`.
-3. **Never read the raw conn after wrapping in `bufio.Reader`** — buffered bytes vanish and the stream desyncs. All reads (including handshake) go through `Conn.ReadEnvelope`.
-4. **Deadlines are absolute** — `SetWriteDeadline`/`SetReadDeadline` must be re-armed per frame; setting once at startup silently disables timeouts after the first period.
-5. **Clock skew on synchronized start** — anchoring the countdown to the absolute `startAt` timestamp breaks on machines with unsynced clocks (common on bench PCs). Anchor to frame arrival + `StartInMs`.
-6. **base64 expansion vs frame cap** — chunk data grows ×4/3 plus envelope overhead. 256 KiB raw is safe under 1 MiB; anyone "optimizing" chunk size above ~700 KiB will produce frames the peer fatally rejects.
-7. **Partial reads/writes** — one `Read` never equals one message (Nagle, GRO, scheduling). `io.ReadFull` for header and body; single buffered `Write` per frame under a mutex so heartbeats can't interleave into a chunk frame.
-8. **stdin is not interruptible portably** — a naive `wg.Add(1)` around the stdin goroutine hangs shutdown forever when the user never presses Enter. Use `os.Stdin.SetReadDeadline(time.Now())` (works for ttys/pipes on Linux), exclude it from the WaitGroup, and treat EOF as `quit` to survive `< /dev/null` without `--non-interactive`.
-9. **Late `test_result` after RPC timeout** — the coordinator may abort a call whose result arrives one frame later; the loop must tolerate `InReplyTo` with no pending entry (log+drop), or it will misroute/panic.
-10. **Farewell abort on a dead conn** — after Ctrl+C following a peer crash, the abort write blocks until the write deadline. Use the short 2 s farewell deadline and ignore its error, or Ctrl+C appears to "hang".
-11. **Path traversal in report transfer** — PC2 must allowlist exact filenames; writing `manifest.Name` verbatim lets a malicious/buggy PC1 write outside the report dir.
-12. **Read deadline must cover the frame body, not just the header** — extending the deadline after reading the header lets a stalled mid-body peer wedge the reader for another full idle period; keep one deadline per frame.
-13. **Heartbeat storms during chunk streaming** — heartbeater must check `LastSend()` before sending, otherwise it queues redundant frames behind large chunk writes and inflates write latency measurements in verbose logs.
-14. **Envelope `testId` on early frames** — `hello` and PC1's first `abort` legitimately carry `testId:""`; validators must special-case pre-`hello_ack` frames or the handshake rejects itself.
+1. **`subtle.ConstantTimeCompare` length short-circuit**: comparing raw token bytes leaks token length via timing and returns 0 instantly on length mismatch. Always compare SHA-256 digests (§3).
+2. **Blocked `net.Conn.Read` ignores context**: the reader goroutine can only be freed by `conn.Close()`. Closing must happen *before* `wg.Wait()` or shutdown deadlocks. Forgetting `ticker.Stop()` is the same class of bug.
+3. **Never read the raw conn after wrapping in `bufio.Reader`**: buffered bytes vanish and the stream desyncs. All reads (including handshake) go through `Conn.ReadEnvelope`.
+4. **Deadlines are absolute**: `SetWriteDeadline`/`SetReadDeadline` must be re-armed per frame. Setting them once at startup silently disables timeouts after the first period.
+5. **Clock skew on synchronized start**: anchoring the countdown to the absolute `startAt` timestamp breaks on machines with unsynced clocks, common on bench PCs. Anchor to frame arrival + `StartInMs`.
+6. **base64 expansion vs frame cap**: chunk data grows ×4/3 plus envelope overhead. 256 KiB raw is safe under 1 MiB; anyone "optimizing" chunk size above ~700 KiB will produce frames the peer fatally rejects.
+7. **Partial reads/writes**: one `Read` never equals one message (Nagle, GRO, scheduling). Use `io.ReadFull` for header and body, and a single buffered `Write` per frame under a mutex so heartbeats can't interleave into a chunk frame.
+8. **stdin is not interruptible portably**: a naive `wg.Add(1)` around the stdin goroutine hangs shutdown forever when the user never presses Enter. Use `os.Stdin.SetReadDeadline(time.Now())` (works for ttys/pipes on Linux), exclude it from the WaitGroup, and treat EOF as `quit` to survive `< /dev/null` without `--non-interactive`.
+9. **Late `test_result` after RPC timeout**: the coordinator may abort a call whose result arrives one frame later. The loop must tolerate `InReplyTo` with no pending entry (log+drop), or it will misroute/panic.
+10. **Farewell abort on a dead conn**: after Ctrl+C following a peer crash, the abort write blocks until the write deadline. Use the short 2 s farewell deadline and ignore its error, or Ctrl+C appears to "hang".
+11. **Path traversal in report transfer**: PC2 must allowlist exact filenames. Writing `manifest.Name` verbatim lets a malicious or buggy PC1 write outside the report dir.
+12. **Read deadline must cover the frame body, not just the header**: extending the deadline after reading the header lets a stalled mid-body peer wedge the reader for another full idle period. Keep one deadline per frame.
+13. **Heartbeat storms during chunk streaming**: the heartbeater must check `LastSend()` before sending, or it queues redundant frames behind large chunk writes and inflates write latency measurements in verbose logs.
+14. **Envelope `testId` on early frames**: `hello` and PC1's first `abort` legitimately carry `testId:""`, so validators must special-case pre-`hello_ack` frames or the handshake rejects itself.

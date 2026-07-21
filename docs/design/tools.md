@@ -2,7 +2,7 @@
 Scope: `internal/runner`, `internal/network`, `internal/parser`, `internal/testsuite`, `testdata/`. Field names below marked **[verified]** were checked live on this dev machine (iproute2 6.x JSON, iputils 20250605, sysfs on kernel 7.0.9-arch2-1).
 
 Package dependency direction (no cycles):
-`parser` (pure, no exec, depends only on `model`) ← `testsuite` → `runner`, `network`, `parser`, `model`; `network` → `runner` (for `ip` exec) + direct sysfs reads; `runner` depends on nothing internal except `clock`/`logging`. Result models (`PingResult`, `Iperf3Result`, `CounterSnapshot`, `LinkSettings`, `CableTestResult`, …) live in `internal/model` so `evaluate`/`reporting` consume them without importing parsers.
+`parser` (pure, no exec, depends only on `model`) ← `testsuite` → `runner`, `network`, `parser`, `model`; `network` → `runner` (for `ip` exec) plus direct sysfs reads; `runner` depends on nothing internal except `clock`/`logging`. Result models (`PingResult`, `Iperf3Result`, `CounterSnapshot`, `LinkSettings`, `CableTestResult`, …) live in `internal/model` so `evaluate` and `reporting` can consume them without importing parsers.
 
 ---
 
@@ -54,21 +54,21 @@ type Process interface {
 ```
 
 ### Error contract (decision)
-`err != nil` **only** for infrastructure failures; non-zero exit is *data*, not error (ping exits 1 on any loss):
+`err != nil` **only** for infrastructure failures. A non-zero exit is *data*, not an error (ping exits 1 on any loss):
 - exec not found: `Run` returns `fmt.Errorf("%s: %w", name, exec.ErrNotFound)` → callers use `errors.Is(err, exec.ErrNotFound)` (LookPath wraps it already; preserve the chain).
 - timeout: result non-nil with `TimedOut=true`, err satisfies `errors.Is(err, ErrTimeout)` **and** `errors.Is(err, context.DeadlineExceeded)`.
 - session cancel: err wraps `context.Canceled`; partial output preserved in result.
 - non-zero exit / signaled: `err == nil`; caller inspects `ExitCode`/`Signal`. Helper `func (r *CommandResult) Failed() bool { return r.ExitCode != 0 }`.
 
 ### Process-group and escalation (exact mechanism)
-- `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` → child pgid == child pid; grandchildren (sudo→ethtool, iperf3 threads) inherit it.
+- `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` → child pgid == child pid. Grandchildren (sudo→ethtool, iperf3 threads) inherit it.
 - `cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }` (ignore `ESRCH`).
 - Own escalation timer: when ctx (or per-spec `context.WithTimeout`) fires, after `GracePeriod` send `syscall.Kill(-pgid, SIGKILL)`.
-- `cmd.WaitDelay = GracePeriod + 2*time.Second` as **backstop only** — see Pitfalls: WaitDelay's kill hits only the direct child, but it also un-hangs `Wait()` when a grandchild holds the stdout pipe open. Both mechanisms are required.
-- Timeout attribution: set a `timedOut atomic.Bool` in the timer callback before signaling; after `Wait`, `TimedOut = timedOut.Load()` (don't infer from `ctx.Err()` alone — parent cancel ≠ timeout).
+- `cmd.WaitDelay = GracePeriod + 2*time.Second` as **backstop only**. WaitDelay's kill hits only the direct child, but it also un-hangs `Wait()` when a grandchild holds the stdout pipe open (see Pitfalls). Both mechanisms are required.
+- Timeout attribution: set a `timedOut atomic.Bool` in the timer callback before signaling; after `Wait`, `TimedOut = timedOut.Load()`. Don't infer from `ctx.Err()` alone, since a parent cancel isn't a timeout.
 
 ### Output capture
-`cappedWriter{max int64}`: stores up to `max` bytes, then discards and sets `Truncated`; on finalize appends marker line `"\n[cablecheck: output truncated at %d bytes; full stream in %s]\n"`. Wiring: `cmd.Stdout = io.MultiWriter(teeFile, capped)` — tee files get the **complete** stream (that's the point of `raw/`), memory is capped. For `Start()`, add a third leg: an `io.Pipe` for live readiness scanning (reader must be drained; the manager always drains it in a goroutine).
+`cappedWriter{max int64}` stores up to `max` bytes, then discards and sets `Truncated`. On finalize it appends the marker line `"\n[cablecheck: output truncated at %d bytes; full stream in %s]\n"`. Wiring: `cmd.Stdout = io.MultiWriter(teeFile, capped)`. Tee files get the **complete** stream (that's the point of `raw/`); memory is capped. For `Start()`, add a third leg: an `io.Pipe` for live readiness scanning. The reader must be drained, and the manager always drains it in a goroutine.
 
 ### Cleanup registry (session-owned PIDs)
 
@@ -89,7 +89,7 @@ func VerifyOwnership(p ProcessInfo) bool // re-reads /proc/<pid>/stat starttime 
 func ScanStale(baseDir string) ([]ProcessInfo, error) // preflight: old testID dirs → validate pidfiles
 ```
 
-Rules: never `pkill`/`killall`; never signal a PID unless `VerifyOwnership` passes (starttime match defeats PID reuse). `Wait()` unregisters and removes the pidfile. Preflight stale check: `ScanStale` over `${XDG_RUNTIME_DIR:-/tmp}/cablecheck/*`; verified-live stale iperf3 → report + offer kill; dead pidfiles → clean up silently.
+Rules: never `pkill`/`killall`, and never signal a PID unless `VerifyOwnership` passes (the starttime match defeats PID reuse). `Wait()` unregisters and removes the pidfile. Preflight stale check: `ScanStale` over `${XDG_RUNTIME_DIR:-/tmp}/cablecheck/*`; verified-live stale iperf3 → report + offer kill; dead pidfiles → clean up silently.
 
 ### Test double
 `internal/runner/runnertest.FakeRunner`: ordered script of `Stub{MatchArgv []string /* prefix match */, Result CommandResult, Err error, Delay time.Duration}` + call recording; `runnertest.FromFixture(dir, name)` loads the triplet convention (`name.stdout`, `name.stderr`, `name.exit` — missing stderr/exit ⇒ empty/0; stdout-only fixtures are plain `name.txt`).
@@ -99,9 +99,9 @@ Rules: never `pkill`/`killall`; never signal a PID unless `VerifyOwnership` pass
 ## 2. iperf3 management (`internal/testsuite/iperf.go`)
 
 ### Placement & lifecycle (decisions)
-- Server **always on the receiving side**, one-shot (`-1`) per phase. Rationale: clean lifecycle (server exits when the test ends — no stale listeners between phases), sender-side client JSON carries everything including `sum_received` and remote CPU. `-R` is **never used**: direction change = swap server side. This kills a whole class of `-R` JSON asymmetries.
+- Server **always on the receiving side**, one-shot (`-1`) per phase. This gives a clean lifecycle: the server exits when the test ends, so there are no stale listeners between phases, and the sender-side client JSON carries everything we need including `sum_received` and remote CPU. `-R` is **never used**; a direction change means swapping the server side. That kills a whole class of `-R` JSON asymmetries.
 - Exception: `--bidir` (single server on PC2, client on PC1 runs `--bidir`).
-- Server argv: `iperf3 -s -B <localIP> -p <port> -1 --forceflush` (bind to the tested link only — mirrors control-plane rule and keeps multi-homed hosts honest).
+- Server argv: `iperf3 -s -B <localIP> -p <port> -1 --forceflush`. Binding to the tested link only mirrors the control-plane rule and keeps multi-homed hosts honest.
 - Client argv base: `iperf3 -c <peerIP> -B <localIP> -p <port> -J --connect-timeout 3000`.
 
 ### Invocation matrix
@@ -113,10 +113,10 @@ Rules: never `pkill`/`killall`; never signal a PID unless `VerifyOwnership` pass
 | TCP bidir | PC2 | `-t <tcpDur> -P <streams> --bidir` (PC1 client) |
 | UDP A→B | B | `-u -b <int bits/s> -t <udpDur> -l <mtu-28>` |
 
-`-b` is passed as a **plain integer** (e.g. `800000000`), computed as 80% of negotiated speed — avoids suffix/decimal parsing differences across iperf3 builds. `-l mtu-28` pins one datagram = one frame (no IP fragmentation), aligning UDP loss with cable behavior. Runner `Timeout = testDuration + 15s`; server `Timeout = testDuration + 30s`.
+`-b` is passed as a **plain integer** (e.g. `800000000`), computed as 80% of negotiated speed. A plain integer avoids suffix/decimal parsing differences across iperf3 builds. `-l mtu-28` pins one datagram to one frame (no IP fragmentation), aligning UDP loss with cable behavior. Runner `Timeout = testDuration + 15s`; server `Timeout = testDuration + 30s`.
 
 ### Readiness detection (decision: stdout banner, NOT port probe)
-`StartServer` scans live stdout for prefix `"Server listening on "` (requires `--forceflush`; see Pitfalls). Fallback: if no banner but process still alive after 1.5 s → ready (bind failures exit immediately with stderr `"unable to start listener for connections: Address already in use"` → typed `ErrPortInUse`). **Never** TCP-connect-probe a `-1` server: a cookie-less connect can consume/abort the one-off session. Readiness is then acked to the peer over the control protocol; only after the ack does the sender launch the client.
+`StartServer` scans live stdout for the prefix `"Server listening on "` (requires `--forceflush`; see Pitfalls). Fallback: if no banner arrives but the process is still alive after 1.5 s, treat it as ready. Bind failures exit immediately with stderr `"unable to start listener for connections: Address already in use"`, which maps to a typed `ErrPortInUse`. **Never** TCP-connect-probe a `-1` server: a cookie-less connect can consume or abort the one-off session. Readiness is acked to the peer over the control protocol, and only after the ack does the sender launch the client.
 
 ```go
 type IperfManager struct { R runner.Runner; Reg *runner.Registry; RawDir string }
@@ -136,13 +136,13 @@ type IperfCaps struct {
     JSON, Reverse, Bidir, OneOff, GetServerOutput, UDP bool
 }
 ```
-- `iperf3 --version` first line, regex `^iperf (\d+)\.(\d+)` → reliable for upstream feature *semantics* (bidir JSON shape changed over time).
-- `iperf3 --help` usage text greps: `--bidir`, `--one-off`, `--json`, `--get-server-output` → reliable for *flag acceptance* (usage text is generated from the accepted option table; catches distro patches/backports).
-- Rule: a capability is claimed only if **both** signals agree (`Bidir = ver>=3.7 && helpHas("--bidir")`). `JSON`, `Reverse`, `UDP` are unconditional for any 3.x (present since 3.0/3.1; if `--version` doesn't say `iperf 3`, preflight fails with "iperf3 3.7+ required"). Support window: 3.7–3.17.
-- Both peers exchange `IperfCaps` in the capabilities message; effective caps = AND. No `--bidir` on either side ⇒ two coordinated one-way phases (report as limitation, never cable failure).
+- `iperf3 --version` first line, regex `^iperf (\d+)\.(\d+)`. This is reliable for upstream feature *semantics* (the bidir JSON shape changed over time).
+- `iperf3 --help` usage text greps: `--bidir`, `--one-off`, `--json`, `--get-server-output`. This is reliable for *flag acceptance*, since the usage text is generated from the accepted option table and so catches distro patches and backports.
+- Rule: a capability is claimed only if **both** signals agree (`Bidir = ver>=3.7 && helpHas("--bidir")`). `JSON`, `Reverse`, and `UDP` are unconditional for any 3.x, present since 3.0/3.1. If `--version` doesn't say `iperf 3`, preflight fails with "iperf3 3.7+ required". Support window: 3.7–3.17.
+- Both peers exchange `IperfCaps` in the capabilities message; effective caps = AND. No `--bidir` on either side means two coordinated one-way phases, reported as a limitation, never a cable failure.
 
 ### JSON parsing across 3.7–3.17 (`internal/parser/iperf.go`)
-Wire structs (all fields optional-tolerant; `json.Unmarshal` ignores unknowns):
+Wire structs, all fields optional-tolerant (`json.Unmarshal` ignores unknowns):
 
 ```go
 type iperfWire struct {
@@ -192,11 +192,11 @@ type iperfUDP struct {
 ```
 
 Version-difference handling (all encoded in `ParseIperf3`):
-- **TCP**: prefer `end.sum_sent`/`end.sum_received` (present across 3.7–3.17). `retransmits` only on sender-side sums/streams — model it as `*uint64`, propagate absence (absent ≠ 0).
-- **UDP**: only `end.sum` exists; on the sending client it carries **server-observed** loss/jitter (that's what we want). No retransmits ever.
-- **Bidir**: 3.7–3.11 have a known bug emitting duplicate/misattributed `sum_sent`/`sum_received` keys (Go's decoder silently keeps the last). Decision: in bidir mode **ignore top-level end sums entirely** and aggregate from `end.streams[]`, partitioning by each stream's `sender.sender` boolean (`true` = client→server). Same for intervals: use `intervals[].sum` (fwd) + `intervals[].sum_bidir_reverse` (rev), tolerating absence of the latter by re-deriving from interval streams.
-- **3.16/3.17** (multithreaded): identical top-level shape; per-interval stream timestamps may stagger a few ms — interval analysis uses `sum` rows only, so it's immune.
-- `error` field non-empty ⇒ return `model.Iperf3Result{Error: ...}` plus typed `ErrIperfClient`; never treat exit-1 client output as unparseable before attempting JSON decode.
+- **TCP**: prefer `end.sum_sent`/`end.sum_received`, present across 3.7–3.17. `retransmits` shows up only on sender-side sums and streams, so model it as `*uint64` and propagate absence (absent isn't 0).
+- **UDP**: only `end.sum` exists. On the sending client it carries **server-observed** loss and jitter, which is what we want. No retransmits ever.
+- **Bidir**: 3.7–3.11 have a known bug that emits duplicate or misattributed `sum_sent`/`sum_received` keys, and Go's decoder silently keeps the last. So in bidir mode we **ignore top-level end sums entirely** and aggregate from `end.streams[]`, partitioning by each stream's `sender.sender` boolean (`true` = client→server). Intervals work the same way: use `intervals[].sum` (fwd) plus `intervals[].sum_bidir_reverse` (rev), tolerating absence of the latter by re-deriving from the interval streams.
+- **3.16/3.17** (multithreaded): identical top-level shape. Per-interval stream timestamps may stagger a few ms, but interval analysis uses `sum` rows only, so it's immune.
+- A non-empty `error` field returns `model.Iperf3Result{Error: ...}` plus a typed `ErrIperfClient`. Never treat exit-1 client output as unparseable before attempting a JSON decode.
 
 Normalized model:
 
@@ -218,24 +218,24 @@ type Iperf3Result struct {
 ```
 
 ### Port availability probe (`internal/network`)
-`ProbePortFree(ip netip.Addr, port uint16) error`: `net.Listen("tcp", ip:port)` **and** `net.ListenPacket("udp", ip:port)`, close both. Both families matter — iperf3 UDP data uses the same port number over UDP. `EADDRINUSE` on a specific-IP bind also catches wildcard binds by other processes.
+`ProbePortFree(ip netip.Addr, port uint16) error`: `net.Listen("tcp", ip:port)` **and** `net.ListenPacket("udp", ip:port)`, close both. Both families matter, because iperf3 UDP data reuses the same port number over UDP. `EADDRINUSE` on a specific-IP bind also catches wildcard binds by other processes.
 
 ### Stale-process identification
-A CableCheck-owned iperf3 is identified **only** by Registry pidfiles: `{pid, startTicks, argv0:"iperf3", testID}`. Before any signal: re-read `/proc/PID/stat` (starttime equal) and `/proc/PID/cmdline` (NUL-split argv[0] basename == `iperf3`, args contain our `-p <port>`). Anything else — including an iperf3 the user runs themselves — is reported in preflight as "port busy / foreign iperf3" and never killed.
+A CableCheck-owned iperf3 is identified **only** by Registry pidfiles: `{pid, startTicks, argv0:"iperf3", testID}`. Before any signal, re-read `/proc/PID/stat` (starttime equal) and `/proc/PID/cmdline` (NUL-split argv[0] basename == `iperf3`, args contain our `-p <port>`). Anything else, including an iperf3 the user runs themselves, is reported in preflight as "port busy / foreign iperf3" and never killed.
 
 ---
 
 ## 3. ping (`internal/testsuite/ping.go` + `internal/parser/ping.go`)
 
 ### Invocation
-- Quick: `ping -n -D -c 500 -i 0.02 -W 1 -w <ceil(500*i)+10> <peer>` (LC_ALL=C via runner base env). `-n` avoids rDNS stalls, `-D` gives per-reply epoch timestamps for real time-gap math, `-w` bounds wall time (runner timeout is the backstop at `-w`+10 s).
-- Full-size: `ping -n -D -M do -s <MTU-28> -c 100 -i 0.2 -W 2 -w 40 <peer>` (1472 for MTU 1500; IPv4: 20 IP + 8 ICMP).
+- Quick: `ping -n -D -c 500 -i 0.02 -W 1 -w <ceil(500*i)+10> <peer>` (LC_ALL=C via runner base env). `-n` avoids rDNS stalls, `-D` gives per-reply epoch timestamps for real time-gap math, and `-w` bounds wall time (the runner timeout is the backstop at `-w`+10 s).
+- Full-size: `ping -n -D -M do -s <MTU-28> -c 100 -i 0.2 -W 2 -w 40 <peer>` (1472 for MTU 1500; IPv4 is 20 IP + 8 ICMP).
 
 ### Interval fallback ladder (0.02 → 0.2 → 1.0)
-Trigger: exit code 2 **and** stderr contains both `"cannot flood"` and `"minimal interval"`. **[verified]** modern iputils 20250605 emits `ping: cannot flood, minimal interval for user must be >= 2 ms, use -i 0.002 (or higher)` (comma); legacy (<2021) emits `ping: cannot flood; minimal interval allowed for user is 200ms` (semicolon) — the two shared substrings above match both, and LC_ALL=C defeats NLS translation. On trigger, retry next rung; record `IntervalUsed` in the result and a limitation note (quick-mode gap analysis granularity degrades). 0.02 works unprivileged on iputils ≥2021 (≥2 ms rule) — verified `-i 0.002` exit 0 unprivileged on this machine.
+Trigger: exit code 2 **and** stderr contains both `"cannot flood"` and `"minimal interval"`. **[verified]** modern iputils 20250605 emits `ping: cannot flood, minimal interval for user must be >= 2 ms, use -i 0.002 (or higher)` (comma); legacy (<2021) emits `ping: cannot flood; minimal interval allowed for user is 200ms` (semicolon). The two shared substrings above match both, and LC_ALL=C defeats NLS translation. On trigger, retry the next rung, then record `IntervalUsed` in the result and a limitation note (quick-mode gap analysis granularity degrades). 0.02 works unprivileged on iputils ≥2021 under the ≥2 ms rule; `-i 0.002` was verified exit 0 unprivileged on this machine.
 
 ### Line grammar (iputils only — busybox detected and rejected)
-Decision: busybox ping is **rejected at preflight**, not supported: `ping -V` must contain `iputils` (**[verified]** `ping from iputils 20250605`); otherwise (or if `exec.LookPath("ping")` resolves through a symlink whose target basename is `busybox`) preflight fails with an install hint. Justification: busybox uses `seq=` not `icmp_seq=`, has no `mdev`, no `-D`, unreliable fractional `-i` — supporting it doubles the grammar for a target audience (desktop/server distros) that universally ships iputils. The parser still recognizes busybox-shaped lines just enough to return `ErrUnsupportedPingFormat` (fixture-tested) instead of silently reporting 100% loss.
+Decision: busybox ping is **rejected at preflight**, not supported. `ping -V` must contain `iputils` (**[verified]** `ping from iputils 20250605`); otherwise, or if `exec.LookPath("ping")` resolves through a symlink whose target basename is `busybox`, preflight fails with an install hint. The justification: busybox uses `seq=` not `icmp_seq=`, has no `mdev`, no `-D`, and unreliable fractional `-i`. Supporting it would double the grammar for a target audience (desktop/server distros) that universally ships iputils. The parser still recognizes busybox-shaped lines just enough to return `ErrUnsupportedPingFormat` (fixture-tested) instead of silently reporting 100% loss.
 
 Regexes (LC_ALL=C, iputils):
 - Reply: `^\[(\d+\.\d+)\] (\d+) bytes from ([0-9a-fA-F:.]+): icmp_seq=(\d+) ttl=(\d+) time=([\d.]+) ms( \(DUP!\))?$` **[verified shape]**
@@ -244,7 +244,7 @@ Regexes (LC_ALL=C, iputils):
 - Summary: `^(\d+) packets transmitted, (\d+) received(?:, \+(\d+) duplicates)?(?:, \+(\d+) errors)?, ([\d.]+)% packet loss, time (\d+)ms$` **[verified shape]**
 - RTT: `^rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms(, pipe \d+)?$` **[verified shape]**
 
-Unknown lines: counted (`UnparsedLines int`), never fatal — raw output is always in `raw/` anyway.
+Unknown lines are counted (`UnparsedLines int`) and never fatal, since the raw output always lands in `raw/` anyway.
 
 ### Analysis
 ```go
@@ -264,7 +264,7 @@ type PingResult struct {
     UnparsedLines               int
 }
 ```
-Semantics: percentiles/spikes computed over the **first** reply per seq (DUPs tracked separately — duplicates on a direct cable are themselves evidence). `LongestGapMs` from `-D` timestamps is the "longest response gap" (captures burst loss *and* stalls); seq-run analysis localizes which packets vanished. Exit 1 with a parsed summary = valid result with loss, not an error.
+Semantics: percentiles and spikes are computed over the **first** reply per seq, with DUPs tracked separately, since duplicates on a direct cable are themselves evidence. `LongestGapMs` from the `-D` timestamps is the "longest response gap" and captures both burst loss and stalls; seq-run analysis localizes which packets vanished. Exit 1 with a parsed summary is a valid result with loss, not an error.
 
 ### Testsuite API
 ```go
@@ -272,14 +272,14 @@ type PingTester struct { R runner.Runner; RawDir string }
 func (t *PingTester) Quick(ctx context.Context, peer netip.Addr, count int) (model.PingResult, error)      // owns the ladder
 func (t *PingTester) FullSize(ctx context.Context, peer netip.Addr, mtu, count int) (model.PingResult, error)
 ```
-Both directions = each peer runs its own ping against the other (coordinated by the protocol layer); no remote execution.
+Both directions: each peer runs its own ping against the other, coordinated by the protocol layer. No remote execution.
 
 ---
 
 ## 4. ethtool parsing (`internal/parser/ethtool.go`)
 
 ### Base settings (`ethtool <if>`)
-Line-oriented state machine: a trimmed line containing `": "` (or ending `:`) starts key/value; the three link-mode keys (`Supported link modes`, `Advertised link modes`, `Link partner advertised link modes`) enter list mode where subsequent deeper-indented colon-free lines are whitespace-split into mode tokens (`1000baseT/Full`). `Not reported` ⇒ empty list.
+Line-oriented state machine: a trimmed line containing `": "` (or ending `:`) starts a key/value pair. The three link-mode keys (`Supported link modes`, `Advertised link modes`, `Link partner advertised link modes`) enter list mode, where subsequent deeper-indented colon-free lines are whitespace-split into mode tokens (`1000baseT/Full`). `Not reported` gives an empty list.
 
 ```go
 type LinkSettings struct {
@@ -293,10 +293,10 @@ type LinkSettings struct {
     Raw          map[string]string // every simple key:value line
 }
 ```
-Speed regex `^(\d+)Mb/s$`; `Unknown!` → -1 (no-link or virtual). `PartnerModes` empty + autoneg on + link up ⇒ "partner did not report" (finding, not failure). Multiline `Current message level` continuation lines are colon-free but we're not in list mode there — they're appended to `Raw["Current message level"]`.
+Speed regex `^(\d+)Mb/s$`; `Unknown!` → -1 (no-link or virtual). `PartnerModes` empty with autoneg on and link up means "partner did not report", a finding rather than a failure. Multiline `Current message level` continuation lines are colon-free but don't put us in list mode; they're appended to `Raw["Current message level"]`.
 
 ### `ethtool -S` (`ParseEthtoolStats`)
-Skip banner line (`NIC statistics:`); accept only `^\s*([A-Za-z0-9_\[\]. -]+?):\s+(\d+)\s*$` → `map[string]uint64`. Anything else ignored (some drivers emit section headers/hex). Duplicate names (per-queue collisions don't happen; identical names would be driver bugs): last wins, log once.
+Skip the banner line (`NIC statistics:`); accept only `^\s*([A-Za-z0-9_\[\]. -]+?):\s+(\d+)\s*$` → `map[string]uint64`. Anything else is ignored, since some drivers emit section headers or hex. For duplicate names (per-queue collisions don't happen, and identical names would be driver bugs) the last wins, logged once.
 
 ### `--cable-test` (`ParseCableTest(stdout, stderr []byte, exitCode int)`)
 Netlink-era grammar:
@@ -309,7 +309,7 @@ Pair C, fault length: 32.00m
 ```
 - `^Pair ([A-D]) code (.+)$` → code map: `OK`→OK, `Open Circuit`→OPEN, `Short within Pair`→SHORT_INTRA, `Short to another pair`→SHORT_INTER, `Impedance mismatch`→IMPEDANCE, anything else→UNSPECIFIED with `RawCode` preserved.
 - `^Pair ([A-D]), fault length: ([\d.]+)m$` attaches distance.
-- Unavailability: exit≠0 with stderr containing `Operation not supported` (or `netlink error` + EOPNOTSUPP text) → `Available=false, Reason="driver does not support cable test"`. `Operation not permitted` → retry once via sudo path if allowed, else UNAVAILABLE("requires root"). Pre-netlink ethtool (no such flag): stderr `bad command line argument` / usage dump → UNAVAILABLE("ethtool too old (netlink cable-test requires ethtool ≥5.4 + kernel ≥5.4)"). Never FAILED from unavailability.
+- Unavailability handling. Exit≠0 with stderr containing `Operation not supported` (or `netlink error` + EOPNOTSUPP text) → `Available=false, Reason="driver does not support cable test"`. `Operation not permitted` → retry once via the sudo path if allowed, else UNAVAILABLE("requires root"). Pre-netlink ethtool with no such flag emits stderr `bad command line argument` or a usage dump → UNAVAILABLE("ethtool too old (netlink cable-test requires ethtool ≥5.4 + kernel ≥5.4)"). Unavailability never becomes FAILED.
 
 ```go
 type CableTestResult struct {
@@ -319,7 +319,7 @@ type CableTestResult struct {
 ```
 
 ### `--cable-test-tdr` (`ParseCableTestTDR`)
-Shape: header `Cable test TDR data for device X.` then per-sample lines pairing `Pair <A-D>`, a distance, and a signed amplitude. Because ethtool's TDR text has shifted between 5.x/6.x releases, the parser is tolerant: within any line starting `Pair `, independently extract `Pair ([A-D])`, `distance[:\s]+([\d.]+)\s*c?m`, `amplitude[:\s]+(-?\d+)`; store `TDRSample{Pair, DistanceM, Amplitude}`; unmatched lines only raise `UnparsedLines`. Result mirrors `CableTestResult` (`Available/Reason/Samples/UnparsedLines`). Evaluator uses TDR only as supporting evidence, so lossy parsing is acceptable.
+Shape: a header `Cable test TDR data for device X.` then per-sample lines pairing `Pair <A-D>`, a distance, and a signed amplitude. Because ethtool's TDR text has shifted between 5.x and 6.x releases, the parser is tolerant. Within any line starting `Pair `, it independently extracts `Pair ([A-D])`, `distance[:\s]+([\d.]+)\s*c?m`, and `amplitude[:\s]+(-?\d+)`, then stores `TDRSample{Pair, DistanceM, Amplitude}`; unmatched lines only raise `UnparsedLines`. The result mirrors `CableTestResult` (`Available/Reason/Samples/UnparsedLines`). The evaluator uses TDR only as supporting evidence, so lossy parsing is acceptable.
 
 ---
 
@@ -381,7 +381,7 @@ type IPTxStats struct {
     CarrierChanges  uint64 `json:"carrier_changes"` // yes, under tx — verified
 }
 ```
-Both commands return a JSON **array**; `ParseIPLinkStats` requires exactly one element for `show dev X`. `Stats64` nil ⇒ typed error (all supported kernels emit stats64).
+Both commands return a JSON **array**; `ParseIPLinkStats` requires exactly one element for `show dev X`. A nil `Stats64` is a typed error, since all supported kernels emit stats64.
 
 ---
 
@@ -417,7 +417,7 @@ Resolution order per key: driver-specific ethtool name → generic ethtool candi
 | `phy_errors` | — | — | — | `phy_errors`, `rx_phy_errors` | — |
 | `link_resets` | n/a | n/a | n/a | n/a | **sysfs** `carrier_changes` (documented exception) |
 
-Notes baked into the design: r8169/r8152 expose almost nothing named per-cause via `ethtool -S` (`tx_packets,rx_packets,tx_errors,rx_errors,rx_missed,align_errors,tx_single_collisions,tx_multi_collisions,tx_aborted,tx_underrun,…`), so on Realtek most physical evidence comes from the `ip -s -s` fallback and `align_errors`. virtio exposes only per-queue counters → `Standard` nearly empty → evaluator correctly lands on "no physical-layer counters available" instead of "0 errors".
+Notes baked into the design: r8169/r8152 expose almost nothing named per-cause via `ethtool -S` (`tx_packets,rx_packets,tx_errors,rx_errors,rx_missed,align_errors,tx_single_collisions,tx_multi_collisions,tx_aborted,tx_underrun,…`), so on Realtek most physical evidence comes from the `ip -s -s` fallback and `align_errors`. virtio exposes only per-queue counters, so `Standard` is nearly empty and the evaluator correctly lands on "no physical-layer counters available" instead of "0 errors".
 
 ```go
 type CounterCollector struct { R runner.Runner; IfName, Driver string; RawDir string }
@@ -445,22 +445,22 @@ type Class struct {
 func Classify(name string) Class // pure sysfs, injectable root for tests (sysfs fixture tree under testdata is overkill; use a fs.FS/root-dir parameter)
 ```
 
-- **Matching: exact address equality** of `localIP.String()` against `addr_info[].local` with `family=="inet"`. Prefix containment is deliberately NOT used for selection — an IP inside an interface's subnet but not assigned is a config error; guessing hides typos. However, on no-match, the error message computes containment purely as a *hint*: `"10.0.0.7 is not assigned to any interface (enp9s0 has 10.0.0.5/24 in the same subnet — did you mean that?)"`.
+- **Matching: exact address equality** of `localIP.String()` against `addr_info[].local` with `family=="inet"`. Prefix containment is not used for selection: an IP inside an interface's subnet but not assigned is a config error, and guessing hides typos. On a no-match, though, the error message computes containment as a *hint*: `"10.0.0.7 is not assigned to any interface (enp9s0 has 10.0.0.5/24 in the same subnet — did you mean that?)"`.
 - Classification order (first hit wins for `Reason`):
-  1. `link_type=="loopback"` or `LOOPBACK` flag → Loopback (rejected without `--allow-virtual-interface`; with the flag it is allowed — this powers the single-machine 127.0.0.1 demo).
+  1. `link_type=="loopback"` or `LOOPBACK` flag → Loopback. Rejected without `--allow-virtual-interface`; with the flag it's allowed, which powers the single-machine 127.0.0.1 demo.
   2. `link_type != "ether"` → Virtual (catches WireGuard/tun, which report `"none"` **[verified]**).
-  3. `/sys/class/net/<if>/wireless` dir exists or uevent `DEVTYPE=wlan` → Wireless **[verified]** (rejected unless `--allow-virtual-interface`; a wifi NIC has a `device` symlink, so this check must precede #4-as-pass).
+  3. `/sys/class/net/<if>/wireless` dir exists or uevent `DEVTYPE=wlan` → Wireless **[verified]**. Rejected unless `--allow-virtual-interface`. A wifi NIC has a `device` symlink, so this check must precede #4-as-pass.
   4. `/sys/class/net/<if>/device` symlink **absent** → Virtual (veth, bridge, bond, vlan, tun, wg all lack it **[verified for wg]**).
   5. uevent `DEVTYPE` ∈ {bridge, vlan, bond, vxlan, wireguard, geneve, macvlan, macsec} → Virtual **[verified: `DEVTYPE=wireguard`]**.
   6. Name-prefix heuristic (belt-and-braces, matches digest): `veth`, `br-`, `docker`, `tun`, `tap`, `wg`, `virbr`, `vmnet`, `vnet`, `zt`, `tailscale` → Virtual.
-- `Driver` = `filepath.Base(os.Readlink("/sys/class/net/<if>/device/driver"))` **[verified: → "r8169"]**; fallback `ethtool -i` parse (`driver: r8169`) if sysfs unreadable. `USB = strings.Contains(realpath(device), "/usb")` → recorded as host-limitation evidence for the evaluator (r8152 dongles).
+- `Driver` = `filepath.Base(os.Readlink("/sys/class/net/<if>/device/driver"))` **[verified: → "r8169"]**, falling back to an `ethtool -i` parse (`driver: r8169`) if sysfs is unreadable. `USB = strings.Contains(realpath(device), "/usb")` is recorded as host-limitation evidence for the evaluator (r8152 dongles).
 - `--interface` override skips IP-based selection but still runs Classify + IP-ownership validation.
 
 ---
 
 ## 8. Link monitoring (`internal/network/monitor.go`)
 
-Pure sysfs polling — zero exec cost, safe at 1 s (or faster) intervals:
+Pure sysfs polling: zero exec cost, safe at 1 s (or faster) intervals.
 
 ```go
 type LinkSnapshot struct {
@@ -485,22 +485,22 @@ func (m *Monitor) History() []LinkEvent              // full record for the repo
 func (m *Monitor) Current() LinkSnapshot
 ```
 
-Key detection trick: **`Renegotiation` fires when `CarrierChanges` advanced by ≥2 between polls even if carrier/speed look identical** — catches sub-interval link flaps that per-field comparison misses (a full down/up cycle = +2). Speed/duplex changes with carrier stable = renegotiation-without-drop (also flagged). Reads use `os.ReadFile` with EINVAL tolerance (see Pitfalls). The `-1` speed sentinel from sysfs **[verified on NO-CARRIER port]** maps to unknown, never "speed changed to -1".
+Key detection trick: **`Renegotiation` fires when `CarrierChanges` advanced by ≥2 between polls, even if carrier and speed look identical**. This catches sub-interval link flaps that per-field comparison misses (a full down/up cycle is +2). Speed or duplex changes with carrier stable count as renegotiation-without-drop, also flagged. Reads use `os.ReadFile` with EINVAL tolerance (see Pitfalls). The `-1` speed sentinel from sysfs **[verified on NO-CARRIER port]** maps to unknown, never "speed changed to -1".
 
 ---
 
 ## 9. sudo handling
 
-- Preflight probe: `sudo -n true` (5 s timeout). Exit 0 ⇒ passwordless sudo available; anything else (exit 1, stderr "a password is required", or sudo missing → `exec.ErrNotFound`) ⇒ unavailable. Never run sudo without `-n` anywhere (hard rule: no mid-test prompts).
-- Privilege matrix: `ethtool <if>`, `ethtool -S`, `ip -j …`, `ping` (incl. 20 ms interval on modern iputils **[verified unprivileged]**), `iperf3` — **no root needed**. Root (CAP_NET_ADMIN) needed only for `ethtool --cable-test` / `--cable-test-tdr`.
-- `runner.Privileged(spec CommandSpec) CommandSpec` helper in testsuite: if `euid==0` → unchanged; else if sudo probed OK and `--no-sudo` not set → prepend `["sudo","-n","--"]` (note: registry then tracks the sudo PID; group-kill via Setpgid still reaps the real ethtool because sudo shares the group). Else → the operation is marked UNAVAILABLE with reason `"requires root; passwordless sudo not available (or --no-sudo)"` at preflight — the run proceeds, cable-test section reports UNAVAILABLE, never FAILED.
-- `--no-sudo`: probe skipped entirely, matrix collapses to "root ops unavailable unless euid==0".
+- Preflight probe: `sudo -n true` (5 s timeout). Exit 0 means passwordless sudo is available; anything else (exit 1, stderr "a password is required", or sudo missing → `exec.ErrNotFound`) means unavailable. Never run sudo without `-n` anywhere. That's a hard rule: no mid-test prompts.
+- Privilege matrix: `ethtool <if>`, `ethtool -S`, `ip -j …`, `ping` (incl. 20 ms interval on modern iputils **[verified unprivileged]**), and `iperf3` need **no root**. Root (CAP_NET_ADMIN) is needed only for `ethtool --cable-test` / `--cable-test-tdr`.
+- `runner.Privileged(spec CommandSpec) CommandSpec` helper in testsuite: if `euid==0`, unchanged; else if sudo probed OK and `--no-sudo` isn't set, prepend `["sudo","-n","--"]`. (The registry then tracks the sudo PID, but the group-kill via Setpgid still reaps the real ethtool because sudo shares the group.) Otherwise the operation is marked UNAVAILABLE at preflight with reason `"requires root; passwordless sudo not available (or --no-sudo)"`. The run proceeds and the cable-test section reports UNAVAILABLE, never FAILED.
+- `--no-sudo`: the probe is skipped entirely and the matrix collapses to "root ops unavailable unless euid==0".
 
 ---
 
 ## 10. Fixture inventory (`testdata/`)
 
-Convention: stdout-only, exit-0 fixtures are `name.txt`; otherwise triplets `name.stdout` / `name.stderr` / `name.exit`. Loaded via `runnertest.FromFixture`.
+Convention: stdout-only, exit-0 fixtures are `name.txt`; everything else is a triplet `name.stdout` / `name.stderr` / `name.exit`. Loaded via `runnertest.FromFixture`.
 
 **testdata/ethtool/**
 | File | Content |
@@ -560,19 +560,19 @@ Convention: stdout-only, exit-0 fixtures are `name.txt`; otherwise triplets `nam
 
 ## Pitfalls (things that break in practice)
 
-1. **`cmd.WaitDelay` kills only the direct child, not the process group** — a sudo'd ethtool or forked helper survives. And without `WaitDelay`, `cmd.Wait` blocks forever if any grandchild inherited the stdout pipe. You need *both*: manual SIGTERM→SIGKILL to `-pgid` **and** `WaitDelay` as the pipe-unblock backstop.
-2. **iperf3 stdout is block-buffered on pipes** — the `Server listening on` banner never arrives without `--forceflush`. Readiness detection silently degrades to the 1.5 s fallback if you forget it.
-3. **Never TCP-probe an `iperf3 -1` server for readiness** — a connect that doesn't send the iperf cookie can consume/abort the one-off session; the real client then gets connection refused. Use the stdout banner.
-4. **iperf3 bidir JSON (3.7–3.11) emits duplicate/misattributed `sum_sent`/`sum_received` keys**; Go's decoder keeps the last one silently. Always derive bidir per-direction totals from `end.streams[]` sender flags.
-5. **iperf3 `-J` failures still print JSON** (`{"error": "..."}`, exit 1). Decode first, check `.error`; don't treat exit≠0 as "no output".
-6. **`retransmits` is absent (not 0) for UDP and for receiver-side sums** — model as `*uint64`; rendering absent as 0 corrupts health evidence. Same for UDP `out_of_order`.
-7. **sysfs reads return EINVAL, not empty**: `speed`/`duplex` when no carrier or on virtual devices, `carrier` when the interface is admin-down **[verified: `cat speed` → "Invalid argument"; also returns literal `-1` on NO-CARRIER ether]**. Every sysfs read must tolerate errors and the `-1` sentinel independently.
-8. **The ping interval-denied message changed wording** between iputils generations (`"cannot flood; minimal interval allowed for user is 200ms"` vs `"cannot flood, minimal interval for user must be >= 2 ms, use -i 0.002 (or higher)"` **[verified]**). Match on the shared substrings `cannot flood` + `minimal interval`, exit code 2 — and note the `PING …` header still lands on stdout before the stderr error.
-9. **Locale breaks every text parser**: iputils is built with NLS **[verified]** and translates messages. The runner must inject `LC_ALL=C`+`LANG=C` unconditionally; don't leave it to call sites.
-10. **`ping` exit 1 means "some loss", not failure**; treating it as an error turns a lossy-cable measurement into a tooling error. Only exit 2 (+stderr) is an invocation problem.
-11. **`ip -j -s -s` detail counters are flat inside `rx`/`tx`** (`rx.crc_errors`, `tx.carrier_changes`) — not a nested `rx_errors` object as the C source structure suggests. Structs above match verified live output. Also `operstate` is uppercase in `ip` JSON but lowercase in sysfs — normalize at parse time.
-12. **Missing counter ≠ zero**: r8169/r8152 expose no `rx_crc_errors` via `ethtool -S`; virtio exposes no physical counters at all. `Standard` map must distinguish absent from 0 or the evaluator will certify a Realtek NIC as "0 CRC errors" it never measured.
-13. **PID reuse on kill paths**: always re-verify `/proc/PID/stat` starttime + `/proc/PID/cmdline` before signaling registry/stale PIDs; ignore `ESRCH` from group kills (child may have exited between check and signal).
-14. **Duplicate ICMP replies skew percentiles** — compute RTT stats over the first reply per seq; count DUPs as their own signal (on a two-host direct cable, DUPs are strong physical-layer evidence).
-15. **ethtool `-S` names are driver-version dependent** (Intel added/renamed counters across kernel releases) — normalization must be candidate-list based, never a 1:1 map, and always preserve `Raw` for the report.
-16. **`--cable-test` takes the link down** — the monitor will fire CarrierLost/Renegotiation during it; testsuite must suppress/annotate monitor events during the cable-test window or the evaluator double-counts self-inflicted link resets (`carrier_changes` jumps by ≥2).
+1. **`cmd.WaitDelay` kills only the direct child, not the process group**, so a sudo'd ethtool or forked helper survives. And without `WaitDelay`, `cmd.Wait` blocks forever if any grandchild inherited the stdout pipe. You need *both*: a manual SIGTERM→SIGKILL to `-pgid` **and** `WaitDelay` as the pipe-unblock backstop.
+2. **iperf3 stdout is block-buffered on pipes**, so the `Server listening on` banner never arrives without `--forceflush`. Readiness detection silently degrades to the 1.5 s fallback if you forget it.
+3. **Never TCP-probe an `iperf3 -1` server for readiness.** A connect that doesn't send the iperf cookie can consume or abort the one-off session, and the real client then gets connection refused. Use the stdout banner.
+4. **iperf3 bidir JSON (3.7–3.11) emits duplicate/misattributed `sum_sent`/`sum_received` keys**, and Go's decoder keeps the last one silently. Always derive bidir per-direction totals from `end.streams[]` sender flags.
+5. **iperf3 `-J` failures still print JSON** (`{"error": "..."}`, exit 1). Decode first, check `.error`, and don't treat exit≠0 as "no output".
+6. **`retransmits` is absent (not 0) for UDP and for receiver-side sums.** Model it as `*uint64`; rendering absent as 0 corrupts health evidence. Same for UDP `out_of_order`.
+7. **sysfs reads return EINVAL, not empty**: `speed`/`duplex` when there's no carrier or on virtual devices, `carrier` when the interface is admin-down **[verified: `cat speed` → "Invalid argument"; also returns literal `-1` on NO-CARRIER ether]**. Every sysfs read must tolerate errors and the `-1` sentinel independently.
+8. **The ping interval-denied message changed wording** between iputils generations (`"cannot flood; minimal interval allowed for user is 200ms"` vs `"cannot flood, minimal interval for user must be >= 2 ms, use -i 0.002 (or higher)"` **[verified]**). Match on the shared substrings `cannot flood` + `minimal interval` with exit code 2. Note that the `PING …` header still lands on stdout before the stderr error.
+9. **Locale breaks every text parser**: iputils is built with NLS **[verified]** and translates messages. The runner must inject `LC_ALL=C`+`LANG=C` unconditionally, rather than leaving it to call sites.
+10. **`ping` exit 1 means "some loss", not failure.** Treating it as an error turns a lossy-cable measurement into a tooling error. Only exit 2 (+stderr) is an invocation problem.
+11. **`ip -j -s -s` detail counters are flat inside `rx`/`tx`** (`rx.crc_errors`, `tx.carrier_changes`), not a nested `rx_errors` object as the C source structure suggests. The structs above match verified live output. Also, `operstate` is uppercase in `ip` JSON but lowercase in sysfs, so normalize at parse time.
+12. **Missing counter ≠ zero**: r8169/r8152 expose no `rx_crc_errors` via `ethtool -S`, and virtio exposes no physical counters at all. The `Standard` map must distinguish absent from 0, or the evaluator will certify a Realtek NIC as "0 CRC errors" it never measured.
+13. **PID reuse on kill paths**: always re-verify `/proc/PID/stat` starttime + `/proc/PID/cmdline` before signaling registry or stale PIDs, and ignore `ESRCH` from group kills (the child may have exited between check and signal).
+14. **Duplicate ICMP replies skew percentiles.** Compute RTT stats over the first reply per seq and count DUPs as their own signal (on a two-host direct cable, DUPs are strong physical-layer evidence).
+15. **ethtool `-S` names are driver-version dependent** (Intel added and renamed counters across kernel releases), so normalization must be candidate-list based, never a 1:1 map, and must always preserve `Raw` for the report.
+16. **`--cable-test` takes the link down**, so the monitor will fire CarrierLost/Renegotiation during it. The testsuite must suppress or annotate monitor events during the cable-test window, or the evaluator double-counts self-inflicted link resets (`carrier_changes` jumps by ≥2).

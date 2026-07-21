@@ -1,26 +1,26 @@
 # CableCheck
 
-CableCheck is a Linux command-line tool for testing the health, stability, and performance of an Ethernet link between two directly connected PCs. PC1 coordinates the run; PC2 executes requested measurements. Together they inspect link negotiation and NIC counters, watch link state through sysfs, and run bidirectional ping, full-size ping, TCP, UDP, and stress tests with `ping`, `ip`, `ethtool`, and `iperf3`.
+CableCheck is a Linux command-line tool for testing the health, stability, and performance of an Ethernet link between two directly connected PCs. PC1 coordinates the run and PC2 executes the measurements. Together they inspect link negotiation and NIC counters, watch link state through sysfs, and run bidirectional ping, full-size ping, TCP, UDP, and stress tests with `ping`, `ip`, `ethtool`, and `iperf3`.
 
-The result is a rule-based classification—`EXCELLENT`, `GOOD`, `WARNING`, `POOR`, `FAILED`, or `INCONCLUSIVE`—plus a human report, machine-readable JSON, a short text summary, and raw evidence.
+You get a rule-based classification (`EXCELLENT`, `GOOD`, `WARNING`, `POOR`, `FAILED`, or `INCONCLUSIVE`) plus a human report, machine-readable JSON, a short text summary, and the raw evidence.
 
 ## What CableCheck can and cannot prove
 
-CableCheck can expose symptoms that are consistent with a bad cable: CRC and framing errors under load, carrier drops, renegotiation, half duplex, reduced negotiated speed, size-dependent packet loss, retransmissions, UDP loss, and cable-test/TDR faults.
+CableCheck can expose symptoms consistent with a bad cable: CRC and framing errors under load, carrier drops, renegotiation, half duplex, reduced negotiated speed, size-dependent packet loss, retransmissions, UDP loss, and cable-test/TDR faults.
 
-It cannot, by itself, prove that the cable is the failed component. The measured path also contains both connectors, both NICs or ports, any USB adapters, their drivers, and both hosts. A `POOR` or `FAILED` result is strong evidence that deserves isolation testing, not a component-level verdict. Repeat the same test with a known-good cable, then—if necessary—test the original cable between different machines or ports.
+What it can't do is prove the cable is the failed component. The measured path also contains both connectors, both NICs or ports, any USB adapters, their drivers, and both hosts. A `POOR` or `FAILED` result is strong evidence that deserves isolation testing, not a component-level verdict. Repeat the test with a known-good cable, then test the original cable between different machines or ports if you need to.
 
-A loopback, bridge, veth, VLAN, wireless, or other virtual interface does not exercise a physical cable. Such an interface is rejected by default; if explicitly allowed for a demo, the result is `INCONCLUSIVE`.
+A loopback, bridge, veth, VLAN, wireless, or other virtual interface doesn't exercise a physical cable. CableCheck rejects such an interface by default. If you explicitly allow one for a demo, the result is `INCONCLUSIVE`.
 
 ## Supported environment
 
-CableCheck is a Go 1.24, standard-library-only program for Linux. It relies on Linux interface metadata, `/sys/class/net`, iproute2 JSON output, and physical Ethernet NICs. Local builds and release builds support Linux `amd64` and `arm64`.
+CableCheck is a Go 1.24, standard-library-only program for Linux. It relies on Linux interface metadata, `/sys/class/net`, iproute2 JSON output, and physical Ethernet NICs. Local and release builds support Linux `amd64` and `arm64`.
 
 Runtime requirements on **both** PCs:
 
-- `iperf3` 3.7 or newer (validated through 3.17; newer releases are accepted because the JSON output is backward-compatible and feature detection reads `iperf3 --help`). JSON support is required. Native `--bidir` is used only when both peers support it; otherwise CableCheck uses two coordinated one-way phases.
+- `iperf3` 3.7 or newer, with JSON support. It's validated through 3.17, and newer releases are accepted because the JSON output is backward-compatible and feature detection reads `iperf3 --help`. Native `--bidir` is used only when both peers support it; otherwise CableCheck uses two coordinated one-way phases.
 - `ethtool` for link state and NIC statistics.
-- `iputils` `ping`; BusyBox `ping` is not supported.
+- `iputils` `ping`. BusyBox `ping` isn't supported.
 - `iproute2` for `ip -j` interface and counter data.
 - A physical wired Ethernet interface. USB Ethernet adapters work, but can make performance results host-limited.
 
@@ -45,7 +45,7 @@ make build
 ./cablecheck version
 ```
 
-`make build` produces a single static `cablecheck` binary in the repository root. It has no runtime Go dependency and is portable between Linux machines of the same architecture, so you can build once and copy the binary to the other PC.
+`make build` produces a single static `cablecheck` binary in the repository root. It has no runtime Go dependency and is portable between Linux machines of the same architecture, so build once and copy the binary to the other PC.
 
 ### Install it as a command
 
@@ -59,13 +59,13 @@ sudo install -m 0755 cablecheck /usr/local/bin/cablecheck
 install -m 0755 cablecheck ~/.local/bin/cablecheck
 ```
 
-Confirm it is registered:
+Confirm it's registered:
 
 ```bash
 cablecheck version
 ```
 
-If you would rather not install it, run it directly from the build directory as `./cablecheck` — substitute `./cablecheck` for `cablecheck` in every command below.
+If you'd rather not install it, run it straight from the build directory as `./cablecheck`, substituting `./cablecheck` for `cablecheck` in every command below.
 
 ## Prepare the direct link
 
@@ -77,7 +77,7 @@ First list interface names and assigned addresses:
 ip addr
 ```
 
-Interface names vary by machine—examples include `enp3s0`, `eno1`, and `enx...`. Substitute the real name for `enpXsY` below. Assign temporary addresses on an otherwise unused subnet and bring each interface up:
+Interface names vary by machine, such as `enp3s0`, `eno1`, or `enx...`. Substitute the real name for `enpXsY` below. Assign temporary addresses on an otherwise unused subnet and bring each interface up:
 
 ```bash
 # PC1
@@ -89,20 +89,20 @@ sudo ip addr add 192.168.50.2/24 dev enpXsY
 sudo ip link set dev enpXsY up
 ```
 
-Run `ip addr` again to confirm that PC1 owns `192.168.50.1` and PC2 owns `192.168.50.2`. CableCheck normally discovers the interface by an exact match on `--local-ip`; use `--interface enpXsY` only when you want to require a particular interface.
+Run `ip addr` again to confirm that PC1 owns `192.168.50.1` and PC2 owns `192.168.50.2`. CableCheck normally discovers the interface by an exact match on `--local-ip`. Use `--interface enpXsY` only when you want to require a particular interface.
 
-The `ip addr add` assignments are temporary: they disappear on reboot, or you can remove them once testing is done — see [Tear down the link](#tear-down-the-link) below.
+The `ip addr add` assignments are temporary. They disappear on reboot, or you can remove them once testing is done. See [Tear down the link](#tear-down-the-link) below.
 
 ## Check the machines first
 
-`doctor` checks the required tools, verifies iputils `ping`, detects the supported `iperf3` features, inventories interfaces, probes passwordless sudo, and checks that the output directory is writable. It does not contact the other PC or run a cable test.
+`doctor` checks the required tools, verifies iputils `ping`, detects the supported `iperf3` features, inventories interfaces, probes passwordless sudo, and checks that the output directory is writable. It doesn't contact the other PC or run a cable test.
 
 ```bash
 cablecheck doctor
 cablecheck doctor --interface enpXsY --output .
 ```
 
-Warnings do not make `doctor` fail. Any failed check makes it exit 4.
+Warnings don't make `doctor` fail. Any failed check makes it exit 4.
 
 ## Run a test
 
@@ -120,7 +120,7 @@ Copy the displayed token into the PC2 command:
 cablecheck run --role pc2 --local-ip 192.168.50.2 --peer-ip 192.168.50.1 --token <token shown by PC1>
 ```
 
-To skip looking up the address, name the interface instead and let CableCheck infer `--local-ip` from it (when the interface has exactly one IPv4 address):
+To skip looking up the address, name the interface instead and let CableCheck infer `--local-ip` from it, as long as the interface has exactly one IPv4 address:
 
 ```bash
 # --local-ip inferred from the interface's sole IPv4 address
@@ -135,17 +135,17 @@ After the authenticated handshake, each terminal waits for its local operator. T
 start
 ```
 
-When both sides have sent `ready`, PC1 sends a synchronized start confirmation with a 3.5-second lead. Each side anchors the countdown to receipt of that message and prints `3… 2… 1… GO`. The interactive commands are `start`, `status`, and `quit`. `--non-interactive` sends readiness automatically.
+Once both sides have sent `ready`, PC1 sends a synchronized start confirmation with a 3.5-second lead. Each side anchors the countdown to receipt of that message and prints `3… 2… 1… GO`. The interactive commands are `start`, `status`, and `quit`. `--non-interactive` sends readiness automatically.
 
 ### Session tokens
 
-The token authenticates the two CableCheck processes for one session. When `--token` is omitted, PC1 generates a random 6-digit code (from a cryptographic source) that is easy to read aloud and retype on PC2; PC2 always requires `--token`. A token you supply yourself must contain 6–128 printable ASCII characters with no whitespace.
+The token authenticates the two CableCheck processes for one session. When `--token` is omitted, PC1 generates a random 6-digit code (from a cryptographic source) that's easy to read aloud and retype on PC2. PC2 always requires `--token`. A token you supply yourself must contain 6–128 printable ASCII characters with no whitespace.
 
-The 6-digit code is a session guard for a trusted direct link — it prevents an accidental cross-connection to the wrong process, not a determined attacker. The token is sent in plaintext inside the opening control message: it is not encryption and does not make an untrusted network safe. CableCheck never writes the token to reports or structured logs.
+The 6-digit code is a session guard for a trusted direct link. It prevents an accidental cross-connection to the wrong process, not a determined attacker. The token is sent in plaintext inside the opening control message, so it isn't encryption and doesn't make an untrusted network safe. CableCheck never writes the token to reports or structured logs.
 
 ## Test modes
 
-All modes inspect link settings, take per-peer counter snapshots, and run a sysfs link monitor at a 1-second default interval. TCP uses four parallel streams by default. The UDP rate defaults to 80% of negotiated link speed; when speed is unknown, CableCheck uses 100 Mbit/s and records that limitation.
+All modes inspect link settings, take per-peer counter snapshots, and run a sysfs link monitor at a 1-second default interval. TCP uses four parallel streams by default. The UDP rate defaults to 80% of negotiated link speed. When speed is unknown, CableCheck uses 100 Mbit/s and records that limitation.
 
 | Mode | Default workload |
 |---|---|
@@ -153,7 +153,7 @@ All modes inspect link settings, take per-peer counter snapshots, and run a sysf
 | `standard` | 1,500-packet stability ping at 20 ms in both directions; the same 100-packet full-size test; two 60 s TCP runs in each direction; one 60 s bidirectional stress run; a 30 s UDP run in each direction at the primary rate and another in each direction at half that rate; initial/final counters. |
 | `soak` | A one-hour wall-clock budget by default. After one link inspection and initial counters, each cycle takes counters, runs 500-packet ping in both directions, one 60 s TCP run in each direction, and one 20 s UDP run in each direction. `periodic` inserts a 60 s default idle gap between cycles; `continuous` runs cycles back-to-back. Full-size ping and bidirectional stress are not part of soak cycles. |
 
-The native bidirectional test runs both directions together. If either peer lacks `iperf3 --bidir`, the fallback uses two one-way phases and therefore takes twice the configured TCP duration.
+The native bidirectional test runs both directions together. If either peer lacks `iperf3 --bidir`, the fallback uses two one-way phases and takes twice the configured TCP duration.
 
 Examples:
 
@@ -200,9 +200,9 @@ TCP and UDP durations accept 5 seconds through 10 minutes. Ports must be unprivi
 
 ## Optional cable diagnostics and privileges
 
-Normal operation is unprivileged: link inspection, NIC statistics, `ip`, `ping`, `iperf3`, sysfs monitoring, and report generation do not require root.
+Normal operation is unprivileged. Link inspection, NIC statistics, `ip`, `ping`, `iperf3`, sysfs monitoring, and report generation don't require root.
 
-Only `ethtool --cable-test` and `ethtool --cable-test-tdr` may require root or `CAP_NET_ADMIN`. They are opt-in because a driver may temporarily drop the link while testing. CableCheck uses the current EUID when already root; otherwise it will use only passwordless `sudo -n`, and never prompts mid-test. `--no-sudo` skips the sudo probe. Missing privilege or driver support makes the diagnostic unavailable; it does not itself mark the cable failed.
+Only `ethtool --cable-test` and `ethtool --cable-test-tdr` may require root or `CAP_NET_ADMIN`. They're opt-in because a driver may temporarily drop the link while testing. CableCheck uses the current EUID when already root; otherwise it uses only passwordless `sudo -n` and never prompts mid-test. `--no-sudo` skips the sudo probe. Missing privilege or driver support makes the diagnostic unavailable, but doesn't itself mark the cable failed.
 
 ```bash
 cablecheck run --role pc1 --local-ip 192.168.50.1 --peer-ip 192.168.50.2 --cable-test
@@ -211,7 +211,7 @@ cablecheck run --role pc1 --local-ip 192.168.50.1 --peer-ip 192.168.50.2 --cable
 cablecheck run --role pc1 --local-ip 192.168.50.1 --peer-ip 192.168.50.2 --cable-test-tdr
 ```
 
-The cable-test step widens both peers' control-channel idle timeout before the disruptive command. Link events observed in that coordinated window are marked self-inflicted and excluded from spontaneous carrier-error evidence.
+The cable-test step widens both peers' control-channel idle timeout before the disruptive command. Any link events in that coordinated window are marked self-inflicted and excluded from spontaneous carrier-error evidence.
 
 ## Interpreting the result
 
@@ -224,7 +224,7 @@ The cable-test step widens both peers' control-channel idle timeout before the d
 | `FAILED` | Failure-level physical evidence, such as link down, at least three carrier events, severe CRC movement, an open/short cable-test result, or correlated UDP loss and physical errors; score 0–25. |
 | `INCONCLUSIVE` | The evidence cannot support a cable verdict: virtual interface, critical evidence missing, an otherwise clean partial run, poor performance explained by CPU/USB host limitation, or a throughput test that could not reach the peer's data port (firewall/routing on the receiving side). Score is JSON `null`. |
 
-Physical evidence dominates. CPU saturation can soften poor performance to `INCONCLUSIVE`, but it never hides physical `POOR` or `FAILED` evidence. Read [docs/health-rules.md](docs/health-rules.md) for the complete thresholds and scoring rules.
+Physical evidence dominates. CPU saturation can soften poor performance to `INCONCLUSIVE`, but it never hides physical `POOR` or `FAILED` evidence. See [docs/health-rules.md](docs/health-rules.md) for the complete thresholds and scoring rules.
 
 ## Reports and raw data
 
@@ -240,17 +240,17 @@ cablecheck-report-YYYY-MM-DD_HH-MM-SS/
 ```
 
 PC2 creates its own `raw/` evidence while the run is active and always writes a
-local `diagnostic.json` on exit — its role, test ID, mode, IPs, final state, any
-error, the reason and detail of a peer abort, PC1's verdict, and an index of its
-own raw files. `diagnostic.json` is not a full report (no classification) and is
+local `diagnostic.json` on exit. That file records its role, test ID, mode, IPs,
+final state, any error, the reason and detail of a peer abort, PC1's verdict, and
+an index of its own raw files. It isn't a full report (no classification) and is
 never transferred; it exists so a failed run is debuggable from PC2 alone. By
 default PC1 then transfers `report.json`, `report.md`, and `summary.txt` into
-PC2's report directory. If transfer is disabled or fails, PC2 retains its local
-raw data and writes a local summary fallback instead. `raw/` and
-`diagnostic.json` are never transferred, so inspect both machines' local report
+PC2's report directory. If transfer is disabled or fails, PC2 keeps its local
+raw data and writes a local summary fallback instead. Since `raw/` and
+`diagnostic.json` are never transferred, inspect both machines' local report
 directories when diagnosing parser or driver behavior.
 
-The transfer manifest carries each file's size and SHA-256. PC2 accepts only the three fixed filenames, caps each file at 8 MiB and the set at 16 MiB, writes to a `.part` file, verifies size and digest, then renames it. A failed file is retried once. Transfer failure is a warning and does not change the health classification or exit code. Set `--no-report-transfer` on either peer to disable or decline transfer.
+The transfer manifest carries each file's size and SHA-256. PC2 accepts only the three fixed filenames, caps each file at 8 MiB and the set at 16 MiB, writes to a `.part` file, verifies size and digest, then renames it. A failed file is retried once. Transfer failure is a warning and doesn't change the health classification or exit code. Set `--no-report-transfer` on either peer to disable or decline transfer.
 
 Re-render Markdown and text from a saved JSON record without re-evaluating its verdict:
 
@@ -263,9 +263,9 @@ See [docs/report-schema.md](docs/report-schema.md) for the JSON contract and the
 
 ## Tear down the link
 
-CableCheck cleans up after **itself** automatically, on both a normal finish and Ctrl-C: it stops every `iperf3` server it started, terminates its own child processes (by tracked PID and process group, never with a blanket `pkill`), releases its control and `iperf3` ports, and removes its temporary run state under `$XDG_RUNTIME_DIR/cablecheck` (or `/tmp`). Report directories are deliverables and are kept.
+CableCheck cleans up after **itself** automatically, on both a normal finish and Ctrl-C. It stops every `iperf3` server it started, terminates its own child processes (by tracked PID and process group, never with a blanket `pkill`), releases its control and `iperf3` ports, and removes its temporary run state under `$XDG_RUNTIME_DIR/cablecheck` (or `/tmp`). Report directories are deliverables, so they're kept.
 
-The only thing you undo by hand is the temporary network configuration you added in [Prepare the direct link](#prepare-the-direct-link). Reverse those two steps on **each** PC — remove the address, and (if you brought the interface up only for this test) set it back down:
+The only thing you undo by hand is the temporary network configuration you added in [Prepare the direct link](#prepare-the-direct-link). Reverse those two steps on **each** PC: remove the address, and set the interface back down if you brought it up only for this test.
 
 ```bash
 # PC1
@@ -279,7 +279,7 @@ sudo ip link set dev enpXsY down
 
 Substitute the real interface name for `enpXsY`. Skip the `ip link set ... down` step if the interface was already up and in use before testing. A reboot also clears the temporary address if you prefer not to remove it manually.
 
-If a run was killed uncleanly (for example `kill -9`) and left an `iperf3` server or stale run state behind, the next run's preflight detects the leftover — it verifies ownership against `/proc` before reporting it — and fails with guidance to clear it rather than touching an unrelated process.
+If a run was killed uncleanly (for example `kill -9`) and left an `iperf3` server or stale run state behind, the next run's preflight detects the leftover. It verifies ownership against `/proc` first, then fails with guidance to clear it rather than touching an unrelated process.
 
 ## Compare with a known-good cable
 
@@ -298,15 +298,15 @@ This A/B comparison is much stronger than an isolated throughput number.
 - **Host-limited throughput:** CPU saturation, interrupt handling, memory pressure, or another workload can hold TCP well below line rate with clean physical counters.
 - **USB Ethernet adapters:** the USB bus, adapter chipset, thermals, or driver can cap or destabilize throughput. CableCheck records USB attachment as host-limitation evidence.
 - **Power saving and frequency scaling:** CPU or NIC power management can produce uneven throughput and latency spikes.
-- **Self-inflicted UDP saturation:** an explicit rate above 95% of known link speed is recorded as near-saturation and its loss is not used as cable evidence.
+- **Self-inflicted UDP saturation:** an explicit rate above 95% of known link speed is recorded as near-saturation, and its loss isn't used as cable evidence.
 - **MTU mismatch:** don't-fragment ping errors point to configuration, not directly to the cable.
-- **Unsupported or missing counters:** absence means “not measured,” not zero errors; missing critical evidence can make the result `INCONCLUSIVE`.
+- **Unsupported or missing counters:** absence means “not measured,” not zero errors. Missing critical evidence can make the result `INCONCLUSIVE`.
 
 ## Security assumptions
 
-CableCheck is for a trusted direct cable or trusted isolated LAN only. The control protocol is authenticated by the shared token but is not encrypted. Do not run it on an untrusted or hostile network.
+CableCheck is for a trusted direct cable or trusted isolated LAN only. The control protocol is authenticated by the shared token but isn't encrypted. Don't run it on an untrusted or hostile network.
 
-PC1 binds the control listener only to the supplied `--local-ip`, never `0.0.0.0`, and silently rejects connections whose source IP is not `--peer-ip`. The token is compared in constant time and omitted from reports and logs. Protocol payloads are decoded into a fixed catalog of structs and test operations; there is no arbitrary type or command deserialization. These safeguards do not replace transport encryption.
+PC1 binds the control listener only to the supplied `--local-ip`, never `0.0.0.0`, and silently rejects connections whose source IP isn't `--peer-ip`. The token is compared in constant time and omitted from reports and logs. Protocol payloads are decoded into a fixed catalog of structs and test operations, with no arbitrary type or command deserialization. These safeguards don't replace transport encryption.
 
 ## Exit codes
 
@@ -321,27 +321,27 @@ PC1 binds the control listener only to the supplied `--local-ip`, never `0.0.0.0
 | 6 | Local interrupt: Ctrl+C/SIGTERM, `quit`, or interactive stdin EOF. |
 | 7 | Internal error, including report persistence failure or an invalid internal verdict. |
 
-Ctrl+C attempts to preserve completed measurements in a partial PC1 report. The interrupted side exits 6; the other side normally observes a peer abort and exits 5.
+Ctrl+C attempts to preserve completed measurements in a partial PC1 report. The interrupted side exits 6, and the other side normally observes a peer abort and exits 5.
 
 ## Troubleshooting
 
 **“required tool not found” or `doctor` reports FAIL**  
-Install the exact package shown by `cablecheck doctor`. Confirm that `ping -V` identifies iputils and `iperf3 --version` is 3.7 or newer.
+Install the exact package shown by `cablecheck doctor`. Confirm that `ping -V` identifies iputils and that `iperf3 --version` is 3.7 or newer.
 
 **Local IP is not assigned / interface not found**  
-Run `ip -j addr`, check the exact address and interface name, bring the interface up, and reapply the temporary address. `--interface` does not bypass the requirement that the interface own `--local-ip`.
+Run `ip -j addr`, check the exact address and interface name, bring the interface up, and reapply the temporary address. `--interface` doesn't bypass the requirement that the interface own `--local-ip`.
 
 **Interface is down or no carrier appears**  
 Check both connectors and NIC LEDs, run `ip link show dev enpXsY`, and verify that both interfaces are up before starting CableCheck.
 
 **PC2 seems to hang at “ready — waiting for peer”**  
-This is normal, not a hang: the synchronized start waits until *both* sides are ready. Type `start` in each terminal, or pass `--non-interactive` to auto-ready. PC2 proceeds the moment PC1 confirms the start.
+This is normal. The synchronized start waits until *both* sides are ready. Type `start` in each terminal, or pass `--non-interactive` to auto-ready. PC2 proceeds the moment PC1 confirms the start.
 
 **PC2 cannot connect**  
 Start PC1 first, confirm both control commands use mirrored IPs, verify TCP port 44300 is not filtered, and check that each machine can reach the other's direct-link address. PC2 retries for up to 60 seconds.
 
 **Throughput test cannot connect / result is INCONCLUSIVE citing a firewall**  
-The control channel only needs the dialing side to reach the listener, but the throughput tests also need the *receiving* side to accept an inbound iperf3 connection on the data ports (`--iperf-port` and base+1). A host firewall (ufw, firewalld) that denies inbound traffic drops those connections even though the control channel worked, so the throughput test is recorded as `INCONCLUSIVE` with a firewall recommendation instead of a cable verdict. Allow the peer on both machines — for a trusted direct link, `sudo ufw allow from <peer-ip>` — or open the data ports, then rerun.
+The control channel only needs the dialing side to reach the listener. The throughput tests also need the *receiving* side to accept an inbound iperf3 connection on the data ports (`--iperf-port` and base+1). A host firewall (ufw, firewalld) that denies inbound traffic drops those connections even though the control channel worked, so the throughput test is recorded as `INCONCLUSIVE` with a firewall recommendation instead of a cable verdict. Allow the peer on both machines (for a trusted direct link, `sudo ufw allow from <peer-ip>`) or open the data ports, then rerun.
 
 **Token rejected**  
 Copy the current token printed by PC1 exactly. Restart PC2 with that token. PC1 allows three wrong-token handshake attempts before it exits 5.
@@ -368,7 +368,7 @@ make demo-e2e
 ./scripts/demo-e2e.sh
 ```
 
-The script runs PC1 on `127.0.0.1` and PC2 on `127.0.0.2` with `--allow-virtual-interface --non-interactive`, checks both report directories, verifies matching SHA-256 hashes for the transferred `report.json`, and tests offline report regeneration. Each CableCheck peer exits 3 because loopback correctly forces `INCONCLUSIVE`; the wrapper script treats those expected peer exits as success and exits 0.
+The script runs PC1 on `127.0.0.1` and PC2 on `127.0.0.2` with `--allow-virtual-interface --non-interactive`, checks both report directories, verifies matching SHA-256 hashes for the transferred `report.json`, and tests offline report regeneration. Each CableCheck peer exits 3 because loopback correctly forces `INCONCLUSIVE`. The wrapper script treats those expected peer exits as success and exits 0.
 
 ## Further documentation
 
