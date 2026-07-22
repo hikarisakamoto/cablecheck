@@ -11,6 +11,7 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
+	"cablecheck/internal/protocol"
 )
 
 var errSoakBudgetExpired = errors.New("soak duration expired")
@@ -91,6 +92,8 @@ type SoakPlan struct {
 	// OnStep, when set, announces each step as (step, total, name); the soak
 	// plan prefixes cycle context onto the cycle's step names.
 	OnStep func(step, total int, name string)
+	// OnProgress, when set, observes progress reported by remote operations.
+	OnProgress func(protocol.TestProgress)
 }
 
 // repeats returns the effective per-cycle TCP repeat count, floored at 1.
@@ -128,6 +131,7 @@ func (p *SoakPlan) engine(results *SessionResults) *QuickPlan {
 		PingCount:      p.PingCount,
 		LocalIperfCaps: p.LocalIperfCaps,
 		Results:        results,
+		OnProgress:     p.OnProgress,
 	}
 }
 

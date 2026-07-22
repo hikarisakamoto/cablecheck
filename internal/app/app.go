@@ -58,6 +58,13 @@ type Deps struct {
 	// OnStep, when set, observes every plan step as (step, total, name);
 	// the cli wires progress rendering here.
 	OnStep func(step, total int, name string)
+	// OnProgress, when set, observes progress from remote test operations.
+	// It runs on the peer event-loop goroutine and must remain fast.
+	OnProgress func(protocol.TestProgress)
+	// OnRunEnd, when set, runs once after the test session ends and before any
+	// end-of-run summary is written to Stdout. The cli wires it to stop live
+	// progress rendering so the summary never prints over an in-flight bar.
+	OnRunEnd func()
 
 	// hooks are test-only fault-injection and observation points; the zero
 	// value installs none (docs/design/testing.md §3).

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
 	"cablecheck/internal/app"
 	"cablecheck/internal/config"
@@ -19,13 +20,20 @@ func cmdRun(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if err != nil {
 		return err
 	}
-	progress := NewProgress(stdout, cfg.Verbose)
+	progress := ui.New(stdout, rendererOptions(cfg))
+	progress.Start()
+	defer progress.Stop()
 	a, err := app.New(cfg, app.Deps{
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		Build:  build,
-		OnStep: progress.Step,
+		Stdin:      stdin,
+		Stdout:     stdout,
+		Stderr:     stderr,
+		Build:      build,
+		OnStep:     progress.Step,
+		OnProgress: progress.Progress,
+		// Stop live rendering when the session ends, before the app writes its
+		// end-of-run summary; the deferred Stop above is the idempotent backstop
+		// for the early-return and interrupt paths.
+		OnRunEnd: progress.Stop,
 	})
 	if err != nil {
 		return err
@@ -97,6 +105,22 @@ func parseRunFlags(args []string, stderr io.Writer) (*config.RunConfig, error) {
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	return config.Resolve(raw, set)
+}
+
+// rendererOptions derives the progress renderer options from the resolved run
+// configuration. SoakBudget drives the elapsed/ETA projection and is only
+// meaningful in soak mode; it stays zero for quick and standard so the renderer
+// falls back to step-fraction progress.
+func rendererOptions(cfg *config.RunConfig) ui.Options {
+	soakBudget := time.Duration(0)
+	if cfg.Mode == config.ModeSoak {
+		soakBudget = cfg.SoakDuration
+	}
+	return ui.Options{
+		Color:      mapColorMode(cfg.Color),
+		Verbose:    cfg.Verbose,
+		SoakBudget: soakBudget,
+	}
 }
 
 // mapColorMode converts the validated config representation to the terminal

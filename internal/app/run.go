@@ -170,6 +170,14 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		_ = os.RemoveAll(s.reg.StateDir())
 	}
 
+	// The test session is over; let the progress UI finalize its live output
+	// before finishWorker/finishCoordinator write the end-of-run summary to
+	// Stdout, so the summary never lands under an unterminated progress bar and
+	// the live-refresh goroutine no longer races the summary write.
+	if a.deps.OnRunEnd != nil {
+		a.deps.OnRunEnd()
+	}
+
 	if a.cfg.Role == config.RolePC2 {
 		return a.finishWorker(dir, rawDir, &outcome, runErr, log)
 	}
@@ -281,6 +289,7 @@ func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuit
 			LocalIperfCaps: pf.LocalIperfCaps,
 			Results:        results,
 			OnStep:         a.baseStepObserver(),
+			OnProgress:     a.deps.OnProgress,
 		}
 		return a.wrapCablePlan(p.Run, testsuite.StandardPlanSteps(), ops, results)
 	case config.ModeSoak:
@@ -304,6 +313,7 @@ func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuit
 			EventSource:    a.monitorEventSnapshot,
 			Results:        results,
 			OnStep:         a.baseStepObserver(),
+			OnProgress:     a.deps.OnProgress,
 		}
 		return a.wrapCablePlan(p.Run, testsuite.SoakPlanSteps(), ops, results)
 	default:
@@ -321,6 +331,7 @@ func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuit
 			LocalIperfCaps: pf.LocalIperfCaps,
 			Results:        results,
 			OnStep:         a.baseStepObserver(),
+			OnProgress:     a.deps.OnProgress,
 		}
 		return a.wrapCablePlan(p.Run, testsuite.QuickPlanSteps(), ops, results)
 	}

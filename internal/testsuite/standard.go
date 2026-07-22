@@ -8,6 +8,7 @@ import (
 
 	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
+	"cablecheck/internal/protocol"
 )
 
 // StandardPlan drives the standard test sequence on PC1. It is the quick plan
@@ -50,6 +51,8 @@ type StandardPlan struct {
 	Results *SessionResults
 	// OnStep, when set, announces each step as (step, total, name).
 	OnStep func(step, total int, name string)
+	// OnProgress, when set, observes progress reported by remote operations.
+	OnProgress func(protocol.TestProgress)
 }
 
 // standardExtraUDPRateFraction is the numerator (over 100) of the negotiated
@@ -115,6 +118,7 @@ func (p *StandardPlan) engine() *QuickPlan {
 		PingCount:      p.PingCount,
 		LocalIperfCaps: p.LocalIperfCaps,
 		Results:        p.Results,
+		OnProgress:     p.OnProgress,
 	}
 }
 

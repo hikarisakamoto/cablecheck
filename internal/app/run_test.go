@@ -22,7 +22,9 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
+	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testsuite"
 	"cablecheck/internal/testutil"
 )
 
@@ -139,7 +141,8 @@ func drainStates(ch <-chan peer.State) []peer.State {
 // transition through the Deps.hooks.onState seam — THE sync primitive of the
 // integration harness (docs/design/testing.md §3).
 func newRunApp(t *testing.T, role config.Role, controlPort, iperfPort uint16,
-	out *runOutput, clk clock.Clock, onStep func(int, int, string)) (*App, *runnertest.FakeRunner, <-chan peer.State) {
+	out *runOutput, clk clock.Clock, onStep func(int, int, string), onRunEnd func(),
+	onProgress ...func(protocol.TestProgress)) (*App, *runnertest.FakeRunner, <-chan peer.State) {
 	t.Helper()
 	fr := runnertest.New(t)
 	scriptPreflightTools(fr)
@@ -162,14 +165,20 @@ func newRunApp(t *testing.T, role config.Role, controlPort, iperfPort uint16,
 		NoSudo:          true,
 	}
 	states := make(chan peer.State, 32) // > the longest possible transition sequence
+	var progressObserver func(protocol.TestProgress)
+	if len(onProgress) > 0 {
+		progressObserver = onProgress[0]
+	}
 	a, err := New(cfg, Deps{
-		Runner:   fr,
-		Clock:    clk,
-		Stdout:   &out.stdout,
-		Stderr:   &out.stderr,
-		StateDir: t.TempDir(),
-		Build:    BuildInfo{Version: "test"},
-		OnStep:   onStep,
+		Runner:     fr,
+		Clock:      clk,
+		Stdout:     &out.stdout,
+		Stderr:     &out.stderr,
+		StateDir:   t.TempDir(),
+		Build:      BuildInfo{Version: "test"},
+		OnStep:     onStep,
+		OnProgress: progressObserver,
+		OnRunEnd:   onRunEnd,
 		hooks: testHooks{onState: func(st peer.State) {
 			// Never block the session's event loop: overflow is loud, not
 			// a deadlock. Errorf only — this runs on session goroutines.
@@ -204,8 +213,24 @@ func TestRunQuickHappyPath(t *testing.T) {
 	clk1, clk2 := clocktest.New(start), clocktest.New(start)
 	var out1, out2 runOutput
 	var steps1, steps2 []string
+	var progressMu sync.Mutex
+	var progress1 []protocol.TestProgress
+	var runEndCalls int
+	var summaryWrittenAtRunEnd bool
+	onRunEnd := func() {
+		// OnRunEnd must fire after the session ends but before the end-of-run
+		// summary is written to Stdout: only then can the cli stop live progress
+		// rendering without the summary landing under a stale bar. Runs on the
+		// run goroutine, so reading out1 here is unraced.
+		runEndCalls++
+		summaryWrittenAtRunEnd = strings.Contains(out1.stdout.String(), "Report:")
+	}
 	pc1, _, states1 := newRunApp(t, config.RolePC1, 0, 45301, &out1, clk1, func(n, total int, name string) {
 		steps1 = append(steps1, fmt.Sprintf("[%d/%d] %s", n, total, name))
+	}, onRunEnd, func(p protocol.TestProgress) {
+		progressMu.Lock()
+		progress1 = append(progress1, p)
+		progressMu.Unlock()
 	})
 	if err := pc1.Start(ctx); err != nil {
 		t.Fatalf("pc1 Start: %v", err)
@@ -220,7 +245,7 @@ func TestRunQuickHappyPath(t *testing.T) {
 
 	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45311, &out2, clk2, func(n, total int, name string) {
 		steps2 = append(steps2, fmt.Sprintf("[%d/%d] %s", n, total, name))
-	})
+	}, nil)
 	if err := pc2.Start(ctx); err != nil {
 		t.Fatalf("pc2 Start: %v", err)
 	}
@@ -270,6 +295,32 @@ func TestRunQuickHappyPath(t *testing.T) {
 		if steps1[i] != want || steps2[i] != want {
 			t.Errorf("step %d = PC1 %q, PC2 %q, want %q", i, steps1[i], steps2[i], want)
 		}
+	}
+	progressMu.Lock()
+	progressSnapshot := append([]protocol.TestProgress(nil), progress1...)
+	progressMu.Unlock()
+	if len(progressSnapshot) == 0 {
+		t.Fatal("PC1 observed no worker TestProgress updates")
+	}
+	foundLinkProgress := false
+	for _, p := range progressSnapshot {
+		if p.Stage == testsuite.OpLinkSettings && p.Percent == -1 && p.Text == "running "+testsuite.OpLinkSettings {
+			foundLinkProgress = true
+			break
+		}
+	}
+	if !foundLinkProgress {
+		t.Errorf("PC1 progress = %+v, want the worker link-settings update", progressSnapshot)
+	}
+
+	// OnRunEnd fires exactly once, after the session ends and before the
+	// end-of-run summary reaches Stdout — the ordering the cli relies on to
+	// clear the live progress bar before the summary prints over it.
+	if runEndCalls != 1 {
+		t.Errorf("OnRunEnd called %d times, want exactly 1", runEndCalls)
+	}
+	if summaryWrittenAtRunEnd {
+		t.Error("OnRunEnd fired after the summary was written; a live bar would be left above it")
 	}
 
 	// PC1 report files exist; report.json unmarshals and is complete.
@@ -379,7 +430,7 @@ func TestRunNoReportTransferFinalizesPostCapsReportOnce(t *testing.T) {
 	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	clk1, clk2 := clocktest.New(start), clocktest.New(start)
 	var out1, out2 runOutput
-	pc1, _, _ := newRunApp(t, config.RolePC1, 0, 45341, &out1, clk1, nil)
+	pc1, _, _ := newRunApp(t, config.RolePC1, 0, 45341, &out1, clk1, nil, nil)
 	var finalizations, postCapabilitiesFinalizations int
 	pc1.deps.hooks.onFinalize = func(_, hasOutcome bool) {
 		finalizations++
@@ -393,7 +444,7 @@ func TestRunNoReportTransferFinalizesPostCapsReportOnce(t *testing.T) {
 	}
 
 	ctrl := pc1.ControlAddr().(*net.TCPAddr)
-	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45351, &out2, clk2, nil)
+	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45351, &out2, clk2, nil, nil)
 	pc2.cfg.NoReportTransfer = true
 	pc2.cfg.AllowVirtualInterface = true
 	virtualRoot := t.TempDir()
@@ -482,7 +533,7 @@ func TestRunInterruptProducesPartialReport(t *testing.T) {
 	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	clk1, clk2 := clocktest.New(start), clocktest.New(start)
 	var out1, out2 runOutput
-	pc1, fr1, states1 := newRunApp(t, config.RolePC1, 0, 45321, &out1, clk1, nil)
+	pc1, fr1, states1 := newRunApp(t, config.RolePC1, 0, 45321, &out1, clk1, nil, nil)
 	var finalizations, failureFinalizations int
 	var monitorStateMu sync.Mutex
 	monitorStopped := false
@@ -508,7 +559,7 @@ func TestRunInterruptProducesPartialReport(t *testing.T) {
 		t.Fatalf("pc1 Start: %v", err)
 	}
 	ctrl := pc1.ControlAddr().(*net.TCPAddr)
-	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45331, &out2, clk2, nil)
+	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45331, &out2, clk2, nil, nil)
 	if err := pc2.Start(context.Background()); err != nil {
 		t.Fatalf("pc2 Start: %v", err)
 	}

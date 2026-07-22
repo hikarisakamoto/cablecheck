@@ -21,7 +21,8 @@ The module is `cablecheck`. It targets Go 1.26, uses only the standard library, 
 - `internal/evaluate` — pure fact extraction, ordered health rules, classification fold, score, and recommendations.
 - `internal/reporting` — report directory/raw-artifact management, JSON/Markdown/text rendering, and verified report-file transfer; imports only `internal/model` plus the standard library.
 - `internal/app` — top-level orchestration: preflight, suite construction, monitoring, peer session, report assembly/evaluation/rendering, transfer callbacks, doctor/report commands, and exit mapping.
-- `internal/cli` — subcommand dispatch, Go `flag` parsing, help/progress output, and final error-to-exit-code mapping.
+- `internal/cli` — subcommand dispatch, Go `flag` parsing, help output, progress-renderer wiring, and final error-to-exit-code mapping.
+- `internal/ui` — terminal progress rendering: color-mode decision, the clock-driven live-refresh loop, the step/percent bar, and live-vs-discrete output selection.
 - `internal/testutil` — shared hermetic test helpers for scripted stdin, dribbled reads, deadline-aware waits, and goroutine leak checks.
 - `cmd/cablecheck` — process entry point, signal-aware context, build metadata, and `os.Exit(cli.Run(...))`.
 

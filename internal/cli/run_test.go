@@ -136,3 +136,30 @@ func TestRunPresentationFlags(t *testing.T) {
 		}
 	})
 }
+
+// TestRendererOptionsSoakBudget pins the one piece of conditional logic in the
+// renderer wiring: SoakBudget carries the soak duration only in soak mode and
+// stays zero otherwise, so the ETA projection never divides by a stray budget.
+func TestRendererOptionsSoakBudget(t *testing.T) {
+	t.Run("soak mode carries the soak duration", func(t *testing.T) {
+		cfg, err := parseRunFlags(baseRunArgs("--mode", "soak", "--soak-duration", "2h"), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("parseRunFlags: %v", err)
+		}
+		if got := rendererOptions(cfg).SoakBudget; got != 2*time.Hour {
+			t.Errorf("soak SoakBudget = %v, want 2h", got)
+		}
+	})
+
+	for _, mode := range []string{"quick", "standard"} {
+		t.Run(mode+" mode leaves the budget zero", func(t *testing.T) {
+			cfg, err := parseRunFlags(baseRunArgs("--mode", mode), &bytes.Buffer{})
+			if err != nil {
+				t.Fatalf("parseRunFlags: %v", err)
+			}
+			if got := rendererOptions(cfg).SoakBudget; got != 0 {
+				t.Errorf("%s SoakBudget = %v, want 0", mode, got)
+			}
+		})
+	}
+}
