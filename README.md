@@ -14,7 +14,7 @@ A loopback, bridge, veth, VLAN, wireless, or other virtual interface doesn't exe
 
 ## Supported environment
 
-CableCheck is a Go 1.24, standard-library-only program for Linux. It relies on Linux interface metadata, `/sys/class/net`, iproute2 JSON output, and physical Ethernet NICs. Local and release builds support Linux `amd64` and `arm64`.
+CableCheck is a Go 1.26, standard-library-only program for Linux. It relies on Linux interface metadata, `/sys/class/net`, iproute2 JSON output, and physical Ethernet NICs. Local and release builds support Linux `amd64` and `arm64`.
 
 Runtime requirements on **both** PCs:
 

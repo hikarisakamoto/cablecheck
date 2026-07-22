@@ -1,0 +1,145 @@
+name: release
+
+# Manual release. Four jobs with privilege separation:
+#   validate  — neutralize the untrusted `version` input (no permissions, no code)
+#   gate      — the SAME quality gate as PR/post-merge (no release ships red)
+#   build     — runs repository code (`make dist`) with read-only rights only
+#   publish   — runs NO repository code; holds the write/OIDC/attestation tokens;
+#               behind the `release` approval environment
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, e.g. v1.2.3'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as a pre-release'
+        type: boolean
+        default: false
+
+permissions: {} # deny by default; widen per job
+
+concurrency:
+  group: release-${{ inputs.version }} # per-version; different versions don't contend
+  cancel-in-progress: false
+
+jobs:
+  # 1) Neutralize the untrusted input BEFORE any checkout, token, approval or build.
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Enforce dispatch from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::release must be dispatched from the main branch"
+          exit 1
+      - name: Validate version (reject multiline, full SemVer match)
+        id: v
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # grep is line-oriented: a multiline value whose first line is valid
+          # would otherwise pass. Reject any embedded newline/CR first.
+          if [ "$(printf '%s' "$VERSION" | wc -l)" -ne 0 ]; then
+            echo "::error::version must be a single line"
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::version must be v-prefixed SemVer, e.g. v1.2.3"
+            exit 1
+          fi
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+
+  # The SAME gate. A reusable workflow cannot raise permissions above the caller,
+  # and the workflow-level `permissions: {}` would otherwise starve its checkout,
+  # so this calling job explicitly grants contents:read.
+  gate:
+    needs: validate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/gate.yml
+
+  # 2) Build runs repository-controlled code (Makefile/go) with NO write/OIDC power.
+  build:
+    needs: [validate, gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x' # release reproducibility: consider pinning an exact patch
+          check-latest: false
+          cache: false
+      - name: Build release binaries
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: make dist VERSION="$VERSION" DATE="$(git log -1 --format=%cI)"
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum cablecheck-linux-amd64 cablecheck-linux-arm64 > checksums.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # 3) Publish runs NO repository code; holds the privileged tokens; approval-gated.
+  publish:
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release # human-approval gate (required reviewers, main-only)
+    permissions:
+      contents: write # create tag + release
+      id-token: write # OIDC for provenance
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: Refuse existing tag/release (idempotency)
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh api "repos/$GH_REPO/git/refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "::error::tag $VERSION already exists"
+            exit 1
+          fi
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::release $VERSION already exists"
+            exit 1
+          fi
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: 'dist/cablecheck-linux-*'
+      - name: Create tag & publish release
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          flags=(--title "$VERSION" --generate-notes --target "$SHA")
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$VERSION" \
+            dist/cablecheck-linux-amd64 \
+            dist/cablecheck-linux-arm64 \
+            dist/checksums.txt \
+            "${flags[@]}"

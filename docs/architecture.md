@@ -2,7 +2,7 @@
 
 CableCheck is one Linux binary with two runtime roles. PC1 is the coordinator. It listens, authenticates PC2, drives the test plan, evaluates the combined evidence, writes the authoritative report, and optionally transfers it. PC2 is the worker. It connects, executes one requested operation at a time, and receives the final verdict and report set.
 
-The module is `cablecheck`. It targets Go 1.24, uses only the standard library, and delegates Linux measurements to external tools through an injected command runner.
+The module is `cablecheck`. It targets Go 1.26, uses only the standard library, and delegates Linux measurements to external tools through an injected command runner.
 
 ## Package map
 

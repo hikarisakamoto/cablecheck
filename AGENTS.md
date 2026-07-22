@@ -5,7 +5,7 @@ spawn) working in this repository. Human-facing usage lives in [README.md](READM
 Design detail lives in [docs/](docs/). This file is the operational contract for *changing*
 the code.
 
-CableCheck is a **Go 1.24+, standard-library-only** Linux CLI. It tests the health of a
+CableCheck is a **Go 1.26+, standard-library-only** Linux CLI. It tests the health of a
 directly-connected Ethernet link between two PCs (PC1 coordinates, PC2 works) and emits a
 rule-based verdict plus JSON / Markdown / text reports. Linux `amd64` and `arm64` only.
 
@@ -30,8 +30,10 @@ rule-based verdict plus JSON / Markdown / text reports. Linux `amd64` and `arm64
 
 ## Commands
 
-The `Makefile` is the source of truth; there's no CI config in-repo. All builds use
-`CGO_ENABLED=0` for a static, dependency-free binary.
+The `Makefile` is the source of truth for *what* runs; GitHub Actions in `.github/workflows/`
+just invoke these targets. `pr.yml`/`main.yml` run `make check` via the reusable `gate.yml`;
+`security.yml` runs `govulncheck` + CodeQL; `release.yml` is a manual (`workflow_dispatch`)
+build+publish. All builds use `CGO_ENABLED=0` for a static, dependency-free binary.
 
 | Command | Purpose |
 |---|---|
