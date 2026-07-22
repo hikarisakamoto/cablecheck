@@ -210,9 +210,17 @@ Example acknowledgement and capability message:
 - `op`: operation name.
 - `params`: operation-specific JSON owned by `internal/testsuite`.
 - `timeoutMs`: worker-side operation budget.
-- `step` and `totalSteps`: schema fields for 1-based display metadata. The
-  coordinator RPC adapter leaves both at their zero values; the session's plan
-  progress is driven locally.
+- `step` and `totalSteps`: 1-based plan display metadata copied from the
+  coordinator's current plan step.
+- `stepName`: optional fully formatted display label. This preserves dynamic
+  labels such as standard repeats and soak cycle prefixes; workers fall back
+  to `start_confirmation.steps[step-1]` when it is absent.
+
+The worker emits a step line only when an accepted `test_request` arrives and
+collapses multiple requests carrying identical step metadata. It never times
+or advances the coordinator's plan independently. These additive fields need
+no protocol version bump: older peers ignore unknown fields, while zero-valued
+metadata produces no worker-side step announcement.
 
 Implemented operation names include `counters_snapshot`, `link_settings`, `ping_run`, `ping_fullsize`, `iperf3_server_start`, `iperf3_server_stop`, `iperf3_client_run`, `iperf3_udp_run`, `iperf3_caps`, `cancel`, `cable_test_window_start`, and `cable_test_window_end`.
 

@@ -100,6 +100,7 @@ func (s *session) handleStartConfirmation(env *protocol.Envelope) {
 		return
 	}
 	s.mode = sc.Mode
+	s.steps = append(s.steps[:0], sc.Steps...)
 	s.log.Info("synchronized start scheduled", "startAt", sc.StartAt, "startInMs", sc.StartInMs, "mode", sc.Mode)
 	s.startCountdown(time.Duration(sc.StartInMs) * time.Millisecond)
 }

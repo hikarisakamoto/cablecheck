@@ -153,9 +153,7 @@ func (p *StandardPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 
 	names := p.planSteps()
 	for i, step := range steps {
-		if p.OnStep != nil {
-			p.OnStep(i+1, len(names), names[i])
-		}
+		announceStep(rc, p.OnStep, i+1, len(names), names[i])
 		if err := step(ctx, rc); err != nil {
 			p.Results.Incomplete = true
 			return fmt.Errorf("testsuite: standard step %d (%s): %w", i+1, names[i], err)

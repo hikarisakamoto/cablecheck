@@ -35,6 +35,7 @@ func TestRPCCorrelation(t *testing.T) {
 		var res *protocol.TestResult
 		var callErr error
 		plan := func(ctx context.Context, rc RemoteCaller) error {
+			rc.SetStep(3, 9, "ping stability")
 			res, callErr = rc.Call(ctx, "ping_run", map[string]int{"count": 3}, 2*time.Second,
 				func(p protocol.TestProgress) {
 					select {
@@ -63,6 +64,9 @@ func TestRPCCorrelation(t *testing.T) {
 		}
 		if treq.Op != "ping_run" || treq.TimeoutMs != 2000 {
 			t.Errorf("test_request = op %q timeoutMs %d, want ping_run/2000", treq.Op, treq.TimeoutMs)
+		}
+		if treq.Step != 3 || treq.TotalSteps != 9 || treq.StepName != "ping stability" {
+			t.Errorf("test_request step = [%d/%d] %q, want [3/9] ping stability", treq.Step, treq.TotalSteps, treq.StepName)
 		}
 		var params map[string]int
 		if err := json.Unmarshal(treq.Params, &params); err != nil || params["count"] != 3 {

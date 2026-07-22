@@ -112,13 +112,15 @@ type CablePlan struct {
 // effort so a dropped control connection cannot discard the result.
 func (p *CablePlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 	if p.Base != nil {
-		if err := p.Base(ctx, rc); err != nil {
+		baseCaller := rc
+		if p.Total > 0 {
+			baseCaller = planTotalCaller{RemoteCaller: rc, total: p.Total}
+		}
+		if err := p.Base(ctx, baseCaller); err != nil {
 			return err
 		}
 	}
-	if p.OnStep != nil {
-		p.OnStep(p.Step, p.Total, "cable diagnostics")
-	}
+	announceStep(rc, p.OnStep, p.Step, p.Total, "cable diagnostics")
 
 	rc.Warn("cable_test_window", "cable diagnostics are starting; the tested link may temporarily go down")
 	rc.SetIdleTimeout(cableWindowTimeout)
@@ -180,4 +182,15 @@ func (p *CablePlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 		}
 	}
 	return nil
+}
+
+// planTotalCaller makes metadata from the wrapped base plan use the complete
+// displayed total after CablePlan appends its diagnostic step.
+type planTotalCaller struct {
+	peer.RemoteCaller
+	total int
+}
+
+func (c planTotalCaller) SetStep(step, _ int, name string) {
+	c.RemoteCaller.SetStep(step, c.total, name)
 }

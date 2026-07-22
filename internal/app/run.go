@@ -100,6 +100,7 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 		Steps:             s.steps,
 		Complete:          v.complete,
 		OnHandshake:       a.setSessionTestID,
+		OnStep:            a.deps.OnStep,
 		OnCableTestWindow: a.setCableTestWindow,
 		OnState: func(_, to peer.State) {
 			// Start the sysfs link monitor exactly when the testing phase

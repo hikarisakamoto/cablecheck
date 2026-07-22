@@ -92,6 +92,10 @@ type Config struct {
 	// OnState, when set, observes every successful session state transition.
 	// It must be fast and must not re-enter the session.
 	OnState func(from, to State)
+	// OnStep, when set on the worker, observes the first accepted request for
+	// each coordinator plan step. It must be fast and must not re-enter the
+	// session.
+	OnStep func(step, total int, name string)
 	// OnCableTestWindow marks the interval in which link-monitor events are
 	// expected consequences of the disruptive diagnostic. It is called on
 	// the worker before the start request is acknowledged and before the end
@@ -197,6 +201,9 @@ func (c Config) callGrace() time.Duration {
 // RemoteCaller is what the test plan programs against on the coordinator:
 // each Call is one test_request → test_result RPC to the worker.
 type RemoteCaller interface {
+	// SetStep sets display metadata attached to subsequent test requests. The
+	// plan calls it at the same boundary as its local step announcement.
+	SetStep(step, total int, name string)
 	// Call sends a test_request for op and blocks until the correlated
 	// test_result arrives, the timeout (plus the session's call grace)
 	// expires, or the session dies. onProgress may be nil; when set it is

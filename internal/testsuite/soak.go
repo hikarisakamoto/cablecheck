@@ -239,9 +239,7 @@ func (p *SoakPlan) runCycle(ctx context.Context, rc peer.RemoteCaller, cycle int
 	step := 0
 	announce := func(name string) {
 		step++
-		if p.OnStep != nil {
-			p.OnStep(step, total, fmt.Sprintf("cycle %d: %s", cycle, name))
-		}
+		announceStep(rc, p.OnStep, step, total, fmt.Sprintf("cycle %d: %s", cycle, name))
 	}
 
 	var cycleCounters model.PeerCounters

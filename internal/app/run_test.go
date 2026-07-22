@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -202,10 +203,9 @@ func TestRunQuickHappyPath(t *testing.T) {
 	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	clk1, clk2 := clocktest.New(start), clocktest.New(start)
 	var out1, out2 runOutput
-	var steps []string
+	var steps1, steps2 []string
 	pc1, _, states1 := newRunApp(t, config.RolePC1, 0, 45301, &out1, clk1, func(n, total int, name string) {
-		steps = append(steps, name)
-		_ = total
+		steps1 = append(steps1, fmt.Sprintf("[%d/%d] %s", n, total, name))
 	})
 	if err := pc1.Start(ctx); err != nil {
 		t.Fatalf("pc1 Start: %v", err)
@@ -218,7 +218,9 @@ func TestRunQuickHappyPath(t *testing.T) {
 		t.Fatalf("pc1 bound port is 0; --control-port 0 support broken")
 	}
 
-	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45311, &out2, clk2, nil)
+	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45311, &out2, clk2, func(n, total int, name string) {
+		steps2 = append(steps2, fmt.Sprintf("[%d/%d] %s", n, total, name))
+	})
 	if err := pc2.Start(ctx); err != nil {
 		t.Fatalf("pc2 Start: %v", err)
 	}
@@ -252,7 +254,7 @@ func TestRunQuickHappyPath(t *testing.T) {
 		}
 	}
 
-	// PC1's step callbacks fired once per plan step, in order.
+	// Both consoles receive identical step callbacks once per plan step.
 	wantSteps := []string{
 		"link settings", "initial counter snapshot",
 		"ping stability", "full-size ping",
@@ -260,12 +262,13 @@ func TestRunQuickHappyPath(t *testing.T) {
 		"bidirectional stress", "UDP loss and jitter",
 		"final counter snapshot",
 	}
-	if len(steps) != len(wantSteps) {
-		t.Fatalf("steps = %q, want %q", steps, wantSteps)
+	if len(steps1) != len(wantSteps) || len(steps2) != len(wantSteps) {
+		t.Fatalf("PC1 steps = %q, PC2 steps = %q, want %q", steps1, steps2, wantSteps)
 	}
 	for i := range wantSteps {
-		if steps[i] != wantSteps[i] {
-			t.Errorf("step %d = %q, want %q", i, steps[i], wantSteps[i])
+		want := fmt.Sprintf("[%d/%d] %s", i+1, len(wantSteps), wantSteps[i])
+		if steps1[i] != want || steps2[i] != want {
+			t.Errorf("step %d = PC1 %q, PC2 %q, want %q", i, steps1[i], steps2[i], want)
 		}
 	}
 

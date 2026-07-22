@@ -102,6 +102,7 @@ type session struct {
 	testID   string
 	peerCaps protocol.Capabilities
 	mode     string
+	steps    []string
 
 	parent context.Context // the caller's ctx: cancellation = local abort
 	ctx    context.Context // session ctx: cancelled first in teardown
@@ -150,12 +151,21 @@ type session struct {
 	transferOn        bool
 	transferRan       bool
 	fin               *finishSpec
+	announcedStep     planStep
+	hasAnnouncedStep  bool
 
 	// peerAbortStage/peerAbortDetail record a peer-initiated abort's stage and
 	// (already-redacted) detail for the Outcome and PC2's diagnostic; empty for
 	// a locally initiated abort (whose stage comes from the abortStage method).
 	peerAbortStage  string
 	peerAbortDetail string
+}
+
+// planStep is coordinator-authored display metadata carried on each request.
+type planStep struct {
+	step  int
+	total int
+	name  string
 }
 
 // activeOp is the handle of the worker's in-flight operation.
