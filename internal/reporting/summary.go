@@ -120,23 +120,3 @@ func perDirection[T any](results []T, extract func(T) (string, string)) string {
 	}
 	return cell(model.DirectionPC1ToPC2, "pc1->pc2") + "  |  " + cell(model.DirectionPC2ToPC1, "pc2->pc1")
 }
-
-// toASCII transliterates the handful of typographic runes the rule texts use
-// and replaces anything else non-ASCII with '?' — the summary is printed to
-// arbitrary terminals and must stay plain ASCII.
-func toASCII(s string) []byte {
-	out := make([]byte, 0, len(s))
-	for _, r := range s {
-		switch {
-		case r < 0x80:
-			out = append(out, byte(r))
-		case r == '—' || r == '–': // em/en dash
-			out = append(out, '-')
-		case r == '→': // right arrow
-			out = append(out, '-', '>')
-		default:
-			out = append(out, '?')
-		}
-	}
-	return out
-}
