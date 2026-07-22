@@ -64,7 +64,7 @@ type Config struct {
 	// standard or soak).
 	Mode string
 	// Steps lists display names of the planned steps, sent in
-	// start_confirmation to drive the worker's "[1/8]" numbering.
+	// start_confirmation to drive the worker's "[n/N]" numbering.
 	Steps []string
 
 	// PrepareComplete, when set on the coordinator, runs after the plan
