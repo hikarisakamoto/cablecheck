@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestProgressLines pins the progress renderer: quiet mode emits exactly the
-// "[n/N] name" step lines; --verbose emits a strict superset of them.
+// TestProgressLines pins the progress renderer: non-verbose mode emits exactly
+// the "[n/N] name" step lines; --verbose emits a strict superset of them.
 func TestProgressLines(t *testing.T) {
 	steps := []struct {
 		n    int
@@ -23,13 +23,13 @@ func TestProgressLines(t *testing.T) {
 		}
 	}
 
-	var quiet bytes.Buffer
-	feed(NewProgress(&quiet, false))
+	var plain bytes.Buffer
+	feed(NewProgress(&plain, false))
 	want := "[1/3] link settings\n" +
 		"[2/3] initial counter snapshot\n" +
 		"[3/3] TCP throughput PC1 → PC2\n"
-	if quiet.String() != want {
-		t.Errorf("quiet output = %q, want exactly %q", quiet.String(), want)
+	if plain.String() != want {
+		t.Errorf("plain output = %q, want exactly %q", plain.String(), want)
 	}
 
 	var verbose bytes.Buffer

@@ -6,3 +6,4 @@ cablecheck-report-*/
 .claude/
 /genexamples
 /tools/genexamples/genexamples
+.opencode/

@@ -29,6 +29,7 @@ func validRaw(t *testing.T) RawRunFlags {
 		IperfPort:   44301,
 		Token:       "correct-horse-battery",
 		Output:      t.TempDir(),
+		Color:       "auto",
 	}
 }
 
@@ -55,6 +56,35 @@ func TestValidationErrorFormat(t *testing.T) {
 	err := &ValidationError{Flag: "--local-ip", Msg: "boom"}
 	if got, want := err.Error(), "--local-ip: boom"; got != want {
 		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestColorAndQuiet(t *testing.T) {
+	for _, color := range []string{"auto", "always", "never"} {
+		t.Run(color, func(t *testing.T) {
+			raw := validRaw(t)
+			raw.Color = color
+			raw.Quiet = true
+			cfg, err := Resolve(raw, nil)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v, want nil", err)
+			}
+			if cfg.Color != color {
+				t.Errorf("Color = %q, want %q", cfg.Color, color)
+			}
+			if !cfg.Quiet {
+				t.Errorf("Quiet = false, want true")
+			}
+		})
+	}
+
+	for _, color := range []string{"", "AUTO", "sometimes"} {
+		t.Run("invalid_"+color, func(t *testing.T) {
+			raw := validRaw(t)
+			raw.Color = color
+			_, err := Resolve(raw, nil)
+			wantValidationError(t, err, "--color", "auto, always, or never")
+		})
 	}
 }
 
@@ -855,6 +885,7 @@ func TestRunConfigLogRedactsToken(t *testing.T) {
 	const secret = "hunter2-super-secret-token"
 	raw := validRaw(t)
 	raw.Token = secret
+	raw.Quiet = true
 	cfg, err := Resolve(raw, nil)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v, want nil", err)
@@ -873,6 +904,9 @@ func TestRunConfigLogRedactsToken(t *testing.T) {
 		}
 		if !strings.Contains(out, "pc1") {
 			t.Errorf("log output missing role (LogValue should still carry config): %s", out)
+		}
+		if !strings.Contains(out, "color=auto") || !strings.Contains(out, "quiet=true") {
+			t.Errorf("log output missing color/quiet fields: %s", out)
 		}
 	})
 

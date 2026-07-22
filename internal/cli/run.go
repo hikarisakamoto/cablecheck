@@ -9,6 +9,7 @@ import (
 
 	"cablecheck/internal/app"
 	"cablecheck/internal/config"
+	"cablecheck/internal/ui"
 )
 
 // cmdRun parses the run flags, resolves the configuration and executes the
@@ -39,7 +40,7 @@ func cmdRun(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	return &app.ExitError{Code: code, Err: werr}
 }
 
-// parseRunFlags registers the 23 run flags, parses args, tracks explicitly
+// parseRunFlags registers the 25 run flags, parses args, tracks explicitly
 // set flags via flag.Visit and resolves the configuration (presets fill
 // everything unset). Flag parse errors map to exit 4; -h yields
 // flag.ErrHelp (exit 0).
@@ -70,6 +71,7 @@ func parseRunFlags(args []string, stderr io.Writer) (*config.RunConfig, error) {
 	fs.BoolVar(&raw.CableTest, "cable-test", false, "")
 	fs.BoolVar(&raw.CableTestTDR, "cable-test-tdr", false, "")
 	// Behavior.
+	fs.BoolVar(&raw.Quiet, "quiet", false, "")
 	fs.BoolVar(&raw.Verbose, "verbose", false, "")
 	fs.BoolVar(&raw.NonInteractive, "non-interactive", false, "")
 	fs.BoolVar(&raw.NoSudo, "no-sudo", false, "")
@@ -77,6 +79,7 @@ func parseRunFlags(args []string, stderr io.Writer) (*config.RunConfig, error) {
 	fs.BoolVar(&raw.AllowVirtualInterface, "allow-virtual-interface", false, "")
 	// Output.
 	fs.StringVar(&raw.Output, "output", ".", "")
+	fs.StringVar(&raw.Color, "color", "auto", "")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -96,8 +99,21 @@ func parseRunFlags(args []string, stderr io.Writer) (*config.RunConfig, error) {
 	return config.Resolve(raw, set)
 }
 
+// mapColorMode converts the validated config representation to the terminal
+// renderer's typed mode. Config remains independent of the UI package.
+func mapColorMode(value string) ui.ColorMode {
+	switch value {
+	case "always":
+		return ui.ColorAlways
+	case "never":
+		return ui.ColorNever
+	default:
+		return ui.ColorAuto
+	}
+}
+
 // runUsage prints the grouped run flag reference (hand-ordered — the
-// default alphabetic PrintDefaults is useless for 23 flags).
+// default alphabetic PrintDefaults is useless for 25 flags).
 func runUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage: cablecheck run --role pc1|pc2 --local-ip A.B.C.D --peer-ip A.B.C.D [flags]
 
@@ -134,6 +150,7 @@ Diagnostics:
   --cable-test-tdr          request TDR cable diagnostics (implies --cable-test)
 
 Behavior:
+  --quiet                   use the compact end-of-run summary
   --non-interactive         skip the interactive start prompt
   --no-sudo                 never probe or use sudo
   --no-report-transfer      do not send report files to pc2
@@ -142,6 +159,7 @@ Behavior:
 
 Output:
   --output string           parent directory for the report directory (default ".")
+  --color string            auto | always | never (default auto)
 
 Boolean flags take no separate value: use --cable-test=false, not --cable-test false.
 
