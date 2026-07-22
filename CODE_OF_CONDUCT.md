@@ -23,8 +23,7 @@ Anywhere the project lives: issues, pull requests, discussions, and commit histo
 
 ## Reporting a problem
 
-<!-- TODO: add contact email before publishing -->
-If someone's behaviour is a problem, email me privately at **[TODO: contact email]**. Tell me what happened, where, and who was involved; links or screenshots help.
+If someone's behaviour is a problem, email me privately at **hikarisakamoto@gmail.com**. Tell me what happened, where, and who was involved; links or screenshots help.
 
 I read reports in good faith and keep them confidential. Be realistic about the scale, though: this is a one-person project with no committee and no support desk, so I can't promise a response within any set time. I'll get to it and take it seriously.
 
