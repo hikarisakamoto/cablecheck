@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and usage help
+    url: https://github.com/hikarisakamoto/cablecheck/discussions
+    about: How do I run this, what does this flag do, is my setup supported — ask in Discussions.
+  - name: Troubleshooting first
+    url: https://github.com/hikarisakamoto/cablecheck/blob/main/README.md#troubleshooting
+    about: Before filing, skim the README troubleshooting and false-positives sections and the docs/ directory. Many results have a known cause.
+  - name: Report a security vulnerability
+    url: https://github.com/hikarisakamoto/cablecheck/blob/main/SECURITY.md
+    about: Don't open a public issue for security reports. See SECURITY.md for how to reach the maintainer privately.

@@ -1,0 +1,109 @@
+name: Bug report
+description: A crash, an error, or behaviour that is clearly wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a verdict you think is wrong (a suspected false positive), use **Unexpected result** instead — that's not a bug.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened, and what did you expect?
+      description: A couple of sentences is plenty. If there's a stack trace or error message, paste it.
+      placeholder: |
+        Running `cablecheck run --role pc1 ...` panics right after the link inspection.
+        I expected it to move on to the ping phase.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The command you ran
+      description: The full invocation on the affected side. **Redact the token** — replace it with `REDACTED`.
+      render: shell
+      placeholder: cablecheck run --role pc1 --local-ip 192.168.50.1 --peer-ip 192.168.50.2 --mode standard --token REDACTED
+    validations:
+      required: true
+
+  - type: textarea
+    id: version
+    attributes:
+      label: cablecheck version
+      description: Paste the full output of `cablecheck version`.
+      render: text
+      placeholder: |
+        cablecheck 7421211
+        commit:   7421211
+        built:    2026-07-20T12:00:00Z
+        go:       go1.26
+        platform: linux/amd64
+        protocol: 1
+        schema:   1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Test mode
+      options:
+        - quick
+        - standard
+        - soak
+        - other / not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: machines
+    attributes:
+      label: Both machines
+      description: Distro, kernel (`uname -r`), and arch for each side. USB Ethernet adapters count — mention them.
+      placeholder: |
+        PC1: Fedora 40, 6.9.4, amd64, onboard Intel I225-V
+        PC2: Debian 12, 6.1.0, arm64, USB 2.5GbE adapter (Realtek RTL8156)
+    validations:
+      required: true
+
+  - type: textarea
+    id: tools
+    attributes:
+      label: Tool versions
+      description: The runtime prerequisites on the affected side(s). `cablecheck doctor` reports most of these if it's easier.
+      placeholder: |
+        iperf3 3.16, ethtool 6.7, iputils ping 20240117, iproute2 6.9.0
+    validations:
+      required: false
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: cablecheck doctor output
+      description: Run `cablecheck doctor` on the affected side and paste it here. This catches most environment problems on its own.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: raw
+    attributes:
+      label: Relevant lines from raw/
+      description: Anything in the output directory's `raw/` that looks related — the failing tool's stderr, a truncated transfer, and so on. No need to attach everything.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this isn't already reported.
+          required: true
+        - label: I'm on Linux (amd64 or arm64). macOS and Windows aren't supported.
+          required: true
+        - label: The interface is a physical wired NIC (onboard or USB Ethernet) — or I'm reporting an issue with the `--allow-virtual-interface` demo path.
+          required: true
