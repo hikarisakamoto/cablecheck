@@ -83,7 +83,35 @@ func (s *session) handleTestRequest(env *protocol.Envelope) {
 			_ = s.cfg.OnCableTestWindow(true)
 		}
 	}
+	s.announceRequestStep(req)
 	s.startOp(env.MessageID, req)
+}
+
+// announceRequestStep mirrors one coordinator plan-step line on the worker.
+// It runs only while handling an accepted test_request, so worker progress is
+// driven by received frames rather than local timing. Multiple RPCs belonging
+// to one plan step are collapsed into one announcement.
+func (s *session) announceRequestStep(req *protocol.TestRequest) {
+	if req.Step < 1 || req.TotalSteps < 1 || req.Step > req.TotalSteps {
+		return
+	}
+	name := req.StepName
+	if name == "" && req.Step <= len(s.steps) {
+		name = s.steps[req.Step-1]
+	}
+	if name == "" {
+		return
+	}
+	name = redactToken(name, s.cfg.Token)
+	step := planStep{step: req.Step, total: req.TotalSteps, name: name}
+	if s.hasAnnouncedStep && s.announcedStep == step {
+		return
+	}
+	s.announcedStep = step
+	s.hasAnnouncedStep = true
+	if s.cfg.OnStep != nil {
+		s.cfg.OnStep(step.step, step.total, step.name)
+	}
 }
 
 // startOp launches the single executor goroutine for one accepted request.

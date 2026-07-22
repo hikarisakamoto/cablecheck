@@ -172,6 +172,10 @@ type TestRequest struct {
 	Step int `json:"step"`
 	// TotalSteps is the plan length.
 	TotalSteps int `json:"totalSteps"`
+	// StepName is the coordinator's fully formatted display name for this
+	// step. It supplements StartConfirmation.Steps for dynamic labels such as
+	// soak cycle prefixes.
+	StepName string `json:"stepName,omitempty"`
 }
 
 // Cable-test window operation names use the ordinary test_request/result

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/testutil"
@@ -78,6 +79,75 @@ func TestWorkerCancelOp(t *testing.T) {
 	}
 	if out.out.FinalState != StateAborted {
 		t.Errorf("FinalState = %s, want aborted", out.out.FinalState)
+	}
+}
+
+// TestWorkerMirrorsCoordinatorSteps pins worker progress to received request
+// frames. The start-confirmation list supplies the compatibility fallback,
+// repeated RPCs in one step are deduplicated, and a request's dynamic label
+// wins for soak-style cycle context.
+func TestWorkerMirrorsCoordinatorSteps(t *testing.T) {
+	testutil.LeakCheck(t)
+	cfg1, cfg2 := testConfigs(t)
+	tr := newPipeTransport()
+	cfg1.Transport, cfg2.Transport = tr, tr
+	cfg2.NonInteractive = true
+	states := newStateRecorder(&cfg2)
+	announced := make(chan planStep, 4)
+	cfg2.OnStep = func(step, total int, name string) {
+		announced <- planStep{step: step, total: total, name: name}
+	}
+	awaitStep := func() planStep {
+		select {
+		case step := <-announced:
+			return step
+		case <-time.After(testutil.TestTimeout(t)):
+			t.Errorf("worker step was not announced")
+			return planStep{}
+		}
+	}
+
+	ctx := t.Context()
+	resCh := startSession(ctx, cfg2, nil, opFunc(nopOp))
+	h := startCoordinatorHarness(t, ctx, tr, cfg1)
+
+	h.await(protocol.TypeReady)
+	h.send(protocol.TypeReady, "", protocol.Ready{})
+	h.send(protocol.TypeStartConfirm, "", protocol.StartConfirmation{
+		StartInMs: 0,
+		Steps:     []string{"link settings", "final counter snapshot"},
+	})
+	states.wait(t, StateTesting)
+
+	first := protocol.TestRequest{Op: "instant", TimeoutMs: 1000, Step: 1, TotalSteps: 2}
+	firstID := h.send(protocol.TypeTestRequest, "", first)
+	awaitTestResult(t, h, firstID)
+	if got := awaitStep(); got != (planStep{step: 1, total: 2, name: "link settings"}) {
+		t.Errorf("first worker step = %+v, want start-confirmation fallback", got)
+	}
+
+	duplicateID := h.send(protocol.TypeTestRequest, "", first)
+	awaitTestResult(t, h, duplicateID)
+	select {
+	case got := <-announced:
+		t.Errorf("duplicate RPC announced step again: %+v", got)
+	default:
+	}
+
+	dynamic := protocol.TestRequest{
+		Op: "instant", TimeoutMs: 1000, Step: 2, TotalSteps: 2,
+		StepName: "cycle 7: final " + testToken,
+	}
+	dynamicID := h.send(protocol.TypeTestRequest, "", dynamic)
+	awaitTestResult(t, h, dynamicID)
+	if got := awaitStep(); got != (planStep{step: 2, total: 2, name: "cycle 7: final [REDACTED]"}) {
+		t.Errorf("dynamic worker step = %+v, want request label with token redacted", got)
+	}
+
+	h.send(protocol.TypeAbort, "", protocol.Abort{Reason: "user_interrupt", Stage: "testing", Initiator: "pc1"})
+	out := awaitResult(t, resCh)
+	if !errors.Is(out.err, ErrPeerAborted) {
+		t.Errorf("Run error = %v, want ErrPeerAborted", out.err)
 	}
 }
 

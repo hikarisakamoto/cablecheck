@@ -18,6 +18,16 @@ import (
 type cableCoordCaller struct {
 	events  []string
 	dropEnd bool
+	step    int
+	total   int
+	name    string
+	steps   []cableStep
+}
+
+type cableStep struct {
+	step  int
+	total int
+	name  string
 }
 
 func (c *cableCoordCaller) Call(_ context.Context, op string, _ any, _ time.Duration,
@@ -39,6 +49,11 @@ func (c *cableCoordCaller) Warn(code, _ string) {
 
 func (c *cableCoordCaller) SetIdleTimeout(d time.Duration) {
 	c.events = append(c.events, "idle:"+d.String())
+}
+
+func (c *cableCoordCaller) SetStep(step, total int, name string) {
+	c.step, c.total, c.name = step, total, name
+	c.steps = append(c.steps, cableStep{step: step, total: total, name: name})
 }
 
 // TestCableTestCoordination verifies the ordered warning/timeout/window
@@ -70,13 +85,16 @@ func TestCableTestCoordination(t *testing.T) {
 			caller := &cableCoordCaller{dropEnd: tc.dropEnd}
 			results := &SessionResults{}
 			plan := &CablePlan{
-				Base: func(context.Context, peer.RemoteCaller) error {
+				Base: func(_ context.Context, rc peer.RemoteCaller) error {
 					caller.events = append(caller.events, "base")
+					rc.SetStep(1, 9, "link settings")
 					return nil
 				},
 				Tester: &CableTester{R: fr, IfName: "eth0", SudoOK: true},
 				TDR:    tc.tdr, Results: results,
 				NormalIdleTimeout: 20 * time.Second,
+				Step:              10,
+				Total:             10,
 				BeginWindow:       func() { caller.events = append(caller.events, "monitor:begin") },
 				EndWindow: func() uint64 {
 					caller.events = append(caller.events, "monitor:end")
@@ -85,6 +103,16 @@ func TestCableTestCoordination(t *testing.T) {
 			}
 			if err := plan.Run(context.Background(), caller); err != nil {
 				t.Errorf("CablePlan.Run: %v", err)
+			}
+			if caller.step != 10 || caller.total != 10 || caller.name != "cable diagnostics" {
+				t.Errorf("cable step metadata = [%d/%d] %q, want [10/10] cable diagnostics", caller.step, caller.total, caller.name)
+			}
+			wantStepMetadata := []cableStep{
+				{step: 1, total: 10, name: "link settings"},
+				{step: 10, total: 10, name: "cable diagnostics"},
+			}
+			if !slices.Equal(caller.steps, wantStepMetadata) {
+				t.Errorf("cable step metadata = %+v, want %+v", caller.steps, wantStepMetadata)
 			}
 			if results.CableTest == nil || !results.CableTest.Available || len(results.CableTest.Pairs) != 4 {
 				t.Errorf("CableTest result = %+v, want retained four-pair result", results.CableTest)

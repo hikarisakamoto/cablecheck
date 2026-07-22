@@ -3,6 +3,7 @@ package testsuite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"sync"
 	"testing"
@@ -128,6 +129,21 @@ func TestSoakPeriodicCycles(t *testing.T) {
 	// The three cycles' TCP results accumulated (one repeat per direction).
 	if len(results.TCP) != 6 {
 		t.Errorf("TCP results = %d, want 2 per cycle × 3 cycles", len(results.TCP))
+	}
+	if len(rc.steps) != 3*len(soakSteps) {
+		t.Fatalf("attached %d remote soak steps %+v, want %d", len(rc.steps), rc.steps, 3*len(soakSteps))
+	}
+	for cycle := 1; cycle <= 3; cycle++ {
+		for i, name := range soakSteps {
+			at := (cycle-1)*len(soakSteps) + i
+			want := fakeStep{
+				step: i + 1, total: len(soakSteps),
+				name: fmt.Sprintf("cycle %d: %s", cycle, name),
+			}
+			if rc.steps[at] != want {
+				t.Errorf("remote soak step %d = %+v, want %+v", at, rc.steps[at], want)
+			}
+		}
 	}
 }
 

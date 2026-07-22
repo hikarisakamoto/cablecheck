@@ -25,6 +25,14 @@ type fakeCaller struct {
 	ops        []string
 	params     map[string][]json.RawMessage
 	replies    map[string][]any
+	step       fakeStep
+	steps      []fakeStep
+}
+
+type fakeStep struct {
+	step  int
+	total int
+	name  string
 }
 
 func newFakeCaller(t *testing.T) *fakeCaller {
@@ -103,6 +111,13 @@ func (f *fakeCaller) Warn(code, text string) {}
 
 func (f *fakeCaller) SetIdleTimeout(time.Duration) {}
 
+func (f *fakeCaller) SetStep(step, total int, name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.step = fakeStep{step: step, total: total, name: name}
+	f.steps = append(f.steps, f.step)
+}
+
 // TestQuickPlanDrivesSteps runs the whole TCP-only quick plan against a
 // scripted local runner and a scripted remote caller, checking step
 // announcements, remote op order/params and the accumulated SessionResults.
@@ -157,10 +172,16 @@ func TestQuickPlanDrivesSteps(t *testing.T) {
 	if len(steps) != len(names) {
 		t.Fatalf("announced %d steps %q, want %d", len(steps), steps, len(names))
 	}
+	if len(rc.steps) != len(names) {
+		t.Fatalf("attached %d remote steps %+v, want %d", len(rc.steps), rc.steps, len(names))
+	}
 	for i, name := range names {
 		want := fmt.Sprintf("[%d/%d] %s", i+1, len(names), name)
 		if steps[i] != want {
 			t.Errorf("step %d announced %q, want %q", i, steps[i], want)
+		}
+		if got := rc.steps[i]; got != (fakeStep{step: i + 1, total: len(names), name: name}) {
+			t.Errorf("remote step %d = %+v, want metadata matching local announcement", i, got)
 		}
 	}
 

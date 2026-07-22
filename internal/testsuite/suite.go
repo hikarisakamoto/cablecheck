@@ -162,15 +162,23 @@ func (q *QuickPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 		q.stepFinalCounters,
 	}
 	for i, step := range steps {
-		if q.OnStep != nil {
-			q.OnStep(i+1, len(quickSteps), quickSteps[i])
-		}
+		announceStep(rc, q.OnStep, i+1, len(quickSteps), quickSteps[i])
 		if err := step(ctx, rc); err != nil {
 			q.Results.Incomplete = true
 			return fmt.Errorf("testsuite: step %d (%s): %w", i+1, quickSteps[i], err)
 		}
 	}
 	return nil
+}
+
+// announceStep keeps request metadata and local rendering on the same plan
+// boundary. SetStep sends nothing itself; the worker announces only when the
+// next test_request frame arrives.
+func announceStep(rc peer.RemoteCaller, onStep func(int, int, string), step, total int, name string) {
+	rc.SetStep(step, total, name)
+	if onStep != nil {
+		onStep(step, total, name)
+	}
 }
 
 // callRemote performs one RPC and decodes its typed payload. A status of

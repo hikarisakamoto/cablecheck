@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"cablecheck/internal/protocol"
@@ -89,7 +90,22 @@ func (s *session) closePendingCalls() {
 
 // remoteCaller is the RemoteCaller handed to the coordinator's PlanFunc.
 type remoteCaller struct {
-	s *session
+	s      *session
+	stepMu sync.Mutex
+	step   planStep
+}
+
+// SetStep updates the display metadata copied onto subsequent test requests.
+func (rc *remoteCaller) SetStep(step, total int, name string) {
+	rc.stepMu.Lock()
+	rc.step = planStep{step: step, total: total, name: name}
+	rc.stepMu.Unlock()
+}
+
+func (rc *remoteCaller) currentStep() planStep {
+	rc.stepMu.Lock()
+	defer rc.stepMu.Unlock()
+	return rc.step
 }
 
 // Call implements RemoteCaller: it writes one test_request and blocks until
@@ -99,6 +115,11 @@ type remoteCaller struct {
 func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout time.Duration,
 	onProgress func(protocol.TestProgress)) (*protocol.TestResult, error) {
 	s := rc.s
+	step := rc.currentStep()
+	stepName := step.name
+	if step.step >= 1 && step.step <= len(s.cfg.Steps) && s.cfg.Steps[step.step-1] == step.name {
+		stepName = ""
+	}
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, fmt.Errorf("peer: marshal params for op %q: %w", op, err)
@@ -113,9 +134,12 @@ func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout
 		}
 		registered = true
 		return protocol.NewEnvelope(protocol.TypeTestRequest, s.testID, msgID, protocol.TestRequest{
-			Op:        op,
-			Params:    raw,
-			TimeoutMs: int(timeout / time.Millisecond),
+			Op:         op,
+			Params:     raw,
+			TimeoutMs:  int(timeout / time.Millisecond),
+			Step:       step.step,
+			TotalSteps: step.total,
+			StepName:   stepName,
 		})
 	})
 	if registered {

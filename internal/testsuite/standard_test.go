@@ -96,6 +96,14 @@ func TestStandardPlanSequence(t *testing.T) {
 	if !slices.Equal(steps, names) {
 		t.Fatalf("announced steps = %q, want the standard step list %q", steps, names)
 	}
+	if len(rc.steps) != len(names) {
+		t.Fatalf("attached %d remote steps %+v, want %d", len(rc.steps), rc.steps, len(names))
+	}
+	for i, name := range names {
+		if got := rc.steps[i]; got != (fakeStep{step: i + 1, total: len(names), name: name}) {
+			t.Errorf("remote standard step %d = %+v, want label matching local announcement", i, got)
+		}
+	}
 
 	// The step list must reflect the repeated TCP phases and the extra
 	// half-rate UDP run so the operator sees the real workload.
