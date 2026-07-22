@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a change or addition.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: The motivation, not the solution. What are you trying to do that CableCheck makes hard or impossible today?
+      placeholder: I want a Prometheus textfile output so node_exporter can scrape the latest verdict.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed idea
+      description: What you'd like it to do. Rough is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds you're using now, or other shapes the fix could take.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I understand CableCheck is Linux-only and standard-library-only, so more platforms and third-party dependencies are out of scope.
+          required: true

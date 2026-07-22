@@ -1,0 +1,74 @@
+name: Unexpected result
+description: Nothing crashed, but the classification looks wrong — a likely false positive.
+labels: ["result"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        CableCheck grades the whole measured path, not the cable alone, so some `WARNING`/`POOR` verdicts have a mundane cause. Two things worth a look before you file:
+
+        - [Common false positives](https://github.com/hikarisakamoto/cablecheck/blob/main/README.md#common-false-positives) — host-limited throughput, USB adapters, power saving, UDP self-saturation, MTU mismatch, missing counters.
+        - [Compare with a known-good cable](https://github.com/hikarisakamoto/cablecheck/blob/main/README.md#compare-with-a-known-good-cable) — the A/B test that turns a hunch into evidence.
+
+        If the numbers still don't add up, that's exactly what this form is for. The `report.json` you attach below usually tells the story.
+
+  - type: input
+    id: got
+    attributes:
+      label: Classification you got
+      placeholder: POOR
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: What you expected, and why
+      placeholder: GOOD — link negotiated at 2.5G, iperf3 by hand hits ~2.3 Gbit/s
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The command you ran
+      description: Redact the token if it's in there.
+      render: shell
+      placeholder: cablecheck run --role pc1 --local-ip 192.168.50.1 --peer-ip 192.168.50.2 --mode standard --token REDACTED
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        **Attach `report.json`** from the output directory by dragging it into the box below — it carries the per-test numbers and the rule that fired. The `raw/` directory helps too if you can include it.
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Report and evidence
+      description: Drop report.json here. Paste anything from raw/ that seems relevant, or a note about what you're attaching.
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: NIC model on each side, whether a USB Ethernet adapter is in the path, and the cable category if you know it.
+      placeholder: |
+        PC1: onboard Intel I225-V. PC2: USB 2.5GbE (Realtek RTL8156). Cat6 patch cable, ~2 m.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: abtest
+    attributes:
+      label: Did you A/B test against a known-good cable?
+      description: Same machines, same ports, same everything — swap only the cable.
+      options:
+        - "Yes — result changed with the known-good cable"
+        - "Yes — result was the same with the known-good cable"
+        - "No, not yet"
+    validations:
+      required: true
