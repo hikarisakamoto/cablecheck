@@ -151,7 +151,7 @@ type StartConfirmation struct {
 	StartInMs int `json:"startInMs"`
 	// Mode is the test mode: quick, standard or soak.
 	Mode string `json:"mode"`
-	// Steps lists display names of the planned steps; drives "[1/8]"
+	// Steps lists display names of the planned steps; drives "[n/N]"
 	// numbering on PC2.
 	Steps []string `json:"steps"`
 }
