@@ -93,6 +93,27 @@ func TestCLIDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid run color exits 4", func(t *testing.T) {
+		args := append([]string{"run"}, baseRunArgs("--color", "sometimes")...)
+		code, _, errOut := runCLI(t, args...)
+		if code != 4 {
+			t.Errorf("code = %d, want 4", code)
+		}
+		if !strings.Contains(errOut, "--color") {
+			t.Errorf("stderr misses the --color diagnosis:\n%s", errOut)
+		}
+	})
+
+	t.Run("run help includes presentation flags", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "run", "-h")
+		if code != 0 {
+			t.Errorf("code = %d, want 0", code)
+		}
+		if !strings.Contains(errOut, "--color") || !strings.Contains(errOut, "--quiet") {
+			t.Errorf("run help misses --color/--quiet:\n%s", errOut)
+		}
+	})
+
 	t.Run("run rejects positional arguments", func(t *testing.T) {
 		code, _, errOut := runCLI(t, "run", "positional")
 		if code != 4 {

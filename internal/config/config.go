@@ -1,6 +1,6 @@
 // Package config validates and resolves the cablecheck run configuration.
-// Raw flag values are checked fail-fast in a fixed order (mode, role, IPs,
-// ports, token, presets and bounds, UDP rate, output directory), mode
+// Raw flag values are checked fail-fast in a fixed order (mode, color, role,
+// IPs, ports, token, presets and bounds, UDP rate, output directory), mode
 // presets fill every test parameter the user did not set explicitly, and
 // the session token is generated on PC1 when absent. The package performs
 // no network I/O and imports only internal/model and the standard library.
@@ -109,6 +109,10 @@ type RunConfig struct {
 	// OutputDir is the absolute, cleaned parent directory for the report
 	// directory. It exists and is a directory.
 	OutputDir string
+	// Color controls terminal color output: auto, always, or never.
+	Color string
+	// Quiet requests the compact end-of-run summary.
+	Quiet bool
 	// Verbose enables verbose progress output.
 	Verbose bool
 	// NonInteractive skips the interactive start prompt.
@@ -154,6 +158,8 @@ func (c RunConfig) LogValue() slog.Value {
 		slog.Bool("cableTest", c.CableTest),
 		slog.Bool("cableTestTDR", c.CableTestTDR),
 		slog.String("outputDir", c.OutputDir),
+		slog.String("color", c.Color),
+		slog.Bool("quiet", c.Quiet),
 		slog.Bool("verbose", c.Verbose),
 		slog.Bool("nonInteractive", c.NonInteractive),
 		slog.Bool("noSudo", c.NoSudo),
@@ -203,6 +209,10 @@ type RawRunFlags struct {
 	CableTestTDR bool
 	// Output is the raw --output parent-directory value.
 	Output string
+	// Color is the raw --color value.
+	Color string
+	// Quiet is the raw --quiet value.
+	Quiet bool
 	// Verbose is the raw --verbose value.
 	Verbose bool
 	// NonInteractive is the raw --non-interactive value.

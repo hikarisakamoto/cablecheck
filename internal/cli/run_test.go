@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cablecheck/internal/config"
+	"cablecheck/internal/ui"
 )
 
 // baseRunArgs is a minimal valid `run` command line for pc1.
@@ -90,6 +91,48 @@ func TestRunFlagPresets(t *testing.T) {
 		var ve *config.ValidationError
 		if !errors.As(err, &ve) {
 			t.Errorf("soak flag in quick mode: err = %v, want ValidationError", err)
+		}
+	})
+}
+
+func TestRunPresentationFlags(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg, err := parseRunFlags(baseRunArgs(), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("parseRunFlags: %v", err)
+		}
+		if cfg.Color != "auto" || cfg.Quiet {
+			t.Errorf("presentation defaults = color %q, quiet %v; want auto, false", cfg.Color, cfg.Quiet)
+		}
+	})
+
+	for _, tc := range []struct {
+		value string
+		want  ui.ColorMode
+	}{
+		{"auto", ui.ColorAuto},
+		{"always", ui.ColorAlways},
+		{"never", ui.ColorNever},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			cfg, err := parseRunFlags(baseRunArgs("--color", tc.value, "--quiet"), &bytes.Buffer{})
+			if err != nil {
+				t.Fatalf("parseRunFlags: %v", err)
+			}
+			if cfg.Color != tc.value || !cfg.Quiet {
+				t.Errorf("presentation flags = color %q, quiet %v; want %q, true", cfg.Color, cfg.Quiet, tc.value)
+			}
+			if got := mapColorMode(cfg.Color); got != tc.want {
+				t.Errorf("mapColorMode(%q) = %q, want %q", cfg.Color, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("invalid color", func(t *testing.T) {
+		_, err := parseRunFlags(baseRunArgs("--color", "sometimes"), &bytes.Buffer{})
+		var ve *config.ValidationError
+		if !errors.As(err, &ve) || ve.Flag != "--color" {
+			t.Errorf("invalid --color: err = %v, want ValidationError for --color", err)
 		}
 	})
 }

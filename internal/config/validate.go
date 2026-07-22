@@ -40,8 +40,8 @@ const (
 )
 
 // Resolve validates raw run flags fail-fast in the canonical order (mode,
-// role, local IP, peer IP, IP distinctness, ports, token, mode presets and
-// bounds, UDP rate, cable-test implication, output directory) and returns
+// color, role, local IP, peer IP, IP distinctness, ports, token, mode presets
+// and bounds, UDP rate, cable-test implication, output directory) and returns
 // the fully resolved configuration.
 //
 // explicitlySet maps flag names (without dashes, as reported by flag.Visit)
@@ -59,7 +59,14 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		return nil, &ValidationError{"--mode", fmt.Sprintf("invalid mode %q: must be quick, standard, or soak", raw.Mode)}
 	}
 
-	// 2. Role.
+	// 2. Color mode.
+	switch raw.Color {
+	case "auto", "always", "never":
+	default:
+		return nil, &ValidationError{"--color", fmt.Sprintf("invalid color mode %q: must be auto, always, or never", raw.Color)}
+	}
+
+	// 3. Role.
 	role := Role(raw.Role)
 	switch role {
 	case RolePC1, RolePC2:
@@ -69,7 +76,7 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		return nil, &ValidationError{"--role", fmt.Sprintf("invalid role %q: must be pc1 or pc2", raw.Role)}
 	}
 
-	// 3-4. IP addresses. --local-ip may be omitted when --interface names the
+	// 4-5. IP addresses. --local-ip may be omitted when --interface names the
 	// test interface; preflight then infers the address from that interface.
 	var localIP netip.Addr
 	if raw.LocalIP != "" || raw.Interface == "" {
@@ -84,13 +91,13 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		return nil, err
 	}
 
-	// 5. The two ends must differ (deferred to preflight when local-ip is
+	// 6. The two ends must differ (deferred to preflight when local-ip is
 	// inferred from the interface).
 	if localIP.IsValid() && localIP == peerIP {
 		return nil, &ValidationError{"--peer-ip", fmt.Sprintf("must differ from --local-ip (both are %q)", localIP)}
 	}
 
-	// 6. Ports.
+	// 7. Ports.
 	controlPort, err := validatePort("--control-port", raw.ControlPort)
 	if err != nil {
 		return nil, err
@@ -106,13 +113,13 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		return nil, &ValidationError{"--control-port", fmt.Sprintf("must not equal --iperf-port (%d) or --iperf-port+1 (%d); those ports are reserved for iperf3", raw.IperfPort, raw.IperfPort+1)}
 	}
 
-	// 7. Token.
+	// 8. Token.
 	token, tokenGenerated, err := resolveToken(role, raw.Token)
 	if err != nil {
 		return nil, err
 	}
 
-	// 8. Mode presets, then bounds.
+	// 9. Mode presets, then bounds.
 	tcpDuration := p.tcpDuration
 	if isSet("tcp-duration") {
 		tcpDuration = raw.TCPDuration
@@ -171,7 +178,7 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		return nil, &ValidationError{"--parallel-streams", fmt.Sprintf("must be between %d and %d (got %d)", minParallelStreams, maxParallelStreams, parallelStreams)}
 	}
 
-	// 9. Explicit UDP rate.
+	// 10. Explicit UDP rate.
 	var udpRate model.Bitrate
 	if raw.UDPRate != "" {
 		udpRate, err = model.ParseBitrate(raw.UDPRate)
@@ -183,10 +190,10 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		}
 	}
 
-	// 10. --cable-test-tdr implies --cable-test.
+	// 11. --cable-test-tdr implies --cable-test.
 	cableTest := raw.CableTest || raw.CableTestTDR
 
-	// 11. Output directory.
+	// 12. Output directory.
 	outputDir, err := validateOutputDir(raw.Output)
 	if err != nil {
 		return nil, err
@@ -215,6 +222,8 @@ func Resolve(raw RawRunFlags, explicitlySet map[string]bool) (*RunConfig, error)
 		CableTest:             cableTest,
 		CableTestTDR:          raw.CableTestTDR,
 		OutputDir:             outputDir,
+		Color:                 raw.Color,
+		Quiet:                 raw.Quiet,
 		Verbose:               raw.Verbose,
 		NonInteractive:        raw.NonInteractive,
 		NoSudo:                raw.NoSudo,

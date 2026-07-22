@@ -5,9 +5,9 @@ import (
 	"io"
 )
 
-// Progress renders test plan step announcements. Quiet mode (the default)
-// emits exactly one "[n/N] name" line per step; verbose mode additionally
-// announces the plan once before the first step.
+// Progress renders test plan step announcements. Non-verbose mode emits
+// exactly one "[n/N] name" line per step; verbose mode additionally announces
+// the plan once before the first step.
 type Progress struct {
 	w        io.Writer
 	verbose  bool
