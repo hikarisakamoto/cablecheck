@@ -1,0 +1,16 @@
+name: main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# No concurrency group on purpose: a group with cancel-in-progress:false still
+# keeps only ONE pending run, so rapid merges would drop intermediate commits'
+# gates. Post-merge must validate EVERY commit, so runs stay independent.
+
+jobs:
+  gate:
+    uses: ./.github/workflows/gate.yml
