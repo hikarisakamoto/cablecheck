@@ -34,7 +34,7 @@ Report privately. **Please don't open a public issue for a suspected vulnerabili
 - Preferred: GitHub private vulnerability reporting — the **Report a vulnerability**
   button under the repo's **Security** tab
   (github.com/hikarisakamoto/cablecheck → Security → Advisories).
-- Fallback: email **[TODO: contact email]**. <!-- TODO: add contact email before publishing -->
+- Fallback: email **hikarisakamoto@gmail.com**. 
 
 Include enough to reproduce:
 
