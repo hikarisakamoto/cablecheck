@@ -19,7 +19,7 @@ jobs:
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,9 +28,11 @@ jobs:
         with:
           go-version: '1.26.x'
           check-latest: false
-          cache: false
+          cache: true
+          cache-dependency-path: go.mod
       # The @version form runs out-of-module: it does NOT edit go.mod/go.sum.
       - name: govulncheck
+        timeout-minutes: 5
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
       - name: assert module graph untouched
         run: |
@@ -44,7 +46,7 @@ jobs:
     name: CodeQL
     if: github.event_name != 'pull_request' # post-merge + weekly only (keep PRs fast)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 12
     permissions:
       contents: read
       security-events: write
@@ -57,11 +59,13 @@ jobs:
         with:
           go-version: '1.26.x'
           check-latest: false
-          cache: false
+          cache: true
+          cache-dependency-path: go.mod
       - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: go
           # build-mode:none is not supported for Go — autobuild compiles this
           # stdlib-only module cleanly so the extractor sees a real build.
       - uses: github/codeql-action/autobuild@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        timeout-minutes: 8
       - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3

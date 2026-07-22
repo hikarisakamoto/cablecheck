@@ -12,7 +12,7 @@ jobs:
   check:
     name: make check
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -21,10 +21,15 @@ jobs:
         with:
           go-version: '1.26.x'
           check-latest: false
-          cache: false
+          # Build cache speeds up vet/test/-race/build on repeat runs. Safe:
+          # fork-PR caches can't poison the main/release scope, and the module
+          # cache is empty (zero deps) so only compiled output is reused.
+          cache: true
+          cache-dependency-path: go.mod
       # make check = fmt-check + vet + tidy-check + test + test-race + build.
       # test-race self-sets CGO_ENABLED=1; ubuntu-24.04 ships gcc, so -race links.
       # Do NOT set a job-level CGO_ENABLED: it would leak into build/dist and
       # break the static, dependency-free binary the project requires.
       - name: make check
+        timeout-minutes: 6
         run: make check
