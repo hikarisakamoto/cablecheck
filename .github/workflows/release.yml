@@ -28,7 +28,7 @@ jobs:
   # 1) Neutralize the untrusted input BEFORE any checkout, token, approval or build.
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 3
     permissions: {}
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -68,7 +68,7 @@ jobs:
   build:
     needs: [validate, gate]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -79,8 +79,9 @@ jobs:
         with:
           go-version: '1.26.x' # release reproducibility: consider pinning an exact patch
           check-latest: false
-          cache: false
+          cache: false # deterministic release build — no cache reuse for published binaries
       - name: Build release binaries
+        timeout-minutes: 6
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: make dist VERSION="$VERSION" DATE="$(git log -1 --format=%cI)"
@@ -98,7 +99,7 @@ jobs:
   publish:
     needs: [validate, build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 8
     environment: release # human-approval gate (required reviewers, main-only)
     permissions:
       contents: write # create tag + release
