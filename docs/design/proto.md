@@ -178,7 +178,7 @@ type StartConfirmation struct { // PC1 → PC2
     StartAt   time.Time `json:"startAt"`   // absolute, for the report only
     StartInMs int       `json:"startInMs"` // authoritative: countdown anchor = frame ARRIVAL + StartInMs (immune to clock skew)
     Mode      string    `json:"mode"`      // quick|standard|soak
-    Steps     []string  `json:"steps"`     // display names, drives "[1/8]" numbering on PC2
+    Steps     []string  `json:"steps"`     // display names, drives "[n/N]" numbering on PC2
 }
 
 type TestRequest struct { // PC1 → PC2
