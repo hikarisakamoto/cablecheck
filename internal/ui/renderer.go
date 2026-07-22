@@ -28,6 +28,9 @@ type Options struct {
 // Renderer serializes progress state and output for one test run.
 type Renderer struct {
 	mu sync.Mutex
+	// lifeMu guards the refresh goroutine lifecycle separately from rendered
+	// state so Stop can join without holding mu.
+	lifeMu sync.Mutex
 
 	w          io.Writer
 	clock      clock.Clock
@@ -43,7 +46,25 @@ type Renderer struct {
 	step     int
 	total    int
 	name     string
+	progress bool
+	percent  float64
+	sub      string
+	drawn    bool
+
+	lifeState rendererLifeState
+	ticker    clock.Ticker
+	stop      chan struct{}
+	done      chan struct{}
 }
+
+type rendererLifeState uint8
+
+const (
+	rendererIdle rendererLifeState = iota
+	rendererRunning
+	rendererStopping
+	rendererStopped
+)
 
 // New returns a progress renderer writing to w.
 func New(w io.Writer, opts Options) *Renderer {
@@ -97,6 +118,75 @@ func (r *Renderer) ColorEnabled() bool {
 	return r.color
 }
 
+// Start begins the clock-driven live refresh. Discrete renderers do not need
+// a ticker: they print only real step/progress events, avoiding output floods
+// in pipes, CI and verbose mode. Start is safe to call more than once.
+func (r *Renderer) Start() {
+	r.lifeMu.Lock()
+	defer r.lifeMu.Unlock()
+	if r.lifeState != rendererIdle {
+		return
+	}
+	if !r.live {
+		r.lifeState = rendererStopped
+		return
+	}
+	r.ticker = r.clock.NewTicker(time.Second)
+	r.stop = make(chan struct{})
+	r.done = make(chan struct{})
+	r.lifeState = rendererRunning
+	go r.refreshLoop(r.ticker, r.stop, r.done)
+}
+
+// Stop ends and joins the live refresh goroutine, then clears any unterminated
+// live frame. It is idempotent and may be called after any run exit path.
+func (r *Renderer) Stop() {
+	r.lifeMu.Lock()
+	switch r.lifeState {
+	case rendererIdle:
+		r.lifeState = rendererStopped
+		r.lifeMu.Unlock()
+		return
+	case rendererStopped:
+		r.lifeMu.Unlock()
+		return
+	case rendererRunning:
+		r.lifeState = rendererStopping
+		r.ticker.Stop()
+		close(r.stop)
+	}
+	done := r.done
+	r.lifeMu.Unlock()
+
+	<-done
+	r.finishLiveLine()
+
+	r.lifeMu.Lock()
+	r.lifeState = rendererStopped
+	r.lifeMu.Unlock()
+}
+
+func (r *Renderer) refreshLoop(ticker clock.Ticker, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	for {
+		select {
+		case <-ticker.C():
+			r.refresh()
+		case <-stop:
+			return
+		}
+	}
+}
+
+func (r *Renderer) refresh() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.validStep() {
+		return
+	}
+	r.render(r.clock.Now())
+}
+
 // Step announces a test-plan step.
 func (r *Renderer) Step(step, total int, name string) {
 	r.mu.Lock()
@@ -112,11 +202,8 @@ func (r *Renderer) Step(step, total int, name string) {
 		fmt.Fprintf(r.w, "starting test plan: %d steps\n", total)
 	}
 	r.step, r.total, r.name = step, total, name
-	complete := overallFraction(step, total, 0)
-	if r.soakBudget > 0 {
-		complete = clampFraction(now.Sub(r.start).Seconds() / r.soakBudget.Seconds())
-	}
-	r.writeLine(renderBarFraction(step, total, r.width, name, "", r.timing(now, complete), complete))
+	r.progress, r.percent, r.sub = false, -1, ""
+	r.render(now)
 }
 
 // Progress renders an in-flight operation update.
@@ -135,10 +222,6 @@ func (r *Renderer) Progress(p protocol.TestProgress) {
 			percent = 100
 		}
 	}
-	complete := overallFraction(r.step, r.total, percent)
-	if r.soakBudget > 0 {
-		complete = clampFraction(now.Sub(r.start).Seconds() / r.soakBudget.Seconds())
-	}
 	text := p.Text
 	if text == "" {
 		text = p.Stage
@@ -149,7 +232,29 @@ func (r *Renderer) Progress(p protocol.TestProgress) {
 		}
 		text += metrics
 	}
-	r.writeLine(renderBarFraction(r.step, r.total, r.width, r.name, text, r.timing(now, complete), complete))
+	r.progress, r.percent, r.sub = true, percent, text
+	if !r.validStep() {
+		return
+	}
+	r.render(now)
+}
+
+func (r *Renderer) validStep() bool {
+	return r.step >= 1 && r.total >= 1 && r.step <= r.total
+}
+
+func (r *Renderer) render(now time.Time) {
+	percent := float64(0)
+	sub := ""
+	if r.progress {
+		percent = r.percent
+		sub = r.sub
+	}
+	complete := overallFraction(r.step, r.total, percent)
+	if r.soakBudget > 0 {
+		complete = clampFraction(now.Sub(r.start).Seconds() / r.soakBudget.Seconds())
+	}
+	r.writeLine(renderBarFraction(r.step, r.total, r.width, r.name, sub, r.timing(now, complete), complete))
 }
 
 func (r *Renderer) timing(now time.Time, complete float64) string {
@@ -184,10 +289,21 @@ func (r *Renderer) timing(now time.Time, complete float64) string {
 func (r *Renderer) writeLine(line string) {
 	if r.live {
 		fmt.Fprint(r.w, "\r\x1b[2K", colorize(line, "\x1b[36m", r.color))
+		r.drawn = true
 		return
 	}
 	line = strings.TrimRight(line, " ")
 	fmt.Fprintln(r.w, colorize(line, "\x1b[36m", r.color))
+}
+
+func (r *Renderer) finishLiveLine() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.live || !r.drawn {
+		return
+	}
+	fmt.Fprint(r.w, "\r\x1b[2K\n")
+	r.drawn = false
 }
 
 func overallFraction(step, total int, percent float64) float64 {

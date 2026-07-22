@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -12,7 +13,35 @@ import (
 	"cablecheck/internal/clock/clocktest"
 	"cablecheck/internal/model"
 	"cablecheck/internal/protocol"
+	"cablecheck/internal/testutil"
 )
+
+type notifyingBuffer struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	writes chan struct{}
+}
+
+func newNotifyingBuffer() *notifyingBuffer {
+	return &notifyingBuffer{writes: make(chan struct{}, 16)}
+}
+
+func (b *notifyingBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	n, err := b.buf.Write(p)
+	b.mu.Unlock()
+	select {
+	case b.writes <- struct{}{}:
+	default:
+	}
+	return n, err
+}
+
+func (b *notifyingBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func TestRendererElapsedETAAndMetrics(t *testing.T) {
 	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
@@ -185,6 +214,114 @@ func TestRendererConcurrentCalls(t *testing.T) {
 	wg.Wait()
 	if out.Len() == 0 {
 		t.Fatal("concurrent renderer produced no output")
+	}
+}
+
+func TestRendererClockDrivenLiveRefresh(t *testing.T) {
+	defer testutil.LeakCheck(t)
+	clk := clocktest.New(time.Unix(0, 0))
+	out := newNotifyingBuffer()
+	r := newRenderer(out, Options{
+		Color: ColorNever,
+		Clock: clk,
+		Env: func(key string) string {
+			if key == "TERM" {
+				return "xterm"
+			}
+			return ""
+		},
+		Width: 120,
+	}, true)
+	r.Start()
+	r.Step(1, 2, "throughput")
+	<-out.writes // initial Step write
+	r.Progress(protocol.TestProgress{Stage: "iperf3_client_run", Percent: -1, Text: "running iperf3_client_run"})
+	<-out.writes // initial Progress write
+
+	clk.BlockUntilWaiters(1)
+	clk.Advance(2 * time.Second)
+	testutil.WaitFor(t, out.writes, "live elapsed refresh")
+	if got := out.String(); !strings.Contains(got, "elapsed 2s") || !strings.Contains(got, "running iperf3_client_run") {
+		t.Fatalf("clock refresh did not advance elapsed time: %q", got)
+	}
+
+	r.Stop()
+	afterStop := out.String()
+	clk.Advance(5 * time.Second)
+	if got := out.String(); got != afterStop {
+		t.Fatalf("stopped renderer wrote after a later clock advance:\nbefore %q\nafter  %q", afterStop, got)
+	}
+	if !strings.HasSuffix(afterStop, "\r\x1b[2K\n") {
+		t.Fatalf("Stop did not clear and terminate the live line: %q", afterStop)
+	}
+	r.Stop() // idempotent
+}
+
+func TestRendererDiscreteModesDoNotStartTicker(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		terminal bool
+		verbose  bool
+		term     string
+	}{
+		{name: "pipe", terminal: false, term: "xterm"},
+		{name: "verbose", terminal: true, verbose: true, term: "xterm"},
+		{name: "dumb", terminal: true, term: "dumb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := clocktest.New(time.Unix(0, 0))
+			r := newRenderer(io.Discard, Options{
+				Clock: clk, Verbose: tc.verbose,
+				Env: func(string) string { return tc.term },
+			}, tc.terminal)
+			r.Start()
+			r.lifeMu.Lock()
+			state, ticker := r.lifeState, r.ticker
+			r.lifeMu.Unlock()
+			if state != rendererStopped || ticker != nil {
+				t.Fatalf("discrete renderer lifecycle = (%v, %v), want stopped with no ticker", state, ticker)
+			}
+			r.Stop()
+		})
+	}
+}
+
+func TestRendererProgressBeforeFirstStepIsSuppressed(t *testing.T) {
+	clk := clocktest.New(time.Unix(0, 0))
+	var out bytes.Buffer
+	r := newRenderer(&out, Options{Color: ColorNever, Clock: clk, Width: 120, SoakBudget: time.Minute}, false)
+	r.Progress(protocol.TestProgress{Stage: "setup", Percent: -1})
+	if got := out.String(); got != "" {
+		t.Fatalf("pre-step progress rendered invalid step metadata: %q", got)
+	}
+	clk.Advance(5 * time.Second)
+	r.Step(1, 5, "cycle 1: counters")
+	got := out.String()
+	if strings.Contains(got, "[0/0]") || !strings.Contains(got, "[1/5] cycle 1: counters") {
+		t.Fatalf("first valid soak step output = %q", got)
+	}
+	if !strings.Contains(got, "elapsed 5s ETA 55s") {
+		t.Fatalf("pre-step progress did not preserve soak elapsed origin: %q", got)
+	}
+}
+
+func TestRendererPreservesLegacyStepSubstrings(t *testing.T) {
+	steps := []string{"link settings", "initial counter snapshot", "TCP throughput PC1 → PC2"}
+	for _, verbose := range []bool{false, true} {
+		var out bytes.Buffer
+		r := newRenderer(&out, Options{Color: ColorNever, Width: 120, Verbose: verbose}, false)
+		for i, name := range steps {
+			r.Step(i+1, len(steps), name)
+		}
+		for i, name := range steps {
+			want := fmt.Sprintf("[%d/%d] %s", i+1, len(steps), name)
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("verbose=%v output missing %q:\n%s", verbose, want, out.String())
+			}
+		}
+		if verbose && !strings.Contains(out.String(), "starting test plan: 3 steps\n") {
+			t.Errorf("verbose output missing plan preamble:\n%s", out.String())
+		}
 	}
 }
 

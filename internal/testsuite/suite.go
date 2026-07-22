@@ -11,6 +11,7 @@ import (
 	"cablecheck/internal/model"
 	"cablecheck/internal/parser"
 	"cablecheck/internal/peer"
+	"cablecheck/internal/protocol"
 )
 
 // SessionResults keys for per-side data.
@@ -145,6 +146,9 @@ type QuickPlan struct {
 	Results *SessionResults
 	// OnStep, when set, announces each step as (step, total, name).
 	OnStep func(step, total int, name string)
+	// OnProgress, when set, observes progress reported by remote operations.
+	// It runs on the peer session event-loop goroutine and must remain fast.
+	OnProgress func(protocol.TestProgress)
 }
 
 // Run executes the quick plan; it satisfies peer.PlanFunc. On error the
@@ -197,7 +201,7 @@ func (q *QuickPlan) callRemote(ctx context.Context, rc peer.RemoteCaller, op str
 // with the planned test whose measurement that RPC was serving.
 func (q *QuickPlan) callRemoteForTest(ctx context.Context, rc peer.RemoteCaller, op string,
 	params any, timeout time.Duration, testName string) (any, error) {
-	res, err := rc.Call(ctx, op, params, timeout, nil)
+	res, err := rc.Call(ctx, op, params, timeout, q.OnProgress)
 	if err != nil {
 		return nil, fmt.Errorf("remote %s: %w", op, err)
 	}

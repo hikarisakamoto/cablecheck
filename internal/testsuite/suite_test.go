@@ -75,6 +75,9 @@ func (f *fakeCaller) Call(ctx context.Context, op string, params any, timeout ti
 	if err := f.sessionCtx.Err(); err != nil {
 		return nil, err
 	}
+	if onProgress != nil {
+		onProgress(protocol.TestProgress{Stage: op, Percent: -1, Text: "running " + op})
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ops = append(f.ops, op)
@@ -105,6 +108,33 @@ func (f *fakeCaller) Call(ctx context.Context, op string, params any, timeout ti
 		}
 	}
 	return &protocol.TestResult{Status: status, Result: body, Error: errText}, nil
+}
+
+func TestPlanProgressObserverPropagation(t *testing.T) {
+	var got []protocol.TestProgress
+	observe := func(p protocol.TestProgress) { got = append(got, p) }
+
+	rc := newFakeCaller(t)
+	rc.reply(OpLinkSettings, &LinkSettingsResult{})
+	quick := &QuickPlan{Results: &SessionResults{}, OnProgress: observe}
+	if _, err := quick.callRemote(context.Background(), rc, OpLinkSettings, nil, time.Second); err != nil {
+		t.Fatalf("quick callRemote: %v", err)
+	}
+
+	standard := (&StandardPlan{OnProgress: observe}).engine()
+	standard.OnProgress(protocol.TestProgress{Stage: "standard"})
+	soak := (&SoakPlan{OnProgress: observe}).engine(&SessionResults{})
+	soak.OnProgress(protocol.TestProgress{Stage: "soak"})
+
+	want := []string{OpLinkSettings, "standard", "soak"}
+	if len(got) != len(want) {
+		t.Fatalf("progress updates = %+v, want stages %q", got, want)
+	}
+	for i, stage := range want {
+		if got[i].Stage != stage {
+			t.Errorf("progress update %d stage = %q, want %q", i, got[i].Stage, stage)
+		}
+	}
 }
 
 func (f *fakeCaller) Warn(code, text string) {}
