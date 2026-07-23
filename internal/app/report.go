@@ -33,6 +33,7 @@ type verdict struct {
 	res       evaluate.Result
 	summary   string
 	code      ExitCode
+	report    *model.Report
 	// finishedAt is captured on the first render so every later re-render
 	// (normally the PrepareComplete enrichment) produces byte-identical report
 	// timestamps: PC2's transferred copy must SHA-256-equal PC1's final copy,
@@ -57,10 +58,10 @@ func (v *verdict) isFinalized() bool {
 }
 
 // store records the evaluated verdict and the render's finish timestamp.
-func (v *verdict) store(res evaluate.Result, summary string, code ExitCode, finishedAt time.Time) {
+func (v *verdict) store(rep *model.Report, res evaluate.Result, summary string, code ExitCode, finishedAt time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.set, v.res, v.summary, v.code, v.finishedAt = true, res, summary, code, finishedAt
+	v.set, v.report, v.res, v.summary, v.code, v.finishedAt = true, rep, res, summary, code, finishedAt
 }
 
 // get returns the stored verdict and whether one was stored.
@@ -75,6 +76,14 @@ func (v *verdict) finishTime() (time.Time, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.finishedAt, v.set
+}
+
+// renderedReport returns the latest report whose complete output set was
+// successfully written. Reports are immutable after store publishes them.
+func (v *verdict) renderedReport() (*model.Report, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.report, v.set && v.report != nil
 }
 
 // complete builds the complete-frame payload; zero before a verdict exists.
@@ -99,7 +108,7 @@ func (v *verdict) complete() protocol.Complete {
 // are wrapped in errReportWrite (exit 7).
 func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite.SessionResults,
 	v *verdict, startedAt time.Time, failure *model.FailureDetails, outcome *peer.Outcome,
-	log *slog.Logger) error {
+	log *slog.Logger) (*model.Report, error) {
 	if h := a.deps.hooks.onFinalize; h != nil {
 		h(failure != nil, outcome != nil)
 	}
@@ -120,15 +129,15 @@ func (a *App) finalize(dir, rawDir string, pf *preflightInfo, results *testsuite
 	}
 	rep.RawFiles = indexRawFiles(dir, rawDir)
 	if err := writeReportFiles(dir, rep); err != nil {
-		return fmt.Errorf("%w: %w", errReportWrite, err)
+		return nil, fmt.Errorf("%w: %w", errReportWrite, err)
 	}
 	summary := fmt.Sprintf("cable health: %s", res.Class)
 	if len(res.Findings) > 0 {
 		summary += " — " + res.Findings[0].Text
 	}
-	v.store(res, summary, ExitCodeFor(res.Class), finishedAt)
+	v.store(rep, res, summary, ExitCodeFor(res.Class), finishedAt)
 	log.Info("report rendered", "dir", dir, "classification", string(res.Class))
-	return nil
+	return rep, nil
 }
 
 // assembleReport builds the pre-evaluation report from preflight data, the

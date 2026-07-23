@@ -24,12 +24,15 @@ func cmdRun(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	progress.Start()
 	defer progress.Stop()
 	a, err := app.New(cfg, app.Deps{
-		Stdin:      stdin,
-		Stdout:     stdout,
-		Stderr:     stderr,
-		Build:      build,
-		OnStep:     progress.Step,
-		OnProgress: progress.Progress,
+		Stdin:           stdin,
+		Stdout:          stdout,
+		Stderr:          stderr,
+		Build:           build,
+		OnStep:          progress.Step,
+		OnProgress:      progress.Progress,
+		OnSummary:       progress.Summary,
+		OnTokenBanner:   progress.TokenBanner,
+		OnWorkerSummary: progress.WorkerSummary,
 		// Stop live rendering when the session ends, before the app writes its
 		// end-of-run summary; the deferred Stop above is the idempotent backstop
 		// for the early-return and interrupt paths.

@@ -502,6 +502,7 @@ Self-inflicted monitoring events carry `selfInflicted:true`, and their carrier c
 ## Security model
 
 - The protocol is for a trusted direct cable or trusted isolated LAN. It provides no TLS, encryption, forward secrecy, or protection from an on-path observer.
+- The supported participants are two known computers. The token prevents accidental peer mismatch; it is not intended to establish trust between unknown machines.
 - The token is plaintext on the wire. To compare, both strings are SHA-256 hashed and the fixed-size digests are compared with `subtle.ConstantTimeCompare`, which avoids content- and length-dependent timing.
 - Tokens and raw hello payloads are never logged, and no report model field can contain the token.
 - PC1 binds only the configured local IP and accepts only the configured peer source IP.
@@ -510,3 +511,7 @@ Self-inflicted monitoring events carry `selfInflicted:true`, and their carrier c
 - Unknown JSON fields and unknown message types are tolerated for forward compatibility, but they don't grant new operations.
 
 Authentication isn't confidentiality. Anyone who can observe the trusted link can read the token and results, so don't expose the control port on an untrusted network.
+
+Within that trust model, tested correctness, usability, compatibility, and maintainability take
+priority over optional hostile-network hardening. The bounded-frame, token non-persistence,
+fixed-operation, and verified-transfer rules remain correctness and local-safety invariants.

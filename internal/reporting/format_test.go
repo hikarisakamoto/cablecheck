@@ -66,6 +66,21 @@ func TestFormatPercent(t *testing.T) {
 	}
 }
 
+func TestFormatSpeedMbps(t *testing.T) {
+	for _, test := range []struct {
+		value int
+		want  string
+	}{
+		{value: -1, want: "unknown"},
+		{value: 0, want: "unknown"},
+		{value: 1000, want: "1000 Mb/s"},
+	} {
+		if got := FormatSpeedMbps(test.value); got != test.want {
+			t.Errorf("FormatSpeedMbps(%d) = %q, want %q", test.value, got, test.want)
+		}
+	}
+}
+
 func TestHealthFormatting(t *testing.T) {
 	tests := []struct {
 		class   model.HealthClass

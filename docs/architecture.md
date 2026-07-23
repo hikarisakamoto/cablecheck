@@ -22,7 +22,7 @@ The module is `cablecheck`. It targets Go 1.26, uses only the standard library, 
 - `internal/reporting` — report directory/raw-artifact management, JSON/Markdown/text rendering, and verified report-file transfer; imports only `internal/model` plus the standard library.
 - `internal/app` — top-level orchestration: preflight, suite construction, monitoring, peer session, report assembly/evaluation/rendering, transfer callbacks, doctor/report commands, and exit mapping.
 - `internal/cli` — subcommand dispatch, Go `flag` parsing, help output, progress-renderer wiring, and final error-to-exit-code mapping.
-- `internal/ui` — terminal progress rendering: color-mode decision, the clock-driven live-refresh loop, the step/percent bar, and live-vs-discrete output selection.
+- `internal/ui` — serialized terminal presentation: color-mode decision, the clock-driven progress renderer, boxed report summary and token callout, compact worker verdict, and plain non-TTY fallbacks.
 - `internal/testutil` — shared hermetic test helpers for scripted stdin, dribbled reads, deadline-aware waits, and goroutine leak checks.
 - `cmd/cablecheck` — process entry point, signal-aware context, build metadata, and `os.Exit(cli.Run(...))`.
 
@@ -75,6 +75,23 @@ Any nonterminal state can end in aborted or failed.
 On PC1, entering `testing` starts the plan driver and the application-owned sysfs monitor. The plan runs local operations directly and remote operations through `RemoteCaller.Call`. On success, PC1 freezes monitoring data, assembles and evaluates the report, optionally transfers the rendered files, exchanges `complete`, and maps the classification to an exit code. If the run ends abnormally, completed measurements are kept in a partial report when possible.
 
 PC2 runs the same preflight and peer machinery but supplies an `OpHandler` instead of a plan. It executes one operation at a time until report/complete or abort. On every exit it writes a local `diagnostic.json` covering its role, test ID, mode, IPs, final state, any error, the reason and detail of a peer abort, PC1's verdict, and an index of its raw files. The diagnostic isn't a `model.Report`, since PC2 runs no evaluation, and it's never transferred. It exists to make a failed run debuggable from PC2 alone.
+
+The CLI injects `internal/ui` methods through app presentation callbacks. PC1's full summary
+receives the latest successfully written in-memory report; it never re-reads `report.json`.
+After `peer.Run` returns, `OnRunEnd` first stops and joins live rendering, then the app invokes
+the summary callback exactly once. `--quiet` or a nil callback keeps the compact plain app
+fallback. PC2 receives only `protocol.Complete`, so its separate callback colors the compact
+verdict without fabricating a `model.Report`.
+
+## Deployment trust boundary
+
+CableCheck supports two known computers on a trusted direct cable or trusted
+internal/isolated network. The token prevents accidental peer mismatch; the protocol does
+not provide confidentiality or hostile-network authentication. Engineering favors tested
+correctness, operator usability, compatibility, and readable maintenance over optional
+hardening outside that supported environment. Core local safety remains mandatory: bounded
+input allocation, token non-persistence, verified transfers, and ownership-checked process
+termination.
 
 ## The session event loop
 
