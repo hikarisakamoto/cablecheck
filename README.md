@@ -114,7 +114,7 @@ Warnings don't make `doctor` fail. Any failed check makes it exit 4.
 
 ## Run a test
 
-Start PC1 first. It binds only `192.168.50.1`, generates a short 6-digit session token when `--token` is omitted, and prints both the token and a ready-to-copy PC2 command:
+Start PC1 first. It binds only `192.168.50.1`, generates a short 6-digit session token when `--token` is omitted, and prints both the token and a ready-to-copy PC2 command in a boxed callout. The command includes the effective control and iperf ports, so it also works with custom ports:
 
 ```bash
 # PC1: coordinator
@@ -145,11 +145,17 @@ start
 
 Once both sides have sent `ready`, PC1 sends a synchronized start confirmation with a 3.5-second lead. Each side anchors the countdown to receipt of that message and prints `3… 2… 1… GO`. The interactive commands are `start`, `status`, and `quit`. `--non-interactive` sends readiness automatically.
 
+During testing, a terminal shows live progress; redirected output uses discrete plain lines.
+At completion, PC1 prints a boxed summary with the health classification, headline link and
+test measurements, important findings, recommendations, and report directory. Use `--quiet`
+to restore the compact one-line verdict and report path. Color is automatic for terminals,
+can be forced with `--color always`, and can be disabled with `--color never` or `NO_COLOR`.
+
 ### Session tokens
 
 The token authenticates the two CableCheck processes for one session. When `--token` is omitted, PC1 generates a random 6-digit code (from a cryptographic source) that's easy to read aloud and retype on PC2. PC2 always requires `--token`. A token you supply yourself must contain 6–128 printable ASCII characters with no whitespace.
 
-The 6-digit code is a session guard for a trusted direct link. It prevents an accidental cross-connection to the wrong process, not a determined attacker. The token is sent in plaintext inside the opening control message, so it isn't encryption and doesn't make an untrusted network safe. CableCheck never writes the token to reports or structured logs.
+The 6-digit code is a session guard for two known computers on a trusted direct cable or trusted internal/isolated network. It prevents an accidental cross-connection to the wrong process, not a determined attacker. The token is sent in plaintext inside the opening control message, so it isn't encryption and doesn't make an untrusted network safe. CableCheck never writes the token to reports or structured logs. Do not expose CableCheck's control port to the Internet or an untrusted LAN.
 
 ## Test modes
 
@@ -197,12 +203,14 @@ Flags must follow the subcommand. Boolean flags take no separate value; use `--c
 | `--monitor-interval D` | `1s`; range 200 ms–30 s. |
 | `--cable-test` | `false`; append `ethtool --cable-test`. |
 | `--cable-test-tdr` | `false`; request TDR and imply `--cable-test`. |
+| `--quiet` | `false`; use the compact end-of-run verdict and report path instead of the boxed summary. |
 | `--verbose` | `false`; show verbose progress/debug logging. |
 | `--non-interactive` | `false`; send readiness without waiting for `start`. |
 | `--no-sudo` | `false`; never probe or use sudo. |
 | `--no-report-transfer` | `false`; disable the PC1-to-PC2 report copy. |
 | `--allow-virtual-interface` | `false`; permit loopback/virtual interfaces for demos, yielding `INCONCLUSIVE`. |
 | `--output dir` | `.`; existing parent directory for the timestamped report directory; `..` path elements are rejected. |
+| `--color auto\|always\|never` | `auto`; color terminals automatically, force ANSI, or disable ANSI. `NO_COLOR` suppresses automatic color. |
 
 TCP and UDP durations accept 5 seconds through 10 minutes. Ports must be unprivileged; the control port must not collide with the iperf ports.
 

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"cablecheck/internal/clock"
-	"cablecheck/internal/model"
 	"cablecheck/internal/protocol"
 )
 
@@ -339,9 +338,3 @@ func formatMetrics(metrics map[string]float64) string {
 func formatDuration(value time.Duration) string {
 	return value.Round(time.Second).String()
 }
-
-// Summary is reserved for the end-of-run summary implementation.
-func (r *Renderer) Summary(_ *model.Report, _ string) {}
-
-// TokenBanner is reserved for the coordinator token banner implementation.
-func (r *Renderer) TokenBanner(_, _ string, _ bool) {}

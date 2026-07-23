@@ -40,6 +40,13 @@ func FormatPercent(value float64) string {
 	return fmtPct(value)
 }
 
+// FormatSpeedMbps renders a negotiated NIC speed, or "unknown" when absent.
+// It is the exported counterpart of the formatter used by summary.txt so
+// terminal and persisted summaries cannot drift.
+func FormatSpeedMbps(mbps int) string {
+	return fmtSpeedMbps(mbps)
+}
+
 // HealthSlug returns a CSS-safe health-class token.
 func HealthSlug(class model.HealthClass) string {
 	switch class {

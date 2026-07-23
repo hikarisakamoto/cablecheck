@@ -30,12 +30,20 @@ func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
 		if !v.isFinalized() {
 			// PrepareComplete normally owns this final rendering. Retrying here
 			// preserves the previous fallback when that callback could not write.
-			if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, outcome, log); err != nil {
+			if _, err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, outcome, log); err != nil {
 				log.Warn("re-rendering the final report failed; the pre-complete rendering stands", "err", err)
 			}
 		}
 		_, summary, code, _ := v.get()
-		fmt.Fprintf(a.deps.Stdout, "\n%s\nReport: %s\n", summary, dir)
+		rep, rendered := v.renderedReport()
+		if !rendered {
+			return ExitInternal, errors.New("app: session completed without a rendered report")
+		}
+		if !a.cfg.Quiet && a.deps.OnSummary != nil {
+			a.deps.OnSummary(rep, dir)
+		} else {
+			fmt.Fprintf(a.deps.Stdout, "\n%s\nReport: %s\n", summary, dir)
+		}
 		return code, nil
 	}
 
@@ -44,10 +52,17 @@ func (a *App) finishCoordinator(dir, rawDir string, pf *preflightInfo,
 		Stage: failureStage(outcome),
 		Error: runErr.Error(),
 	}
-	if err := a.finalize(dir, rawDir, pf, results, v, startedAt, failure, outcome, log); err != nil {
+	rep, err := a.finalize(dir, rawDir, pf, results, v, startedAt, failure, outcome, log)
+	if err != nil {
 		log.Warn("writing the partial report failed", "err", err)
+	} else if !a.cfg.Quiet && a.deps.OnSummary != nil {
+		a.deps.OnSummary(rep, dir)
 	} else {
-		fmt.Fprintf(a.deps.Stdout, "\nrun did not complete (%v)\nPartial report: %s\n", runErr, dir)
+		// Compact fallback (quiet or no summary hook): keep the run-failure
+		// context but still carry the same cable health: / Report: substrings
+		// the success line emits, so both compact fallbacks read consistently.
+		_, summary, _, _ := v.get()
+		fmt.Fprintf(a.deps.Stdout, "\n%s\nrun did not complete (%v)\nReport: %s\n", summary, runErr, dir)
 	}
 	return code, runErr
 }
@@ -85,6 +100,10 @@ func (a *App) finishWorker(dir, rawDir string, outcome *peer.Outcome, runErr err
 	if comp == nil {
 		return ExitInternal, errors.New("app: session completed but PC1 sent no verdict")
 	}
+	code := ExitCode(comp.ExitCode)
+	if code < ExitOK || code > ExitInternal {
+		return ExitInternal, fmt.Errorf("app: PC1 reported an out-of-range exit code %d", comp.ExitCode)
+	}
 	verdictLine := fmt.Sprintf("verdict from PC1: %s", comp.Classification)
 	if comp.Summary != "" {
 		verdictLine = fmt.Sprintf("verdict from PC1: %s", comp.Summary)
@@ -94,14 +113,16 @@ func (a *App) finishWorker(dir, rawDir string, outcome *peer.Outcome, runErr err
 		a.writeWorkerSummary(dir, outcome, verdictLine, log)
 	}
 	summaryPath := filepath.Join(dir, "summary.txt")
-	if transferred {
+	if a.deps.OnWorkerSummary != nil {
+		path := summaryPath
+		if transferred {
+			path = dir
+		}
+		a.deps.OnWorkerSummary(model.HealthClass(comp.Classification), verdictLine, path, transferred)
+	} else if transferred {
 		fmt.Fprintf(a.deps.Stdout, "\n%s\nReport received from PC1: %s\n", verdictLine, dir)
 	} else {
 		fmt.Fprintf(a.deps.Stdout, "\n%s\nSummary: %s\n", verdictLine, summaryPath)
-	}
-	code := ExitCode(comp.ExitCode)
-	if code < ExitOK || code > ExitInternal {
-		return ExitInternal, fmt.Errorf("app: PC1 reported an out-of-range exit code %d", comp.ExitCode)
 	}
 	return code, nil
 }

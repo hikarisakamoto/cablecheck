@@ -28,6 +28,27 @@ rule-based verdict plus JSON / Markdown / text reports. Linux `amd64` and `arm64
 
 ---
 
+## Product trust model and decision priorities
+
+CableCheck is supported only between **two known computers on a trusted direct cable or
+trusted internal/isolated network**. It is not an Internet-facing service and does not try to
+defend the control protocol from a hostile network.
+
+When engineering goals conflict, prioritize them in this order:
+
+1. Observable correctness and the strongest practical automated test evidence.
+2. Operator usability and clear failure behavior.
+3. Compatibility with supported Linux systems, tools, terminals, and saved reports.
+4. Maintainable, readable code with the smallest justified abstraction surface.
+5. Optional security hardening outside the supported trusted-network threat model.
+
+Do not add hostile-network complexity when it makes the supported use case harder to use,
+less compatible, or less maintainable. This tradeoff does **not** relax the core safety
+invariants below: tokens stay out of logs/reports/errors, frames and transfers stay bounded,
+and process termination stays ownership-checked and process-group scoped.
+
+---
+
 ## Commands
 
 The `Makefile` is the source of truth for *what* runs; GitHub Actions in `.github/workflows/`
@@ -79,6 +100,7 @@ rules. `app` is the composition root.
 | `internal/model` | Pure domain types: `Report`, results, `Bitrate`/`Duration` value objects, `HealthClass`. Imports stdlib only. |
 | `internal/clock` | Injectable wall clock; `FakeClock` for tests. |
 | `internal/logging` | `slog` multi-handler (human text → stderr, JSON debug → report dir) with token/payload redaction. |
+| `internal/ui` | Serialized terminal progress, boxed summaries/token callouts, color decisions, and plain non-TTY fallbacks. |
 | `internal/testutil`, `internal/runner/runnertest` | Hermetic test infrastructure (leak checks, `FakeRunner`, scripted stdin, dribble reader). |
 | `testdata/` | Fixtures (`ip/ethtool/ping/iperf`), `golden/` (byte-exact report output), `stubtools/` (demo-only shell stubs — **tests never use these**). |
 | `docs/` | `architecture.md`, `protocol.md`, `health-rules.md`, `report-schema.md`. |
