@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/netip"
@@ -51,7 +52,7 @@ func TestFinishCoordinatorRefreshesVerdictAfterPeerCapabilities(t *testing.T) {
 
 	// First pass: what the plan wrapper can render before the session outcome
 	// exposes the worker capabilities.
-	if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log); err != nil {
+	if _, err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log); err != nil {
 		t.Fatalf("first finalize: %v", err)
 	}
 	exchanged := v.complete()
@@ -131,7 +132,7 @@ func TestFinishCoordinatorReevaluatesAfterPeerCapabilities(t *testing.T) {
 	}
 	v := &verdict{}
 	startedAt := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
-	if err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log); err != nil {
+	if _, err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log); err != nil {
 		t.Fatalf("provisional finalize: %v", err)
 	}
 	if provisional := v.complete(); provisional.Classification != string(model.HealthExcellent) {
@@ -161,6 +162,191 @@ func TestFinishCoordinatorReevaluatesAfterPeerCapabilities(t *testing.T) {
 	}
 	if !slices.Contains(findingRuleIDs(rep.Findings), "HOST-02") {
 		t.Errorf("findings = %v, want HOST-02", findingRuleIDs(rep.Findings))
+	}
+}
+
+func TestFinishCoordinatorQuietUsesCompactFallback(t *testing.T) {
+	var out bytes.Buffer
+	var summaryCalls int
+	cfg := &config.RunConfig{
+		Role: config.RolePC1, LocalIP: netip.MustParseAddr("127.0.0.1"),
+		PeerIP: netip.MustParseAddr("127.0.0.2"), Mode: config.ModeQuick,
+		Token: "testtoken1234", Quiet: true,
+	}
+	a, err := New(cfg, Deps{
+		Stdout: &out, StateDir: t.TempDir(),
+		OnSummary: func(*model.Report, string) { summaryCalls++ },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	dir := t.TempDir()
+	rawDir := filepath.Join(dir, "raw")
+	if err := os.MkdirAll(rawDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pf := &preflightInfo{}
+	pf.Iface.Name = "eth0"
+	results := &testsuite.SessionResults{}
+	v := &verdict{}
+	startedAt := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	if _, err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log); err != nil {
+		t.Fatalf("provisional finalize: %v", err)
+	}
+
+	if _, err := a.finishCoordinator(dir, rawDir, pf, results, v, startedAt, &peer.Outcome{}, nil, log); err != nil {
+		t.Fatalf("finishCoordinator: %v", err)
+	}
+	if summaryCalls != 0 {
+		t.Errorf("OnSummary called %d times in quiet mode", summaryCalls)
+	}
+	for _, want := range []string{"cable health:", "Report: " + dir} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("quiet output missing %q: %q", want, out.String())
+		}
+	}
+}
+
+func TestFinishCoordinatorPartialUsesSummaryHook(t *testing.T) {
+	var out bytes.Buffer
+	var presented *model.Report
+	var presentedDir string
+	cfg := &config.RunConfig{
+		Role: config.RolePC1, LocalIP: netip.MustParseAddr("127.0.0.1"),
+		PeerIP: netip.MustParseAddr("127.0.0.2"), Mode: config.ModeQuick, Token: "testtoken1234",
+	}
+	a, err := New(cfg, Deps{
+		Stdout: &out, StateDir: t.TempDir(),
+		OnSummary: func(rep *model.Report, dir string) {
+			presented, presentedDir = rep, dir
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	dir := t.TempDir()
+	rawDir := filepath.Join(dir, "raw")
+	if err := os.MkdirAll(rawDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pf := &preflightInfo{}
+	pf.Iface.Name = "eth0"
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	runErr := errors.New("peer disconnected")
+
+	_, gotErr := a.finishCoordinator(dir, rawDir, pf, &testsuite.SessionResults{}, &verdict{},
+		time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC), &peer.Outcome{FinalState: peer.StateTesting}, runErr, log)
+	if !errors.Is(gotErr, runErr) {
+		t.Fatalf("finishCoordinator error = %v, want %v", gotErr, runErr)
+	}
+	if presented == nil || !presented.Partial || presented.Failure == nil {
+		t.Fatalf("presented report = %+v, want partial report with failure", presented)
+	}
+	if presentedDir != dir {
+		t.Errorf("presented dir = %q, want %q", presentedDir, dir)
+	}
+	if out.Len() != 0 {
+		t.Errorf("summary hook did not own partial output: %q", out.String())
+	}
+}
+
+func TestFinishCoordinatorPartialQuietUsesCompactFallback(t *testing.T) {
+	var out bytes.Buffer
+	var summaryCalls int
+	cfg := &config.RunConfig{
+		Role: config.RolePC1, LocalIP: netip.MustParseAddr("127.0.0.1"),
+		PeerIP: netip.MustParseAddr("127.0.0.2"), Mode: config.ModeQuick,
+		Token: "testtoken1234", Quiet: true,
+	}
+	a, err := New(cfg, Deps{
+		Stdout: &out, StateDir: t.TempDir(),
+		OnSummary: func(*model.Report, string) { summaryCalls++ },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	dir := t.TempDir()
+	rawDir := filepath.Join(dir, "raw")
+	if err := os.MkdirAll(rawDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pf := &preflightInfo{}
+	pf.Iface.Name = "eth0"
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	runErr := errors.New("peer disconnected")
+
+	if _, gotErr := a.finishCoordinator(dir, rawDir, pf, &testsuite.SessionResults{}, &verdict{},
+		time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC), &peer.Outcome{FinalState: peer.StateTesting}, runErr, log); !errors.Is(gotErr, runErr) {
+		t.Fatalf("finishCoordinator error = %v, want %v", gotErr, runErr)
+	}
+	if summaryCalls != 0 {
+		t.Errorf("OnSummary called %d times in quiet mode", summaryCalls)
+	}
+	// The compact partial fallback keeps the failure context yet still carries
+	// the cable health: / Report: substrings the success line emits.
+	for _, want := range []string{"cable health:", "run did not complete (peer disconnected)", "Report: " + dir} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("quiet partial output missing %q: %q", want, out.String())
+		}
+	}
+}
+
+func TestFinishCoordinatorPresentsLastSuccessfulReportAfterEnrichmentWriteFailure(t *testing.T) {
+	var presented *model.Report
+	cfg := &config.RunConfig{
+		Role: config.RolePC1, LocalIP: netip.MustParseAddr("127.0.0.1"),
+		PeerIP: netip.MustParseAddr("127.0.0.2"), Mode: config.ModeQuick, Token: "testtoken1234",
+	}
+	a, err := New(cfg, Deps{
+		StateDir: t.TempDir(),
+		OnSummary: func(rep *model.Report, _ string) {
+			presented = rep
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	dir := t.TempDir()
+	rawDir := filepath.Join(dir, "raw")
+	if err := os.MkdirAll(rawDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pf := &preflightInfo{}
+	pf.Iface.Name = "eth0"
+	results := &testsuite.SessionResults{}
+	v := &verdict{}
+	startedAt := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	provisional, err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log)
+	if err != nil {
+		t.Fatalf("provisional finalize: %v", err)
+	}
+	_, _, provisionalCode, _ := v.get()
+
+	// Turn report.md into a directory so both enrichment attempts fail after
+	// the provisional report was already published successfully.
+	if err := os.Remove(filepath.Join(dir, "report.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "report.md"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outcome := &peer.Outcome{PeerCaps: protocol.Capabilities{
+		NIC: protocol.NICInfo{Name: "eth0", SpeedMbps: 1000, Duplex: "half"},
+	}}
+	code, err := a.finishCoordinator(dir, rawDir, pf, results, v, startedAt, outcome, nil, log)
+	if err != nil {
+		t.Fatalf("finishCoordinator: %v", err)
+	}
+	if code != provisionalCode {
+		t.Errorf("exit code = %d, want provisional %d", code, provisionalCode)
+	}
+	if presented != provisional {
+		t.Errorf("presented report pointer = %p, want last successful provisional %p", presented, provisional)
+	}
+	if latest, ok := v.renderedReport(); !ok || latest != provisional {
+		t.Errorf("stored report = %p/%v, want provisional %p", latest, ok, provisional)
 	}
 }
 
@@ -372,6 +558,40 @@ func TestFinishWorkerFallbackUsesCoordinatorMode(t *testing.T) {
 	}
 	if bytes.Contains(summary, []byte("mode:      quick")) {
 		t.Errorf("PC2 fallback summary uses PC2's local mode:\n%s", summary)
+	}
+}
+
+func TestFinishWorkerSummaryHookOwnsOutput(t *testing.T) {
+	var out bytes.Buffer
+	a := newWorkerApp(t, &out)
+	var calls int
+	var gotClass model.HealthClass
+	var gotLine, gotPath string
+	var gotTransferred bool
+	a.deps.OnWorkerSummary = func(class model.HealthClass, line, path string, transferred bool) {
+		calls++
+		gotClass, gotLine, gotPath, gotTransferred = class, line, path, transferred
+	}
+	dir := t.TempDir()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	comp := &protocol.Complete{Classification: "EXCELLENT", Summary: "cable health: EXCELLENT", ExitCode: 0}
+
+	if _, err := a.finishWorker(dir, filepath.Join(dir, "raw"), &peer.Outcome{PeerComplete: comp}, nil, log); err != nil {
+		t.Fatalf("finishWorker: %v", err)
+	}
+	if calls != 1 || gotClass != model.HealthExcellent || !strings.Contains(gotLine, "verdict from PC1: cable health: EXCELLENT") || gotPath != filepath.Join(dir, "summary.txt") || gotTransferred {
+		t.Errorf("worker hook = calls %d class %q line %q path %q transferred %v", calls, gotClass, gotLine, gotPath, gotTransferred)
+	}
+	if out.Len() != 0 {
+		t.Errorf("worker hook did not own output: %q", out.String())
+	}
+
+	comp.ExitCode = 99
+	if _, err := a.finishWorker(t.TempDir(), t.TempDir(), &peer.Outcome{PeerComplete: comp}, nil, log); err == nil {
+		t.Fatal("invalid completion exit code was accepted")
+	}
+	if calls != 1 {
+		t.Errorf("worker hook called for invalid completion; calls = %d", calls)
 	}
 }
 

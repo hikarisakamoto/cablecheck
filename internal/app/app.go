@@ -17,6 +17,7 @@ import (
 
 	"cablecheck/internal/clock"
 	"cablecheck/internal/config"
+	"cablecheck/internal/model"
 	"cablecheck/internal/network"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
@@ -65,6 +66,16 @@ type Deps struct {
 	// end-of-run summary is written to Stdout. The cli wires it to stop live
 	// progress rendering so the summary never prints over an in-flight bar.
 	OnRunEnd func()
+	// OnSummary, when set, owns the full coordinator end-of-run presentation.
+	// It receives the final in-memory report only after report files are
+	// successfully written. Quiet mode deliberately suppresses this hook.
+	OnSummary func(*model.Report, string)
+	// OnTokenBanner, when set, owns the coordinator's token and PC2-command
+	// presentation. The token remains an operator-facing stdout value only.
+	OnTokenBanner func(token, pc2Cmd string, generated bool)
+	// OnWorkerSummary, when set, owns PC2's compact completion presentation.
+	// PC2 has a protocol verdict but no evaluated model.Report of its own.
+	OnWorkerSummary func(class model.HealthClass, verdictLine, path string, transferred bool)
 
 	// hooks are test-only fault-injection and observation points; the zero
 	// value installs none (docs/design/testing.md §3).

@@ -2,6 +2,12 @@
 
 Scope: all `*_test.go`, mock infrastructure, integration harness, Makefile, CI gates, local e2e demo. Everything automated is hermetic: no iperf3, no ethtool, no real NIC, no dependence on local `ping`/`ip`. `go test ./...` and `go test -race ./...` are hard gates.
 
+Test evidence is the project's highest engineering priority. Prefer deterministic unit tests
+for pure transforms, white-box integration tests for orchestration and lifecycle ordering,
+race/shuffle runs for concurrency, and the loopback demo for the built binary. A feature is
+not complete merely because its happy path works manually; every practical fallback and
+failure branch must be pinned without real tools, real networks, or timing sleeps.
+
 ---
 
 ## 0. Test-support package layout (decided)

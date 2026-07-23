@@ -129,6 +129,24 @@ if (( pc1_status != expected_exit || pc2_status != expected_exit )); then
 	fail "peer exit codes were PC1=$pc1_status PC2=$pc2_status; expected both $expected_exit (INCONCLUSIVE for a loopback/virtual interface)"
 fi
 
+# Redirected stdout is the production non-TTY path: it must retain all stable
+# operator-facing labels while using the plain boxed renderer with no ANSI.
+for expected in \
+	'Session token: demo-token' \
+	'--control-port 45200' \
+	'--iperf-port 45201' \
+	'CableCheck result' \
+	'cable health:' \
+	'Report:'; do
+	grep -Fq -- "$expected" "$tmpdir/pc1.log" || fail "PC1 output missing: $expected"
+done
+for expected in 'verdict from PC1:' 'Report received from PC1:'; do
+	grep -Fq -- "$expected" "$tmpdir/pc2.log" || fail "PC2 output missing: $expected"
+done
+if [[ $(<"$tmpdir/pc1.log") == *$'\033['* || $(<"$tmpdir/pc2.log") == *$'\033['* ]]; then
+	fail 'redirected peer output contains ANSI escape sequences'
+fi
+
 mapfile -t pc1_reports < <(find "$tmpdir/pc1" -mindepth 1 -maxdepth 1 -type d -name 'cablecheck-report-*' -print)
 mapfile -t pc2_reports < <(find "$tmpdir/pc2" -mindepth 1 -maxdepth 1 -type d -name 'cablecheck-report-*' -print)
 (( ${#pc1_reports[@]} == 1 )) || fail "expected one PC1 report directory, found ${#pc1_reports[@]}"

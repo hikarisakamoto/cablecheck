@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cablecheck/internal/clock"
@@ -122,7 +123,7 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 	// files into its own report directory.
 	if a.cfg.Role == config.RolePC1 {
 		pcfg.PrepareComplete = func(peerCaps protocol.Capabilities) error {
-			err := a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
+			_, err := a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil,
 				&peer.Outcome{PeerCaps: peerCaps, TestID: a.sessionTestID()}, log)
 			if err == nil {
 				v.markFinalized()
@@ -150,7 +151,8 @@ func (a *App) run(ctx context.Context) (ExitCode, error) {
 			// as soon as the plan reports success. The report files must
 			// exist here because PrepareComplete replaces them with the
 			// capability-enriched rendering before any optional transfer.
-			return a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil, nil, log)
+			_, err := a.finalize(dir, rawDir, pf, s.results, v, startedAt, nil, nil, log)
+			return err
 		}
 	}
 
@@ -396,10 +398,45 @@ func (a *App) monitorEventSnapshot() []model.MonitoringEvent {
 // line on stdout via fmt — deliberately never through slog, so the log file
 // cannot contain the secret.
 func (a *App) printTokenBanner() {
+	pc2Cmd := a.pc2Command()
+	if a.deps.OnTokenBanner != nil {
+		a.deps.OnTokenBanner(a.cfg.Token, pc2Cmd, a.cfg.TokenGenerated)
+		return
+	}
 	suffix := ""
 	if a.cfg.TokenGenerated {
 		suffix = "  (auto-generated)"
 	}
-	fmt.Fprintf(a.deps.Stdout, "Session token: %s%s\nOn PC2 run:\n  cablecheck run --role pc2 --local-ip %s --peer-ip %s --token %s\n",
-		a.cfg.Token, suffix, a.cfg.PeerIP.Unmap(), a.cfg.LocalIP.Unmap(), a.cfg.Token)
+	fmt.Fprintf(a.deps.Stdout, "Session token: %s%s\nOn PC2 run:\n  %s\n", a.cfg.Token, suffix, pc2Cmd)
+}
+
+// pc2Command returns a command matching the coordinator's effective network
+// settings. Including both ports keeps the callout correct for custom values
+// and for --control-port 0, whose real bound port is known only after Start.
+func (a *App) pc2Command() string {
+	args := []string{
+		"cablecheck", "run",
+		"--role", "pc2",
+		"--local-ip", a.cfg.PeerIP.Unmap().String(),
+		"--peer-ip", a.cfg.LocalIP.Unmap().String(),
+		"--control-port", fmt.Sprintf("%d", a.controlPort),
+		"--iperf-port", fmt.Sprintf("%d", a.cfg.IperfPort),
+	}
+	if a.cfg.AllowVirtualInterface {
+		args = append(args, "--allow-virtual-interface")
+	}
+	args = append(args, "--token", quoteShellArg(a.cfg.Token))
+	return strings.Join(args, " ")
+}
+
+// quoteShellArg preserves ordinary generated tokens verbatim and quotes the
+// wider printable-ASCII token syntax only when a POSIX shell would interpret
+// it. This is command compatibility, not an expansion of the trust model.
+func quoteShellArg(value string) string {
+	if value != "" && strings.IndexFunc(value, func(r rune) bool {
+		return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-", r)
+	}) == -1 {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

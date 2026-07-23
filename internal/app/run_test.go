@@ -26,6 +26,7 @@ import (
 	"cablecheck/internal/runner/runnertest"
 	"cablecheck/internal/testsuite"
 	"cablecheck/internal/testutil"
+	"cablecheck/internal/ui"
 )
 
 // scriptQuickRun adds the test-plan scripts a full quick run needs on top of
@@ -217,6 +218,10 @@ func TestRunQuickHappyPath(t *testing.T) {
 	var progress1 []protocol.TestProgress
 	var runEndCalls int
 	var summaryWrittenAtRunEnd bool
+	var runEnded bool
+	var summaryCalls int
+	var summaryAfterRunEnd bool
+	var presentedReport *model.Report
 	onRunEnd := func() {
 		// OnRunEnd must fire after the session ends but before the end-of-run
 		// summary is written to Stdout: only then can the cli stop live progress
@@ -224,6 +229,7 @@ func TestRunQuickHappyPath(t *testing.T) {
 		// run goroutine, so reading out1 here is unraced.
 		runEndCalls++
 		summaryWrittenAtRunEnd = strings.Contains(out1.stdout.String(), "Report:")
+		runEnded = true
 	}
 	pc1, _, states1 := newRunApp(t, config.RolePC1, 0, 45301, &out1, clk1, func(n, total int, name string) {
 		steps1 = append(steps1, fmt.Sprintf("[%d/%d] %s", n, total, name))
@@ -232,6 +238,14 @@ func TestRunQuickHappyPath(t *testing.T) {
 		progress1 = append(progress1, p)
 		progressMu.Unlock()
 	})
+	pc1Presenter := ui.New(&out1.stdout, ui.Options{Color: ui.ColorAuto, Width: 80})
+	pc1.deps.OnSummary = func(rep *model.Report, dir string) {
+		summaryCalls++
+		summaryAfterRunEnd = runEnded
+		presentedReport = rep
+		pc1Presenter.Summary(rep, dir)
+	}
+	pc1.deps.OnTokenBanner = pc1Presenter.TokenBanner
 	if err := pc1.Start(ctx); err != nil {
 		t.Fatalf("pc1 Start: %v", err)
 	}
@@ -246,6 +260,8 @@ func TestRunQuickHappyPath(t *testing.T) {
 	pc2, _, states2 := newRunApp(t, config.RolePC2, uint16(ctrl.Port), 45311, &out2, clk2, func(n, total int, name string) {
 		steps2 = append(steps2, fmt.Sprintf("[%d/%d] %s", n, total, name))
 	}, nil)
+	pc2Presenter := ui.New(&out2.stdout, ui.Options{Color: ui.ColorAuto, Width: 80})
+	pc2.deps.OnWorkerSummary = pc2Presenter.WorkerSummary
 	if err := pc2.Start(ctx); err != nil {
 		t.Fatalf("pc2 Start: %v", err)
 	}
@@ -322,6 +338,9 @@ func TestRunQuickHappyPath(t *testing.T) {
 	if summaryWrittenAtRunEnd {
 		t.Error("OnRunEnd fired after the summary was written; a live bar would be left above it")
 	}
+	if summaryCalls != 1 || !summaryAfterRunEnd {
+		t.Errorf("OnSummary calls/ordering = %d/%v, want exactly once after OnRunEnd", summaryCalls, summaryAfterRunEnd)
+	}
 
 	// PC1 report files exist; report.json unmarshals and is complete.
 	dir1 := findReportDir(t, pc1.cfg.OutputDir)
@@ -338,6 +357,24 @@ func TestRunQuickHappyPath(t *testing.T) {
 	}
 	if rep.Classification != model.HealthGood && rep.Classification != model.HealthExcellent {
 		t.Errorf("classification = %s, want GOOD or EXCELLENT (findings: %v)", rep.Classification, rep.ClassificationReasons)
+	}
+	if presentedReport == nil || presentedReport.Classification != rep.Classification || presentedReport.PC2.NIC.Name != rep.PC2.NIC.Name {
+		t.Errorf("OnSummary report = %+v, want final enriched report class %s with PC2 NIC %q", presentedReport, rep.Classification, rep.PC2.NIC.Name)
+	}
+	for side, output := range map[string]string{"pc1": out1.stdout.String(), "pc2": out2.stdout.String()} {
+		if strings.Contains(output, "\x1b[") {
+			t.Errorf("%s non-TTY output contains ANSI: %q", side, output)
+		}
+	}
+	for _, want := range []string{"Session token:", "CableCheck result", "cable health:", "Report: "} {
+		if !strings.Contains(out1.stdout.String(), want) {
+			t.Errorf("pc1 rendered output missing %q:\n%s", want, out1.stdout.String())
+		}
+	}
+	for _, want := range []string{"verdict from PC1:", "Report received from PC1:"} {
+		if !strings.Contains(out2.stdout.String(), want) {
+			t.Errorf("pc2 rendered output missing %q:\n%s", want, out2.stdout.String())
+		}
 	}
 	if rep.TestID == "" {
 		t.Errorf("report.TestID is empty")
@@ -415,6 +452,76 @@ func TestRunQuickHappyPath(t *testing.T) {
 	for _, e := range mustReadDir(t, dir2) {
 		if strings.HasSuffix(e.Name(), ".part") {
 			t.Errorf("pc2 left a partial file %q", e.Name())
+		}
+	}
+}
+
+func TestTokenBannerUsesEffectivePC2Command(t *testing.T) {
+	var out bytes.Buffer
+	var gotToken, gotCommand string
+	var gotGenerated bool
+	cfg := &config.RunConfig{
+		Role:                  config.RolePC1,
+		LocalIP:               netip.MustParseAddr("192.168.50.1"),
+		PeerIP:                netip.MustParseAddr("192.168.50.2"),
+		ControlPort:           0,
+		IperfPort:             45401,
+		Token:                 "123456",
+		TokenGenerated:        true,
+		AllowVirtualInterface: true,
+	}
+	a, err := New(cfg, Deps{
+		Stdout: &out,
+		OnTokenBanner: func(token, command string, generated bool) {
+			gotToken, gotCommand, gotGenerated = token, command, generated
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.controlPort = 46234
+	a.printTokenBanner()
+
+	if out.Len() != 0 {
+		t.Errorf("token hook did not own output: %q", out.String())
+	}
+	if gotToken != "123456" || !gotGenerated {
+		t.Errorf("token callback = %q generated=%v", gotToken, gotGenerated)
+	}
+	for _, want := range []string{
+		"--local-ip 192.168.50.2",
+		"--peer-ip 192.168.50.1",
+		"--control-port 46234",
+		"--iperf-port 45401",
+		"--allow-virtual-interface",
+		"--token 123456",
+	} {
+		if !strings.Contains(gotCommand, want) {
+			t.Errorf("PC2 command missing %q: %q", want, gotCommand)
+		}
+	}
+}
+
+func TestTokenBannerPlainFallbackAndShellQuoting(t *testing.T) {
+	var out bytes.Buffer
+	cfg := &config.RunConfig{
+		Role: config.RolePC1, LocalIP: netip.MustParseAddr("192.168.50.1"),
+		PeerIP: netip.MustParseAddr("192.168.50.2"), ControlPort: 44300,
+		IperfPort: 44301, Token: "odd'$;token",
+	}
+	a, err := New(cfg, Deps{Stdout: &out})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.printTokenBanner()
+	got := out.String()
+	for _, want := range []string{
+		"Session token: odd'$;token",
+		"On PC2 run:",
+		`--token 'odd'"'"'$;token'`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("plain token banner missing %q: %q", want, got)
 		}
 	}
 }
