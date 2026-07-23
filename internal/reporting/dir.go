@@ -1,5 +1,5 @@
-// Package reporting owns the on-disk report layout and the three rendered
-// outputs of a run: report.json, report.md and summary.txt.
+// Package reporting owns the on-disk report layout and rendered outputs of a
+// run: report.json, report.md, summary.txt and PC1's report.html.
 //
 // The package depends on internal/model and the standard library ONLY (a test
 // enforces it structurally). Rendering is a pure function of *model.Report,

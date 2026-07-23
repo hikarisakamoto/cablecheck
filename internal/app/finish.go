@@ -84,7 +84,7 @@ func (a *App) finishWorker(dir, rawDir string, outcome *peer.Outcome, runErr err
 		// diagnostic ("token rejected by coordinator").
 		log.Error("run did not complete", "err", msg)
 		if reportTransferred(dir) {
-			// The full report set — including PC1's own summary.txt — already
+			// The transferable report core — including PC1's own summary.txt — already
 			// arrived and was digest-verified before the session failed (a lost
 			// connection or Ctrl+C during the complete exchange). Overwriting
 			// summary.txt with a fallback claiming it "was not transferred"
@@ -127,13 +127,14 @@ func (a *App) finishWorker(dir, rawDir string, outcome *peer.Outcome, runErr err
 	return code, nil
 }
 
-// reportTransferred reports whether PC1's full report set was received into
-// dir. Files commit per file in canonical order, so the presence of any single
-// file (report.json first) is not enough: summary.txt can exhaust its retries
-// after report.json already landed, leaving an incomplete set. Only when all
-// three verified files are present is the transfer complete and the local
-// fallback summary safe to skip. Each file was renamed from a .part solely
-// after its digest verified.
+// reportTransferred reports whether PC1's authoritative transferable core was
+// received into dir. report.html is intentionally PC1-only. Files commit per
+// file in canonical order, so the presence of any single file (report.json
+// first) is not enough: summary.txt can exhaust its retries after report.json
+// already landed, leaving an incomplete set. Only when all three verified
+// files are present is the transfer complete and the local fallback summary
+// safe to skip. Each file was renamed from a .part solely after its digest
+// verified.
 func reportTransferred(dir string) bool {
 	for _, name := range []string{"report.json", "report.md", "summary.txt"} {
 		fi, err := os.Stat(filepath.Join(dir, name))
@@ -165,8 +166,9 @@ local ip:  %s
 peer ip:   %s
 %s
 
-The full report (report.json, report.md, summary.txt) was generated on PC1.
+The transferable report core (report.json, report.md, summary.txt) was generated on PC1.
 It was not transferred to PC2 (transfer declined, disabled, or failed).
+The self-contained report.html remains in PC1's report directory.
 `,
 		testID, mode, a.cfg.LocalIP.Unmap(), a.cfg.PeerIP.Unmap(), verdictLine)
 	if err := os.WriteFile(filepath.Join(dir, "summary.txt"), []byte(body), 0o600); err != nil {
@@ -179,7 +181,7 @@ It was not transferred to PC2 (transfer declined, disabled, or failed).
 // would overwrite PC1's own verified copy with a note that is now false, so the
 // diagnostic goes into a separate transfer-note.txt instead.
 func (a *App) writeWorkerFailureNote(dir, note string, log *slog.Logger) {
-	body := fmt.Sprintf("CableCheck (pc2 / worker)\n%s\n\nPC1's report set was transferred and verified before this failure; the transferred report.json, report.md and summary.txt are PC1's own files.\n", note)
+	body := fmt.Sprintf("CableCheck (pc2 / worker)\n%s\n\nPC1's report core was transferred and verified before this failure; the transferred report.json, report.md and summary.txt are PC1's own files. PC1's report.html remains local to PC1.\n", note)
 	if err := os.WriteFile(filepath.Join(dir, "transfer-note.txt"), []byte(body), 0o600); err != nil {
 		log.Warn("writing the worker failure note failed", "err", err)
 	}

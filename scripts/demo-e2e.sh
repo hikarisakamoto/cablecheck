@@ -154,18 +154,20 @@ mapfile -t pc2_reports < <(find "$tmpdir/pc2" -mindepth 1 -maxdepth 1 -type d -n
 pc1_report=${pc1_reports[0]}
 pc2_report=${pc2_reports[0]}
 
-for side in "$pc1_report" "$pc2_report"; do
-	for name in report.json report.md summary.txt; do
-		[[ -f "$side/$name" ]] || fail "missing report artifact: $side/$name"
-	done
+for name in report.json report.md summary.txt report.html; do
+	[[ -f "$pc1_report/$name" ]] || fail "missing PC1 report artifact: $pc1_report/$name"
 done
+for name in report.json report.md summary.txt; do
+	[[ -f "$pc2_report/$name" ]] || fail "missing PC2 report artifact: $pc2_report/$name"
+done
+[[ ! -e "$pc2_report/report.html" ]] || fail 'report.html must remain PC1-only'
 
 pc1_sha=$(sha256sum "$pc1_report/report.json" | awk '{print $1}')
 pc2_sha=$(sha256sum "$pc2_report/report.json" | awk '{print $1}')
 [[ "$pc1_sha" == "$pc2_sha" ]] || fail "report.json hashes differ: PC1=$pc1_sha PC2=$pc2_sha"
 
 if ! "$repo_dir/cablecheck" report "$pc1_report/report.json" >"$tmpdir/report.log" 2>&1; then
-	fail 'the report subcommand could not regenerate report.md and summary.txt'
+	fail 'the report subcommand could not regenerate report.md, summary.txt and report.html'
 fi
 
 show_logs

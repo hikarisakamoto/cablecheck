@@ -411,7 +411,7 @@ Internally, `Call` allocates a messageID, registers `pending[msgID] = &call{done
 
 Direction PC1 → PC2, only in `generating_report`, only if **both** `!cfg.NoReportTransfer` and peer's `Capabilities.AcceptReportTransfer`.
 
-**Numbers**: `ChunkSize = 256 KiB` raw (base64 → ~342 KiB, envelope ≤ ~350 KiB ≪ 1 MiB frame cap). `MaxFileSize = 8 MiB` per file, `MaxTotalSize = 16 MiB`. A soak-mode report.json with interval series stays well under that, and `raw/` is never transferred. Names use the exact allowlist `{"report.json","report.md","summary.txt"}`; PC2 rejects anything else, and independently rejects any name containing `/`, `\`, or `..` (path traversal).
+**Numbers**: `ChunkSize = 256 KiB` raw (base64 → ~342 KiB, envelope ≤ ~350 KiB ≪ 1 MiB frame cap). `MaxFileSize = 8 MiB` per file, `MaxTotalSize = 16 MiB`. A soak-mode report.json with interval series stays well under that, and `raw/` is never transferred. Names use the exact allowlist `{"report.json","report.md","summary.txt"}`; PC2 rejects anything else, and independently rejects any name containing `/`, `\`, or `..` (path traversal). The self-contained `report.html` remains local to PC1 and is outside this protocol.
 
 Flow, per session:
 1. PC1 → `report` manifest (names, sizes, sha256). PC2 validates names/caps; if it can't accept (disk, caps exceeded) replies `report_ack{Name:"", Declined:true, Error}` → PC1 logs warning, skips to `complete`.

@@ -14,6 +14,12 @@ import (
 func TestRegeneratePure(t *testing.T) {
 	r := goldenReport()
 
+	html1 := RenderHTML(r)
+	html2 := RenderHTML(r)
+	if !bytes.Equal(html1, html2) {
+		t.Errorf("RenderHTML is not pure: two calls on the same report differ")
+	}
+
 	md1 := RenderMarkdown(r)
 	md2 := RenderMarkdown(r)
 	if !bytes.Equal(md1, md2) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -413,7 +414,7 @@ func TestRunQuickHappyPath(t *testing.T) {
 	if rep.PC2.NIC.Name != "eth0" {
 		t.Errorf("peer machine info missing: PC2.NIC = %+v", rep.PC2.NIC)
 	}
-	for _, name := range []string{"report.md", "summary.txt"} {
+	for _, name := range []string{"report.md", "summary.txt", "report.html"} {
 		if _, err := os.Stat(filepath.Join(dir1, name)); err != nil {
 			t.Errorf("pc1 %s: %v", name, err)
 		}
@@ -448,6 +449,9 @@ func TestRunQuickHappyPath(t *testing.T) {
 		if sha256.Sum256(a) != sha256.Sum256(b) {
 			t.Errorf("pc2 %s SHA-256 differs from pc1's copy", name)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dir2, "report.html")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("pc2 report.html should not be transferred: %v", err)
 	}
 	for _, e := range mustReadDir(t, dir2) {
 		if strings.HasSuffix(e.Name(), ".part") {

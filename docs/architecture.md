@@ -19,7 +19,7 @@ The module is `cablecheck`. It targets Go 1.26, uses only the standard library, 
 - `internal/network` — interface discovery/classification, sysfs link monitoring, USB/virtual detection, and port probes.
 - `internal/testsuite` — link/counter/ping/iperf/cable operations, the worker op vocabulary, and quick/standard/soak coordinator plans.
 - `internal/evaluate` — pure fact extraction, ordered health rules, classification fold, score, and recommendations.
-- `internal/reporting` — report directory/raw-artifact management, JSON/Markdown/text rendering, and verified report-file transfer; imports only `internal/model` plus the standard library.
+- `internal/reporting` — report directory/raw-artifact management, JSON/HTML/Markdown/text rendering, and verified report-file transfer; imports only `internal/model` plus the standard library.
 - `internal/app` — top-level orchestration: preflight, suite construction, monitoring, peer session, report assembly/evaluation/rendering, transfer callbacks, doctor/report commands, and exit mapping.
 - `internal/cli` — subcommand dispatch, Go `flag` parsing, help output, progress-renderer wiring, and final error-to-exit-code mapping.
 - `internal/ui` — serialized terminal presentation: color-mode decision, the clock-driven progress renderer, boxed report summary and token callout, compact worker verdict, and plain non-TTY fallbacks.
@@ -72,7 +72,7 @@ initializing -> preflight -> listening (PC1) / connecting (PC2)
 Any nonterminal state can end in aborted or failed.
 ```
 
-On PC1, entering `testing` starts the plan driver and the application-owned sysfs monitor. The plan runs local operations directly and remote operations through `RemoteCaller.Call`. On success, PC1 freezes monitoring data, assembles and evaluates the report, optionally transfers the rendered files, exchanges `complete`, and maps the classification to an exit code. If the run ends abnormally, completed measurements are kept in a partial report when possible.
+On PC1, entering `testing` starts the plan driver and the application-owned sysfs monitor. The plan runs local operations directly and remote operations through `RemoteCaller.Call`. On success, PC1 freezes monitoring data, assembles and evaluates the report, writes all rendered outputs, optionally transfers the JSON/Markdown/text core (the self-contained HTML stays on PC1), exchanges `complete`, and maps the classification to an exit code. If the run ends abnormally, completed measurements are kept in a partial report when possible.
 
 PC2 runs the same preflight and peer machinery but supplies an `OpHandler` instead of a plan. It executes one operation at a time until report/complete or abort. On every exit it writes a local `diagnostic.json` covering its role, test ID, mode, IPs, final state, any error, the reason and detail of a peer abort, PC1's verdict, and an index of its raw files. The diagnostic isn't a `model.Report`, since PC2 runs no evaluation, and it's never transferred. It exists to make a failed run debuggable from PC2 alone.
 

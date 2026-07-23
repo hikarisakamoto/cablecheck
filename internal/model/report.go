@@ -18,7 +18,7 @@ import (
 const SchemaVersion = "1.0.0"
 
 // Report is the complete record of one CableCheck run and the single source
-// for all rendered outputs (report.json, report.md, summary.txt).
+// for all rendered outputs (report.json, report.md, summary.txt, report.html).
 //
 // The JSON field names of the spec fields are verbatim and stable; findings,
 // rawFiles, link and machines are additive extensions. Durations use

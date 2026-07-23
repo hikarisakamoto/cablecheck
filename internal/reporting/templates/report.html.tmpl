@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CableCheck Report</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f3f6fa; --panel:#fff; --ink:#172033; --muted:#647087; --line:#d9e0ea; --accent:#2463eb; --excellent:#137a52; --good:#187257; --warning:#a55b00; --poor:#b13b21; --failed:#b42318; --inconclusive:#5c6370; --unknown:#5c6370; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(1180px,calc(100% - 32px)); margin:32px auto 64px; }
+    h1,h2,p { margin-top:0; }
+    .eyebrow { margin:0 0 8px; color:var(--muted); font-size:.78rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+    .hero { border-left:8px solid var(--unknown); border-radius:14px; padding:24px; background:var(--panel); box-shadow:0 8px 30px rgba(23,32,51,.08); }
+    .hero h1 { margin-bottom:6px; font-size:clamp(1.8rem,4vw,3rem); }
+    .hero-grid { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+    .score { min-width:92px; border:1px solid var(--line); border-radius:999px; padding:10px 16px; text-align:center; font-size:1.1rem; font-weight:800; }
+    .verdict-excellent { border-color:var(--excellent); } .verdict-good { border-color:var(--good); } .verdict-warning { border-color:var(--warning); } .verdict-poor { border-color:var(--poor); } .verdict-failed { border-color:var(--failed); } .verdict-inconclusive,.verdict-unknown { border-color:var(--inconclusive); }
+    .chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:14px; }
+    .chip { border-radius:999px; padding:3px 9px; color:#fff; background:var(--unknown); font-size:.78rem; font-weight:750; }
+    .severity-info { background:#3274c8; } .severity-warning { background:var(--warning); } .severity-poor { background:var(--poor); } .severity-failed { background:var(--failed); } .severity-marker,.severity-unknown { background:var(--unknown); }
+    .sections { display:grid; gap:12px; margin-top:20px; }
+    details { overflow:hidden; border:1px solid var(--line); border-radius:11px; background:var(--panel); }
+    summary { cursor:pointer; padding:15px 18px; font-size:1.02rem; font-weight:750; }
+    details[open] summary { border-bottom:1px solid var(--line); }
+    .content { padding:18px; }
+    .note { margin:0; border-left:4px solid #8ca0bb; border-radius:4px; padding:9px 12px; background:rgba(126,145,170,.12); color:var(--muted); }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    th,td { border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:.78rem; letter-spacing:.03em; text-transform:uppercase; }
+    tr:last-child td { border-bottom:0; }
+    dl { display:grid; grid-template-columns:minmax(160px,240px) 1fr; gap:7px 16px; margin:0; }
+    dt { color:var(--muted); font-weight:650; } dd { margin:0; overflow-wrap:anywhere; }
+    ul,ol { margin-bottom:0; padding-left:22px; }
+    .finding { margin:0 0 14px; } .finding:last-child { margin-bottom:0; }
+    .finding-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .charts { display:grid; gap:10px; margin:0 0 18px; }
+    .chart-row { display:grid; grid-template-columns:minmax(100px,180px) 1fr minmax(90px,130px); gap:10px; align-items:center; }
+    .chart-label { color:var(--muted); font-weight:650; }
+    .chart-value { text-align:right; font-variant-numeric:tabular-nums; }
+    svg { display:block; width:100%; height:12px; overflow:visible; }
+    .chart-track { fill:#dce3ed; } .bar-pc1-to-pc2 { fill:#2463eb; } .bar-pc2-to-pc1 { fill:#7a4bd4; } .bar-unknown { fill:#738096; }
+    .percentiles { margin-top:10px; color:var(--muted); font-size:.88rem; }
+    code { overflow-wrap:anywhere; }
+    @media (prefers-color-scheme:dark) { :root { --bg:#111722; --panel:#1a2230; --ink:#edf2f8; --muted:#aab5c5; --line:#344155; } .hero { box-shadow:none; } .chart-track { fill:#344155; } }
+    @media (max-width:650px) { main { width:min(100% - 18px,1180px); margin-top:12px; } .hero-grid { display:block; } .score { display:inline-block; margin-top:14px; } dl { grid-template-columns:1fr; gap:2px; } dd { margin-bottom:9px; } .chart-row { grid-template-columns:90px 1fr; } .chart-value { grid-column:2; text-align:left; } }
+    @media print { :root { color-scheme:light; --bg:#fff; --panel:#fff; --ink:#000; --muted:#444; --line:#bbb; } main { width:100%; margin:0; } .hero { box-shadow:none; } details { break-inside:avoid; } }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero verdict-{{healthSlug .Report.Classification}}">
+    <p class="eyebrow">CableCheck · Ethernet link health</p>
+    <div class="hero-grid">
+      <div>
+        <h1>{{healthLabel .Report.Classification}}</h1>
+        {{if .Report.Classification}}<p>{{verdictText .Report.Classification}}</p>{{else}}<p>No classification was recorded.</p>{{end}}
+      </div>
+      <div class="score">{{scoreOrNA .Report.Score}}</div>
+    </div>
+    {{if .Report.Findings}}<div class="chips" aria-label="Finding severities">{{range .Report.Findings}}<span class="chip severity-{{severitySlug .Severity}}">{{severityLabel .Severity}}</span>{{end}}</div>{{end}}
+  </header>
+
+  <div class="sections">
+    <details open><summary>1. Overall Result</summary><div class="content">
+      {{if .Report.Classification}}<p><strong>{{.Report.Classification}}</strong> — {{verdictText .Report.Classification}}</p>{{else}}<p class="note">Not run: the report carries no classification.</p>{{end}}
+    </div></details>
+
+    <details open><summary>2. Score &amp; Rule Evidence</summary><div class="content">
+      {{if and (not .Report.Classification) (not .Report.Score) (not .Report.Findings)}}<p class="note">Not run: the report carries no evaluation.</p>{{else}}
+      <dl><dt>Score</dt><dd>{{if .Report.Score}}{{scoreOrNA .Report.Score}}{{else}}n/a (INCONCLUSIVE runs carry no score){{end}}</dd>{{range .Report.ClassificationReasons}}<dt>Reason</dt><dd>{{.}}</dd>{{end}}</dl>
+      {{if .Report.Findings}}<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody>{{range .Report.Findings}}<tr><td>{{.RuleID}}</td><td>{{.Category}}</td><td><span class="chip severity-{{severitySlug .Severity}}">{{severityLabel .Severity}}</span></td><td>{{.Text}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">No rule findings — every rule passed.</p>{{end}}
+      {{end}}
+    </div></details>
+
+    <details open><summary>3. Session Info</summary><div class="content"><dl>
+      <dt>Test ID</dt><dd>{{orUnknown .Report.TestID}}</dd><dt>Schema version</dt><dd>{{orUnknown .Report.SchemaVersion}}</dd><dt>Tool version</dt><dd>{{orUnknown .Report.ToolVersion}}</dd><dt>Protocol version</dt><dd>{{orUnknown .Report.ProtocolVersion}}</dd><dt>Started</dt><dd>{{formatTime .Report.StartedAt}}</dd><dt>Finished</dt><dd>{{formatTime .Report.FinishedAt}}</dd><dt>Duration</dt><dd>{{.Report.Duration}}</dd><dt>Mode</dt><dd>{{orUnknown .Report.Configuration.Mode}}</dd><dt>Partial run</dt><dd>{{yesNo .Report.Partial}}</dd>{{with .Report.Failure}}<dt>Failure</dt><dd>{{.Error}} (stage: {{.Stage}})</dd>{{end}}
+    </dl></div></details>
+
+    <details open><summary>4. Machines &amp; Environment</summary><div class="content">
+      {{if and (not .Report.PC1.Hostname) (not .Report.PC2.Hostname) (not .Report.PC1.NIC.Name) (not .Report.PC2.NIC.Name)}}<p class="note">Not run: machine details were not recorded.</p>{{else}}<div class="table-wrap"><table><thead><tr><th>Side</th><th>Hostname</th><th>Kernel</th><th>OS</th><th>NIC</th><th>Driver</th><th>Speed</th><th>Duplex</th><th>MTU</th><th>MAC</th><th>USB</th></tr></thead><tbody>
+      <tr><td>pc1</td><td>{{orUnknown .Report.PC1.Hostname}}</td><td>{{orUnknown .Report.PC1.Kernel}}</td><td>{{orUnknown .Report.PC1.OS}}</td><td>{{orUnknown .Report.PC1.NIC.Name}}</td><td>{{orUnknown .Report.PC1.NIC.Driver}}</td><td>{{formatSpeedMbps .Report.PC1.NIC.SpeedMbps}}</td><td>{{orUnknown .Report.PC1.NIC.Duplex}}</td><td>{{.Report.PC1.NIC.MTU}}</td><td>{{orUnknown .Report.PC1.NIC.MAC}}</td><td>{{yesNo .Report.PC1.NIC.USB}}</td></tr>
+      <tr><td>pc2</td><td>{{orUnknown .Report.PC2.Hostname}}</td><td>{{orUnknown .Report.PC2.Kernel}}</td><td>{{orUnknown .Report.PC2.OS}}</td><td>{{orUnknown .Report.PC2.NIC.Name}}</td><td>{{orUnknown .Report.PC2.NIC.Driver}}</td><td>{{formatSpeedMbps .Report.PC2.NIC.SpeedMbps}}</td><td>{{orUnknown .Report.PC2.NIC.Duplex}}</td><td>{{.Report.PC2.NIC.MTU}}</td><td>{{orUnknown .Report.PC2.NIC.MAC}}</td><td>{{yesNo .Report.PC2.NIC.USB}}</td></tr>
+      </tbody></table></div>{{end}}
+    </div></details>
+
+    <details open><summary>5. Interface &amp; Link Negotiation</summary><div class="content">
+      {{if .LinkRows}}<div class="table-wrap"><table><thead><tr><th>Side</th><th>Phase</th><th>Speed</th><th>Duplex</th><th>Autoneg</th><th>Link</th><th>MDI-X</th><th>Partner modes</th></tr></thead><tbody>{{range .LinkRows}}<tr><td>{{.Side}}</td><td>{{.Phase}}</td><td>{{formatSpeedMbps .Settings.SpeedMbps}}</td><td>{{orUnknown .Settings.Duplex}}</td><td>{{orUnknown .Settings.AutoNeg}}</td><td>{{yesNo .Settings.LinkDetected}}</td><td>{{orUnknown .Settings.MDIX}}</td><td>{{orUnknown (join .Settings.PartnerModes ", ")}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">Not run: link negotiation state was not captured.</p>{{end}}
+    </div></details>
+
+    <details open><summary>6. Link Events Timeline</summary><div class="content">
+      {{if .LinkEvents}}<div class="table-wrap"><table><thead><tr><th>At</th><th>Event</th><th>Detail</th></tr></thead><tbody>{{range .LinkEvents}}<tr><td>{{formatTime .At}}</td><td>{{.Type}}</td><td>{{.Detail}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">No link events were observed during the run.</p>{{end}}
+    </div></details>
+
+    <details open><summary>7. Counter Baseline</summary><div class="content">
+      {{if not .CountersCaptured}}<p class="note">Not run: no counter snapshots were captured.</p>{{else if not .BaselineRows}}<p class="note">Not run: neither side exposes normalized counters (absence is not zero).</p>{{else}}<div class="table-wrap"><table><thead><tr><th>Counter</th><th>PC1</th><th>PC2</th></tr></thead><tbody>{{range .BaselineRows}}<tr><td>{{.Name}}</td><td>{{.PC1}}</td><td>{{.PC2}}</td></tr>{{end}}</tbody></table></div><p class="note">Counters absent on a side are not exposed by that hardware — absence is not zero.</p>{{end}}
+    </div></details>
+
+    <details open><summary>8. Counter Deltas</summary><div class="content">
+      {{if .DeltaRows}}<div class="table-wrap"><table><thead><tr><th>Counter</th><th>PC1 Δ</th><th>PC2 Δ</th></tr></thead><tbody>{{range .DeltaRows}}<tr><td>{{.Name}}</td><td>{{.PC1}}</td><td>{{.PC2}}</td></tr>{{end}}</tbody></table></div><p class="note">“unreliable” marks a counter that reset or wrapped mid-run; its delta is not evidence.</p>{{else}}<p class="note">Not run: counter deltas were not computed.</p>{{end}}
+    </div></details>
+
+    <details open><summary>9. Ping Stability</summary><div class="content">
+      {{if .Ping.Rows}}{{template "ping" .Ping}}{{else}}<p class="note">Not run: {{skipReason .Report "ping" "no result was recorded."}}</p>{{end}}
+    </div></details>
+
+    <details open><summary>10. Full-Size Ping</summary><div class="content">
+      {{if .FullSizePing.Rows}}{{template "ping" .FullSizePing}}{{else}}<p class="note">Not run: {{skipReason .Report "full_size_ping" "no result was recorded."}}</p>{{end}}
+    </div></details>
+
+    <details open><summary>11. TCP Throughput PC1→PC2</summary><div class="content">
+      {{if .TCPPC1ToPC2.Rows}}{{template "tcp" .TCPPC1ToPC2}}{{else}}<p class="note">Not run: {{skipReason .Report "tcp" "no TCP result was recorded for this direction."}}</p>{{end}}
+    </div></details>
+
+    <details open><summary>12. TCP Throughput PC2→PC1</summary><div class="content">
+      {{if .TCPPC2ToPC1.Rows}}{{template "tcp" .TCPPC2ToPC1}}{{else}}<p class="note">Not run: {{skipReason .Report "tcp" "no TCP result was recorded for this direction."}}</p>{{end}}
+    </div></details>
+
+    <details open><summary>13. Bidirectional Stress</summary><div class="content">
+      {{with .Report.Tests.Bidirectional}}{{if $.BidirBars}}{{template "throughputChart" $.BidirBars}}{{end}}<div class="table-wrap"><table><thead><tr><th>Direction</th><th>Sender</th><th>Receiver</th><th>Retransmits</th></tr></thead><tbody>{{range $.BidirRows}}<tr><td>{{.Direction}}</td><td>{{formatBps .Sender}}</td><td>{{formatBps .Receiver}}</td><td>{{.Retrans}}</td></tr>{{end}}</tbody></table></div>{{if .TwoPhaseFallback}}<p class="note">Ran as two coordinated one-way phases (--bidir unavailable on a peer), not simultaneously.</p>{{end}}{{else}}<p class="note">Not run: {{skipReason $.Report "bidirectional" "no bidirectional result was recorded."}}</p>{{end}}
+    </div></details>
+
+    <details open><summary>14. UDP Loss &amp; Jitter</summary><div class="content">
+      {{if .Report.Tests.UDP}}<div class="table-wrap"><table><thead><tr><th>Direction</th><th>Target</th><th>Sender</th><th>Receiver</th><th>Lost/Total</th><th>Loss</th><th>Jitter</th><th>Out-of-order</th></tr></thead><tbody>{{range .Report.Tests.UDP}}<tr><td>{{directionLabel .Direction}}</td><td>{{formatUintBps .TargetBps}}</td><td>{{formatBps .ActualSenderBps}}</td><td>{{formatBps .ActualReceiverBps}}</td><td>{{.LostPackets}}/{{.TotalPackets}}</td><td>{{formatPercent .LossPercent}}</td><td>{{printf "%.2f ms" .JitterMs}}</td><td>{{if .OutOfOrder}}{{.OutOfOrder}}{{else}}not reported{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">Not run: {{skipReason .Report "udp" "no UDP result was recorded."}}</p>{{end}}
+    </div></details>
+
+    <details open><summary>15. CPU Utilization</summary><div class="content">
+      {{if .CPURows}}<div class="table-wrap"><table><thead><tr><th>Test</th><th>Sender CPU</th><th>Receiver CPU</th></tr></thead><tbody>{{range .CPURows}}<tr><td>{{.Test}}</td><td>{{printf "%.1f%%" .CPU.HostTotal}}</td><td>{{printf "%.1f%%" .CPU.RemoteTotal}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">Not run: no throughput test reported CPU utilization.</p>{{end}}
+    </div></details>
+
+    <details open><summary>16. Cable Diagnostics</summary><div class="content">
+      {{with .Report.Tests.CableTest}}{{if not .Available}}<p class="note">Not run: {{orUnknown .UnavailableReason}}</p>{{else}}<div class="table-wrap"><table><thead><tr><th>Pair</th><th>Status</th><th>Fault distance</th></tr></thead><tbody>{{range .Pairs}}<tr><td>{{.Pair}}</td><td>{{.Status}}</td><td>{{if .HasFault}}{{printf "~%.1f m" .FaultMeters}}{{else}}-{{end}}</td></tr>{{end}}</tbody></table></div>{{end}}{{else}}<p class="note">Not run: {{skipReason $.Report "cable_test" "cable diagnostics were not requested."}}</p>{{end}}
+    </div></details>
+
+    <details open><summary>17. Monitoring Timeline</summary><div class="content">
+      {{if .Report.MonitoringEvents}}<div class="table-wrap"><table><thead><tr><th>At</th><th>Event</th><th>Detail</th></tr></thead><tbody>{{range .Report.MonitoringEvents}}<tr><td>{{formatTime .At}}</td><td>{{.Type}}</td><td>{{.Detail}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">No monitoring events were recorded during the run.</p>{{end}}
+    </div></details>
+
+    <details open><summary>18. Findings Detail</summary><div class="content">
+      {{if .Report.Findings}}{{range .Report.Findings}}<article class="finding"><div class="finding-head"><strong>{{.RuleID}}</strong><span class="chip severity-{{severitySlug .Severity}}">{{severityLabel .Severity}}</span><span>{{.Category}}</span></div><p>{{.Text}}</p>{{if .Evidence}}<ul>{{range .Evidence}}<li>{{.}}</li>{{end}}</ul>{{end}}</article>{{end}}{{else}}<p class="note">No findings — every rule passed.</p>{{end}}
+    </div></details>
+
+    <details open><summary>19. Recommendations</summary><div class="content">
+      {{if .Report.Recommendations}}<ol>{{range .Report.Recommendations}}<li>{{.}}</li>{{end}}</ol>{{else}}<p class="note">No recommendations — no action needed.</p>{{end}}
+    </div></details>
+
+    <details open><summary>20. Limitations &amp; Unavailable Tests</summary><div class="content">
+      {{if and (not .Report.SkippedTests) (not .Report.Warnings)}}<p class="note">None — every planned test ran and no warnings were raised.</p>{{else}}{{if .Report.SkippedTests}}<div class="table-wrap"><table><thead><tr><th>Test</th><th>Reason</th></tr></thead><tbody>{{range .Report.SkippedTests}}<tr><td>{{.Name}}</td><td>{{.Reason}}</td></tr>{{end}}</tbody></table></div>{{end}}{{if .Report.Warnings}}<ul>{{range .Report.Warnings}}<li>Warning: {{.}}</li>{{end}}</ul>{{end}}{{end}}
+    </div></details>
+
+    <details open><summary>21. Configuration Used</summary><div class="content">
+      {{if and (not .Report.Configuration.Role) (not .Report.Configuration.LocalIP) (not .Report.Configuration.Mode)}}<p class="note">Not run: no configuration echo was recorded.</p>{{else}}<dl><dt>Role</dt><dd>{{orUnknown .Report.Configuration.Role}}</dd><dt>Local IP</dt><dd>{{orUnknown .Report.Configuration.LocalIP}}</dd><dt>Peer IP</dt><dd>{{orUnknown .Report.Configuration.PeerIP}}</dd><dt>Interface</dt><dd>{{orUnknown .Report.Configuration.Interface}}</dd><dt>Mode</dt><dd>{{orUnknown .Report.Configuration.Mode}}</dd><dt>Control port</dt><dd>{{.Report.Configuration.ControlPort}}</dd><dt>iperf3 port</dt><dd>{{.Report.Configuration.IperfPort}}</dd><dt>TCP duration</dt><dd>{{.Report.Configuration.TCPDuration}}</dd><dt>UDP duration</dt><dd>{{.Report.Configuration.UDPDuration}}</dd><dt>UDP rate</dt><dd>{{.Report.Configuration.UDPRate}}bit/s</dd><dt>Parallel streams</dt><dd>{{.Report.Configuration.ParallelStreams}}</dd><dt>Ping count</dt><dd>{{.Report.Configuration.PingCount}}</dd><dt>Ping interval</dt><dd>{{.Report.Configuration.PingInterval}}</dd><dt>TCP repeats</dt><dd>{{.Report.Configuration.TCPRepeats}}</dd>{{if .ShowSoak}}<dt>Soak duration</dt><dd>{{.Report.Configuration.SoakDuration}}</dd><dt>Soak load</dt><dd>{{orUnknown .Report.Configuration.SoakLoad}}</dd>{{end}}<dt>Monitor interval</dt><dd>{{.Report.Configuration.MonitorInterval}}</dd><dt>Cable test requested</dt><dd>{{yesNo .Report.Configuration.CableTest}}</dd><dt>Cable test TDR requested</dt><dd>{{yesNo .Report.Configuration.CableTestTDR}}</dd><dt>Output directory</dt><dd>{{orUnknown .Report.Configuration.Output}}</dd><dt>Verbose</dt><dd>{{yesNo .Report.Configuration.Verbose}}</dd><dt>Non-interactive</dt><dd>{{yesNo .Report.Configuration.NonInteractive}}</dd><dt>No sudo</dt><dd>{{yesNo .Report.Configuration.NoSudo}}</dd><dt>No report transfer</dt><dd>{{yesNo .Report.Configuration.NoReportTransfer}}</dd><dt>Allow virtual interface</dt><dd>{{yesNo .Report.Configuration.AllowVirtualInterface}}</dd><dt>Token auto-generated</dt><dd>{{yesNo .Report.Configuration.TokenGenerated}}</dd></dl>{{end}}
+    </div></details>
+
+    <details open><summary>22. Tool Versions</summary><div class="content">
+      {{if .ToolRows}}<div class="table-wrap"><table><thead><tr><th>Tool</th><th>PC1</th><th>PC2</th></tr></thead><tbody>{{range .ToolRows}}<tr><td>{{.Tool}}</td><td>{{.PC1}}</td><td>{{.PC2}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">Not run: tool versions were not recorded.</p>{{end}}
+    </div></details>
+
+    <details open><summary>23. Raw Artifact Index</summary><div class="content">
+      {{if .Report.RawFiles}}<div class="table-wrap"><table><thead><tr><th>File</th><th>SHA-256</th><th>Bytes</th></tr></thead><tbody>{{range .Report.RawFiles}}<tr><td><code>{{.Name}}</code></td><td><code>{{.SHA256}}</code></td><td>{{.Bytes}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">No raw artifacts were recorded.</p>{{end}}
+    </div></details>
+  </div>
+</main>
+
+{{define "ping"}}
+  {{if .Bars}}<div class="charts" aria-label="Average round-trip latency">{{range .Bars}}<div class="chart-row"><span class="chart-label">{{.Label}}</span><svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><rect class="chart-track" x="0" y="0" width="100" height="10" rx="3"></rect><rect class="bar-{{.Slug}}" x="0" y="0" width="{{chartPct .Value .Max}}" height="10" rx="3"></rect></svg><span class="chart-value">{{printf "%.2f ms" .Value}}</span></div>{{end}}</div>{{end}}
+  <div class="table-wrap"><table><thead><tr><th>Direction</th><th>Sent</th><th>Received</th><th>Loss</th><th>Dup</th><th>Errors</th><th>RTT min/avg/max/mdev (ms)</th><th>Longest gap</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{directionLabel .Result.Direction}}</td><td>{{.Result.Transmitted}}</td><td>{{.Result.Received}}</td><td>{{formatPercent .Result.LossPercent}}</td><td>{{.Result.Duplicates}}</td><td>{{add .Result.SendErrors .Result.IcmpErrors}}</td><td>{{printf "%.2f / %.2f / %.2f / %.2f" .Result.RTTMinMs .Result.RTTAvgMs .Result.RTTMaxMs .Result.RTTMdevMs}}</td><td>{{printf "%.1f ms" .Result.LongestGapMs}}</td></tr>{{end}}</tbody></table></div>
+  {{range .Rows}}{{if .Percentiles}}<p class="percentiles"><strong>{{directionLabel .Result.Direction}} percentiles:</strong> {{range $i, $p := .Percentiles}}{{if $i}} · {{end}}p{{$p.Rank}} {{printf "%.2f" $p.Value}} ms{{end}}</p>{{end}}{{end}}
+{{end}}
+
+{{define "tcp"}}
+  {{if .Bars}}{{template "throughputChart" .Bars}}{{end}}
+  <div class="table-wrap"><table><thead><tr><th>Run</th><th>Duration</th><th>Streams</th><th>Sender</th><th>Receiver</th><th>Retransmits</th><th>CoV</th><th>Min interval</th><th>Max interval</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{.Run}}{{if .Result.Incomplete}} (incomplete){{end}}</td><td>{{.Result.Duration}}</td><td>{{.Result.ParallelStreams}}</td><td>{{formatBps .Result.SenderBitsPerSecond}}</td><td>{{formatBps .Result.ReceiverBitsPerSecond}}</td><td>{{.Retrans}}</td><td>{{formatRatioPercent .Result.ThroughputVariation}}</td><td>{{formatBps .Result.MinimumIntervalBps}}</td><td>{{formatBps .Result.MaximumIntervalBps}}</td></tr>{{end}}</tbody></table></div>
+{{end}}
+
+{{define "throughputChart"}}<div class="charts" aria-label="Delivered throughput">{{range .}}<div class="chart-row"><span class="chart-label">{{.Label}}</span><svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><rect class="chart-track" x="0" y="0" width="100" height="10" rx="3"></rect><rect class="bar-{{.Slug}}" x="0" y="0" width="{{chartPct .Value .Max}}" height="10" rx="3"></rect></svg><span class="chart-value">{{formatBps .Value}}</span></div>{{end}}</div>{{end}}
+</body>
+</html>

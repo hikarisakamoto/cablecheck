@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CableCheck Report</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f3f6fa; --panel:#fff; --ink:#172033; --muted:#647087; --line:#d9e0ea; --accent:#2463eb; --excellent:#137a52; --good:#187257; --warning:#a55b00; --poor:#b13b21; --failed:#b42318; --inconclusive:#5c6370; --unknown:#5c6370; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(1180px,calc(100% - 32px)); margin:32px auto 64px; }
+    h1,h2,p { margin-top:0; }
+    .eyebrow { margin:0 0 8px; color:var(--muted); font-size:.78rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+    .hero { border-left:8px solid var(--unknown); border-radius:14px; padding:24px; background:var(--panel); box-shadow:0 8px 30px rgba(23,32,51,.08); }
+    .hero h1 { margin-bottom:6px; font-size:clamp(1.8rem,4vw,3rem); }
+    .hero-grid { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+    .score { min-width:92px; border:1px solid var(--line); border-radius:999px; padding:10px 16px; text-align:center; font-size:1.1rem; font-weight:800; }
+    .verdict-excellent { border-color:var(--excellent); } .verdict-good { border-color:var(--good); } .verdict-warning { border-color:var(--warning); } .verdict-poor { border-color:var(--poor); } .verdict-failed { border-color:var(--failed); } .verdict-inconclusive,.verdict-unknown { border-color:var(--inconclusive); }
+    .chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:14px; }
+    .chip { border-radius:999px; padding:3px 9px; color:#fff; background:var(--unknown); font-size:.78rem; font-weight:750; }
+    .severity-info { background:#3274c8; } .severity-warning { background:var(--warning); } .severity-poor { background:var(--poor); } .severity-failed { background:var(--failed); } .severity-marker,.severity-unknown { background:var(--unknown); }
+    .sections { display:grid; gap:12px; margin-top:20px; }
+    details { overflow:hidden; border:1px solid var(--line); border-radius:11px; background:var(--panel); }
+    summary { cursor:pointer; padding:15px 18px; font-size:1.02rem; font-weight:750; }
+    details[open] summary { border-bottom:1px solid var(--line); }
+    .content { padding:18px; }
+    .note { margin:0; border-left:4px solid #8ca0bb; border-radius:4px; padding:9px 12px; background:rgba(126,145,170,.12); color:var(--muted); }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    th,td { border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:.78rem; letter-spacing:.03em; text-transform:uppercase; }
+    tr:last-child td { border-bottom:0; }
+    dl { display:grid; grid-template-columns:minmax(160px,240px) 1fr; gap:7px 16px; margin:0; }
+    dt { color:var(--muted); font-weight:650; } dd { margin:0; overflow-wrap:anywhere; }
+    ul,ol { margin-bottom:0; padding-left:22px; }
+    .finding { margin:0 0 14px; } .finding:last-child { margin-bottom:0; }
+    .finding-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .charts { display:grid; gap:10px; margin:0 0 18px; }
+    .chart-row { display:grid; grid-template-columns:minmax(100px,180px) 1fr minmax(90px,130px); gap:10px; align-items:center; }
+    .chart-label { color:var(--muted); font-weight:650; }
+    .chart-value { text-align:right; font-variant-numeric:tabular-nums; }
+    svg { display:block; width:100%; height:12px; overflow:visible; }
+    .chart-track { fill:#dce3ed; } .bar-pc1-to-pc2 { fill:#2463eb; } .bar-pc2-to-pc1 { fill:#7a4bd4; } .bar-unknown { fill:#738096; }
+    .percentiles { margin-top:10px; color:var(--muted); font-size:.88rem; }
+    code { overflow-wrap:anywhere; }
+    @media (prefers-color-scheme:dark) { :root { --bg:#111722; --panel:#1a2230; --ink:#edf2f8; --muted:#aab5c5; --line:#344155; } .hero { box-shadow:none; } .chart-track { fill:#344155; } }
+    @media (max-width:650px) { main { width:min(100% - 18px,1180px); margin-top:12px; } .hero-grid { display:block; } .score { display:inline-block; margin-top:14px; } dl { grid-template-columns:1fr; gap:2px; } dd { margin-bottom:9px; } .chart-row { grid-template-columns:90px 1fr; } .chart-value { grid-column:2; text-align:left; } }
+    @media print { :root { color-scheme:light; --bg:#fff; --panel:#fff; --ink:#000; --muted:#444; --line:#bbb; } main { width:100%; margin:0; } .hero { box-shadow:none; } details { break-inside:avoid; } }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero verdict-failed">
+    <p class="eyebrow">CableCheck · Ethernet link health</p>
+    <div class="hero-grid">
+      <div>
+        <h1>Failed</h1>
+        <p>The cable failed critical tests and must be replaced.</p>
+      </div>
+      <div class="score">25/100</div>
+    </div>
+    <div class="chips" aria-label="Finding severities"><span class="chip severity-failed">Failed</span></div>
+  </header>
+
+  <div class="sections">
+    <details open><summary>1. Overall Result</summary><div class="content">
+      <p><strong>FAILED</strong> — The cable failed critical tests and must be replaced.</p>
+    </div></details>
+
+    <details open><summary>2. Score &amp; Rule Evidence</summary><div class="content">
+      
+      <dl><dt>Score</dt><dd>25/100</dd><dt>Reason</dt><dd>CRC-class receive errors incremented by 1555 during the test.</dd></dl>
+      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody><tr><td>PHY-02</td><td>physical</td><td><span class="chip severity-failed">Failed</span></td><td>CRC-class receive errors incremented by 1555 during the test.</td></tr></tbody></table></div>
+      
+    </div></details>
+
+    <details open><summary>3. Session Info</summary><div class="content"><dl>
+      <dt>Test ID</dt><dd>example-crc-errors</dd><dt>Schema version</dt><dd>1.0.0</dd><dt>Tool version</dt><dd>1.0.0</dd><dt>Protocol version</dt><dd>1</dd><dt>Started</dt><dd>2026-01-02T15:04:05Z</dd><dt>Finished</dt><dd>2026-01-02T15:05:35Z</dd><dt>Duration</dt><dd>1m30s</dd><dt>Mode</dt><dd>quick</dd><dt>Partial run</dt><dd>no</dd>
+    </dl></div></details>
+
+    <details open><summary>4. Machines &amp; Environment</summary><div class="content">
+      <div class="table-wrap"><table><thead><tr><th>Side</th><th>Hostname</th><th>Kernel</th><th>OS</th><th>NIC</th><th>Driver</th><th>Speed</th><th>Duplex</th><th>MTU</th><th>MAC</th><th>USB</th></tr></thead><tbody>
+      <tr><td>pc1</td><td>alpha</td><td>6.9.1-generic</td><td>linux/amd64</td><td>enp3s0</td><td>e1000e</td><td>1000 Mb/s</td><td>full</td><td>1500</td><td>aa:bb:cc:00:11:22</td><td>no</td></tr>
+      <tr><td>pc2</td><td>bravo</td><td>6.9.1-generic</td><td>linux/amd64</td><td>enp4s0</td><td>e1000e</td><td>1000 Mb/s</td><td>full</td><td>1500</td><td>aa:bb:cc:00:33:44</td><td>no</td></tr>
+      </tbody></table></div>
+    </div></details>
+
+    <details open><summary>5. Interface &amp; Link Negotiation</summary><div class="content">
+      <div class="table-wrap"><table><thead><tr><th>Side</th><th>Phase</th><th>Speed</th><th>Duplex</th><th>Autoneg</th><th>Link</th><th>MDI-X</th><th>Partner modes</th></tr></thead><tbody><tr><td>pc1</td><td>before</td><td>1000 Mb/s</td><td>full</td><td>on</td><td>yes</td><td>on (auto)</td><td>1000baseT/Full</td></tr><tr><td>pc1</td><td>after</td><td>1000 Mb/s</td><td>full</td><td>on</td><td>yes</td><td>on (auto)</td><td>1000baseT/Full</td></tr><tr><td>pc2</td><td>before</td><td>1000 Mb/s</td><td>full</td><td>on</td><td>yes</td><td>on (auto)</td><td>1000baseT/Full</td></tr><tr><td>pc2</td><td>after</td><td>1000 Mb/s</td><td>full</td><td>on</td><td>yes</td><td>on (auto)</td><td>1000baseT/Full</td></tr></tbody></table></div>
+    </div></details>
+
+    <details open><summary>6. Link Events Timeline</summary><div class="content">
+      <p class="note">No link events were observed during the run.</p>
+    </div></details>
+
+    <details open><summary>7. Counter Baseline</summary><div class="content">
+      <div class="table-wrap"><table><thead><tr><th>Counter</th><th>PC1</th><th>PC2</th></tr></thead><tbody><tr><td>link_resets</td><td>0</td><td>0</td></tr><tr><td>rx_align</td><td>0</td><td>0</td></tr><tr><td>rx_crc</td><td>0</td><td>0</td></tr><tr><td>rx_fifo</td><td>0</td><td>0</td></tr><tr><td>rx_frame</td><td>0</td><td>0</td></tr><tr><td>rx_missed</td><td>0</td><td>0</td></tr></tbody></table></div><p class="note">Counters absent on a side are not exposed by that hardware — absence is not zero.</p>
+    </div></details>
+
+    <details open><summary>8. Counter Deltas</summary><div class="content">
+      <div class="table-wrap"><table><thead><tr><th>Counter</th><th>PC1 Δ</th><th>PC2 Δ</th></tr></thead><tbody><tr><td>link_resets</td><td>&#43;0</td><td>&#43;0</td></tr><tr><td>rx_align</td><td>&#43;12</td><td>&#43;0</td></tr><tr><td>rx_crc</td><td>&#43;1543</td><td>&#43;0</td></tr><tr><td>rx_fifo</td><td>&#43;0</td><td>&#43;0</td></tr><tr><td>rx_frame</td><td>&#43;0</td><td>&#43;0</td></tr><tr><td>rx_missed</td><td>&#43;0</td><td>&#43;0</td></tr></tbody></table></div><p class="note">“unreliable” marks a counter that reset or wrapped mid-run; its delta is not evidence.</p>
+    </div></details>
+
+    <details open><summary>9. Ping Stability</summary><div class="content">
+      
+  <div class="charts" aria-label="Average round-trip latency"><div class="chart-row"><span class="chart-label">pc1 → pc2</span><svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><rect class="chart-track" x="0" y="0" width="100" height="10" rx="3"></rect><rect class="bar-pc1-to-pc2" x="0" y="0" width="100" height="10" rx="3"></rect></svg><span class="chart-value">0.21 ms</span></div><div class="chart-row"><span class="chart-label">pc2 → pc1</span><svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><rect class="chart-track" x="0" y="0" width="100" height="10" rx="3"></rect><rect class="bar-pc2-to-pc1" x="0" y="0" width="100" height="10" rx="3"></rect></svg><span class="chart-value">0.21 ms</span></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Direction</th><th>Sent</th><th>Received</th><th>Loss</th><th>Dup</th><th>Errors</th><th>RTT min/avg/max/mdev (ms)</th><th>Longest gap</th></tr></thead><tbody><tr><td>pc1 → pc2</td><td>500</td><td>500</td><td>0.00%</td><td>0</td><td>0</td><td>0.18 / 0.21 / 0.35 / 0.02</td><td>0.0 ms</td></tr><tr><td>pc2 → pc1</td><td>500</td><td>500</td><td>0.00%</td><td>0</td><td>0</td><td>0.18 / 0.21 / 0.35 / 0.02</td><td>0.0 ms</td></tr></tbody></table></div>
+  <p class="percentiles"><strong>pc1 → pc2 percentiles:</strong> p50 0.21 ms · p90 0.24 ms · p95 0.26 ms · p99 0.31 ms</p><p class="percentiles"><strong>pc2 → pc1 percentiles:</strong> p50 0.21 ms · p90 0.24 ms · p95 0.26 ms · p99 0.31 ms</p>
+
+    </div></details>
+
+    <details open><summary>10. Full-Size Ping</summary><div class="content">
+      <p class="note">Not run: no result was recorded.</p>
+    </div></details>
+
+    <details open><summary>11. TCP Throughput PC1→PC2</summary><div class="content">
+      
+  <div class="charts" aria-label="Delivered throughput"><div class="chart-row"><span class="chart-label">Run 1</span><svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><rect class="chart-track" x="0" y="0" width="100" height="10" rx="3"></rect><rect class="bar-pc1-to-pc2" x="0" y="0" width="93.01" height="10" rx="3"></rect></svg><span class="chart-value">930.1 Mbit/s</span></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Run</th><th>Duration</th><th>Streams</th><th>Sender</th><th>Receiver</th><th>Retransmits</th><th>CoV</th><th>Min interval</th><th>Max interval</th></tr></thead><tbody><tr><td>1</td><td>30s</td><td>4</td><td>930.4 Mbit/s</td><td>930.1 Mbit/s</td><td>0</td><td>1.20%</td><td>927.1 Mbit/s</td><td>932.1 Mbit/s</td></tr></tbody></table></div>
+
+    </div></details>
+
+    <details open><summary>12. TCP Throughput PC2→PC1</summary><div class="content">
+      
+  <div class="charts" aria-label="Delivered throughput"><div class="chart-row"><span class="chart-label">Run 1</span><svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><rect class="chart-track" x="0" y="0" width="100" height="10" rx="3"></rect><rect class="bar-pc2-to-pc1" x="0" y="0" width="92.85" height="10" rx="3"></rect></svg><span class="chart-value">928.5 Mbit/s</span></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Run</th><th>Duration</th><th>Streams</th><th>Sender</th><th>Receiver</th><th>Retransmits</th><th>CoV</th><th>Min interval</th><th>Max interval</th></tr></thead><tbody><tr><td>1</td><td>30s</td><td>4</td><td>928.9 Mbit/s</td><td>928.5 Mbit/s</td><td>0</td><td>1.20%</td><td>925.5 Mbit/s</td><td>930.5 Mbit/s</td></tr></tbody></table></div>
+
+    </div></details>
+
+    <details open><summary>13. Bidirectional Stress</summary><div class="content">
+      <p class="note">Not run: no bidirectional result was recorded.</p>
+    </div></details>
+
+    <details open><summary>14. UDP Loss &amp; Jitter</summary><div class="content">
+      <div class="table-wrap"><table><thead><tr><th>Direction</th><th>Target</th><th>Sender</th><th>Receiver</th><th>Lost/Total</th><th>Loss</th><th>Jitter</th><th>Out-of-order</th></tr></thead><tbody><tr><td>pc1 → pc2</td><td>800.0 Mbit/s</td><td>799.6 Mbit/s</td><td>799.6 Mbit/s</td><td>0/67930</td><td>0.00%</td><td>0.11 ms</td><td>0</td></tr><tr><td>pc2 → pc1</td><td>800.0 Mbit/s</td><td>799.3 Mbit/s</td><td>799.3 Mbit/s</td><td>0/67928</td><td>0.00%</td><td>0.11 ms</td><td>0</td></tr></tbody></table></div>
+    </div></details>
+
+    <details open><summary>15. CPU Utilization</summary><div class="content">
+      <div class="table-wrap"><table><thead><tr><th>Test</th><th>Sender CPU</th><th>Receiver CPU</th></tr></thead><tbody><tr><td>TCP pc1 → pc2</td><td>12.5%</td><td>9.8%</td></tr><tr><td>TCP pc2 → pc1</td><td>12.5%</td><td>9.8%</td></tr><tr><td>UDP pc1 → pc2</td><td>12.5%</td><td>9.8%</td></tr><tr><td>UDP pc2 → pc1</td><td>12.5%</td><td>9.8%</td></tr></tbody></table></div>
+    </div></details>
+
+    <details open><summary>16. Cable Diagnostics</summary><div class="content">
+      <p class="note">Not run: cable diagnostics were not requested.</p>
+    </div></details>
+
+    <details open><summary>17. Monitoring Timeline</summary><div class="content">
+      <p class="note">No monitoring events were recorded during the run.</p>
+    </div></details>
+
+    <details open><summary>18. Findings Detail</summary><div class="content">
+      <article class="finding"><div class="finding-head"><strong>PHY-02</strong><span class="chip severity-failed">Failed</span><span>physical</span></div><p>CRC-class receive errors incremented by 1555 during the test.</p><ul><li>pc1: CRC-class error counters &#43;1555 during the test</li></ul></article>
+    </div></details>
+
+    <details open><summary>19. Recommendations</summary><div class="content">
+      <ol><li>Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun.</li><li>Isolation test: same machines with a different cable, then the same cable between different machines.</li></ol>
+    </div></details>
+
+    <details open><summary>20. Limitations &amp; Unavailable Tests</summary><div class="content">
+      <p class="note">None — every planned test ran and no warnings were raised.</p>
+    </div></details>
+
+    <details open><summary>21. Configuration Used</summary><div class="content">
+      <dl><dt>Role</dt><dd>pc1</dd><dt>Local IP</dt><dd>192.168.100.1</dd><dt>Peer IP</dt><dd>192.168.100.2</dd><dt>Interface</dt><dd>enp3s0</dd><dt>Mode</dt><dd>quick</dd><dt>Control port</dt><dd>44300</dd><dt>iperf3 port</dt><dd>44301</dd><dt>TCP duration</dt><dd>30s</dd><dt>UDP duration</dt><dd>20s</dd><dt>UDP rate</dt><dd>800Mbit/s</dd><dt>Parallel streams</dt><dd>4</dd><dt>Ping count</dt><dd>500</dd><dt>Ping interval</dt><dd>20ms</dd><dt>TCP repeats</dt><dd>1</dd><dt>Monitor interval</dt><dd>1s</dd><dt>Cable test requested</dt><dd>no</dd><dt>Cable test TDR requested</dt><dd>no</dd><dt>Output directory</dt><dd>.</dd><dt>Verbose</dt><dd>no</dd><dt>Non-interactive</dt><dd>no</dd><dt>No sudo</dt><dd>no</dd><dt>No report transfer</dt><dd>no</dd><dt>Allow virtual interface</dt><dd>no</dd><dt>Token auto-generated</dt><dd>yes</dd></dl>
+    </div></details>
+
+    <details open><summary>22. Tool Versions</summary><div class="content">
+      <div class="table-wrap"><table><thead><tr><th>Tool</th><th>PC1</th><th>PC2</th></tr></thead><tbody><tr><td>ethtool</td><td>6.7</td><td>6.7</td></tr><tr><td>iperf3</td><td>3.16</td><td>3.16</td></tr><tr><td>ping</td><td>iputils-20240117</td><td>iputils-20240117</td></tr></tbody></table></div>
+    </div></details>
+
+    <details open><summary>23. Raw Artifact Index</summary><div class="content">
+      <p class="note">No raw artifacts were recorded.</p>
+    </div></details>
+  </div>
+</main>
+
+
+
+
+
+
+</body>
+</html>
