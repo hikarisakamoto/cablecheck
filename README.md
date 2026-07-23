@@ -1,5 +1,13 @@
 # CableCheck
 
+[![Go](https://img.shields.io/github/go-mod/go-version/hikarisakamoto/cablecheck?logo=go&logoColor=white&label=go)](go.mod)
+[![License](https://img.shields.io/github/license/hikarisakamoto/cablecheck?color=brightgreen)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/hikarisakamoto/cablecheck)](https://github.com/hikarisakamoto/cablecheck/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/hikarisakamoto/cablecheck/total)](https://github.com/hikarisakamoto/cablecheck/releases)
+[![Stars](https://img.shields.io/github/stars/hikarisakamoto/cablecheck)](https://github.com/hikarisakamoto/cablecheck/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/hikarisakamoto/cablecheck)](https://github.com/hikarisakamoto/cablecheck/commits/main)
+[![Platform](https://img.shields.io/badge/platform-Linux-informational)](#supported-environment)
+
 CableCheck is a Linux command-line tool for testing the health, stability, and performance of an Ethernet link between two directly connected PCs. PC1 coordinates the run and PC2 executes the measurements. Together they inspect link negotiation and NIC counters, watch link state through sysfs, and run bidirectional ping, full-size ping, TCP, UDP, and stress tests with `ping`, `ip`, `ethtool`, and `iperf3`.
 
 You get a rule-based classification (`EXCELLENT`, `GOOD`, `WARNING`, `POOR`, `FAILED`, or `INCONCLUSIVE`) plus a human report, machine-readable JSON, a short text summary, and the raw evidence.
