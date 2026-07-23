@@ -10,7 +10,7 @@ import (
 	"cablecheck/internal/app"
 )
 
-// cmdReport re-renders report.md and summary.txt from a saved report.json. It
+// cmdReport re-renders report.md, summary.txt and report.html from a saved report.json. It
 // takes the report.json path as its single positional argument and an optional
 // --output directory (default: alongside the JSON). All rendering happens
 // offline through the pure reporting layer — the saved classification is never
@@ -39,7 +39,7 @@ func cmdReport(_ context.Context, args []string, stdout, stderr io.Writer) error
 func reportUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage: cablecheck report [--output dir] <report.json>
 
-Re-render report.md and summary.txt from a saved report.json. The saved
+Re-render report.md, summary.txt and report.html from a saved report.json. The saved
 classification is reproduced verbatim (no re-evaluation).
 
 Flags:

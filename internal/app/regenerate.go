@@ -19,12 +19,13 @@ import (
 // allocating for it.
 const regenSizeCap = 64 << 20
 
-// Regenerate re-renders report.md and summary.txt from a saved report.json
-// (docs/design/clieval.md §5.5). It re-parses the record and renders through
-// the same pure reporting functions a live run uses — it never re-evaluates,
-// because the classification is part of the saved record and must not drift.
+// Regenerate re-renders report.md, summary.txt and report.html from a saved
+// report.json (docs/design/clieval.md §5.5). It re-parses the record and
+// renders through the same pure reporting functions a live run uses — it
+// never re-evaluates, because the classification is part of the saved record
+// and must not drift.
 //
-// path is the report.json to read; outDir is where the two files are written,
+// path is the report.json to read; outDir is where the three files are written,
 // defaulting to the JSON's own directory when empty. Every user-facing failure
 // (missing file, oversize file, malformed JSON, unsupported schema major) is
 // wrapped in an *ExitError{ExitConfig} so the cli maps it to exit 4.
@@ -68,6 +69,7 @@ func Regenerate(path, outDir string, stdout io.Writer) error {
 	}{
 		{"report.md", reporting.RenderMarkdown(&rep)},
 		{"summary.txt", reporting.RenderSummary(&rep)},
+		{"report.html", reporting.RenderHTML(&rep)},
 	}
 	for _, f := range files {
 		dst := filepath.Join(outDir, f.name)

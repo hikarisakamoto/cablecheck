@@ -251,6 +251,7 @@ authoritative directory has this layout:
 cablecheck-report-YYYY-MM-DD_HH-MM-SS/
 ├── summary.txt       short operator summary
 ├── report.md         full human-readable report
+├── report.html       self-contained browser report (PC1 only)
 ├── report.json       schema-versioned source record
 └── raw/              command output and CableCheck debug evidence
 ```
@@ -266,9 +267,13 @@ raw data and writes a local summary fallback instead. Since `raw/` and
 `diagnostic.json` are never transferred, inspect both machines' local report
 directories when diagnosing parser or driver behavior.
 
+`report.html` is generated only in PC1's authoritative directory and is not
+transferred to PC2. It contains inline CSS and SVG charts with no JavaScript or
+external resources, so it can be opened fully offline.
+
 The transfer manifest carries each file's size and SHA-256. PC2 accepts only the three fixed filenames, caps each file at 8 MiB and the set at 16 MiB, writes to a `.part` file, verifies size and digest, then renames it. A failed file is retried once. Transfer failure is a warning and doesn't change the health classification or exit code. Set `--no-report-transfer` on either peer to disable or decline transfer.
 
-Re-render Markdown and text from a saved JSON record without re-evaluating its verdict:
+Re-render HTML, Markdown and text from a saved JSON record without re-evaluating its verdict:
 
 ```bash
 cablecheck report cablecheck-report-2026-07-19_12-00-00/report.json
@@ -384,7 +389,7 @@ make demo-e2e
 ./scripts/demo-e2e.sh
 ```
 
-The script runs PC1 on `127.0.0.1` and PC2 on `127.0.0.2` with `--allow-virtual-interface --non-interactive`, checks both report directories, verifies matching SHA-256 hashes for the transferred `report.json`, and tests offline report regeneration. Each CableCheck peer exits 3 because loopback correctly forces `INCONCLUSIVE`. The wrapper script treats those expected peer exits as success and exits 0.
+The script runs PC1 on `127.0.0.1` and PC2 on `127.0.0.2` with `--allow-virtual-interface --non-interactive`, checks both report directories (including PC1-only `report.html`), verifies matching SHA-256 hashes for the transferred `report.json`, and tests offline report regeneration. Each CableCheck peer exits 3 because loopback correctly forces `INCONCLUSIVE`. The wrapper script treats those expected peer exits as success and exits 0.
 
 ## Further documentation
 

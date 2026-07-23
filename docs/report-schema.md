@@ -309,4 +309,5 @@ Schema 1.x follows these rules:
    values are never silently redefined.
 
 Use `cablecheck report path/to/report.json` to render a compatible JSON report
-into `report.md` and `summary.txt` without rerunning any tests.
+into `report.md`, `summary.txt` and self-contained `report.html` without
+rerunning any tests.

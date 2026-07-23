@@ -7,7 +7,7 @@ the code.
 
 CableCheck is a **Go 1.26+, standard-library-only** Linux CLI. It tests the health of a
 directly-connected Ethernet link between two PCs (PC1 coordinates, PC2 works) and emits a
-rule-based verdict plus JSON / Markdown / text reports. Linux `amd64` and `arm64` only.
+rule-based verdict plus JSON / HTML / Markdown / text reports. Linux `amd64` and `arm64` only.
 
 ---
 
@@ -96,7 +96,7 @@ rules. `app` is the composition root.
 | `internal/parser` | Pure output parsers (`ethtool`, `ip -j`, `ping`, `iperf3`, cable-test/TDR). Bytes in, model out, no I/O. |
 | `internal/runner` | Shell-free process execution: `exec.CommandContext` + `Setpgid`, SIGTERM→SIGKILL escalation, bounded capture, `LC_ALL=C`. |
 | `internal/network` | Interface discovery/classification by owning IP, sysfs link monitoring, USB/virtual detection, port probes. |
-| `internal/reporting` | Report dir layout + JSON/Markdown/text rendering + verified SHA-256 transfer + offline regeneration (`model` + stdlib only). |
+| `internal/reporting` | Report dir layout + JSON/HTML/Markdown/text rendering + verified SHA-256 transfer of the three-file core + offline regeneration (`model` + stdlib only). |
 | `internal/model` | Pure domain types: `Report`, results, `Bitrate`/`Duration` value objects, `HealthClass`. Imports stdlib only. |
 | `internal/clock` | Injectable wall clock; `FakeClock` for tests. |
 | `internal/logging` | `slog` multi-handler (human text → stderr, JSON debug → report dir) with token/payload redaction. |
@@ -169,8 +169,9 @@ These are correctness requirements, not style preferences. A change that violate
   `/run/cablecheck`, `/tmp` last; reject symlinks and foreign-owned dirs (mode `0700`).
 - **Frame decoding:** validate the 4-byte length prefix against the max **before** allocating
   (`TestFrameMaxSize` guards against a 4 GiB alloc). Keep it.
-- **Report transfer:** only the three fixed filenames, size + SHA-256 verified, per-file/total
-  caps; transfer failure is advisory and must never change the verdict or exit code.
+- **Report transfer:** only the three fixed core filenames, size + SHA-256 verified,
+  per-file/total caps; `report.html` stays on PC1, and transfer failure is advisory and must
+  never change the verdict or exit code.
 
 ### Exit-code contract (`internal/app/exit.go`)
 

@@ -275,8 +275,9 @@ All from `testdata/ip/*.json` fixtures through FakeRunner — never the real `ip
 
 ### internal/reporting
 - `TestMarkdownGolden` — golden files `testdata/golden/report-{healthy,reduced-speed,crc,host-limited,failed}.md`; deterministic input (FakeClock timestamps, fixed testId); `-update` flag (`var update = flag.Bool("update", false, ...)`); byte-exact compare; asserts all 23 mandated section headers present via a separate structural test so a golden regen can't silently drop sections.
+- `TestHTMLGoldenHealthy` plus structure/escaping/self-containment tests — byte-exact healthy HTML, all 23 open sections for populated and empty reports, deterministic charts, and no executable peer-derived markup or external assets.
 - `TestSummaryTxtGolden` — same pattern.
-- `TestRegenerateFromJSON` — write report.json → `reporting.Regenerate(jsonPath, outDir)` (the `cablecheck report` engine) ⇒ report.md + summary.txt byte-identical to direct generation. Pins the CLI subcommand's core.
+- `TestRegenerateFromJSON` — write report.json → `reporting.Regenerate(jsonPath, outDir)` (the `cablecheck report` engine) ⇒ report.md + summary.txt + report.html byte-identical to direct generation. Pins the CLI subcommand's core.
 - `TestReportDirNaming` — FakeClock ⇒ `cablecheck-report-2026-07-15_10-30-00`.
 - `TestRawArtifactPaths` — raw/ tree written; every CommandResult teed.
 - `TestTransferSHA256` — chunked transfer over `net.Pipe`: happy path hash match; **corrupted chunk** (test flips a byte via a wrapping `io.Writer`) ⇒ verification error, receiver keeps nothing partial; oversize file ⇒ rejected against negotiated cap before transfer.
@@ -320,7 +321,7 @@ func (a *App) Wait() (ExitCode, error)
 
 Scenarios (each a subtest of `TestIntegration`):
 
-1. **HappyPathQuick** — full quick run. Asserts: both exit 0; PC1 dir contains report.json (unmarshals into model.Report, classification ∈ {GOOD, EXCELLENT}), report.md with all 23 headers, summary.txt, raw/ populated; PC2 dir contains transferred report.json/report.md/summary.txt whose SHA-256 equal PC1's files. Interactive variant: stdin `io.Pipe`, test writes "start\n" to both after observing state `waiting_for_local_start` via `onState` channel. This proves start-sync ordering without sleeps.
+1. **HappyPathQuick** — full quick run. Asserts: both exit 0; PC1 dir contains report.json (unmarshals into model.Report, classification ∈ {GOOD, EXCELLENT}), report.md and PC1-only report.html with all 23 sections, summary.txt, raw/ populated; PC2 dir contains transferred report.json/report.md/summary.txt whose SHA-256 equal PC1's files and no report.html. Interactive variant: stdin `io.Pipe`, test writes "start\n" to both after observing state `waiting_for_local_start` via `onState` channel. This proves start-sync ordering without sleeps.
 2. **PeerDisconnectMidTest** — worker's iperf3 client Script has `Delay`+`Started`; on `Started`, test hard-cancels the worker's ctx (simulates death). Coordinator: partial report written (report.json has `"partial": true` / incomplete test entries), exit **5**.
 3. **SIGINTSimulation** — coordinator ctx cancelled mid-TCP-test (gated on `Started`). Asserts: abort message received by worker (worker `onState` reaches aborted; worker exits 5), coordinator's receiving-side FakeProcess `Killed()` true, partial report present, coordinator exit **6**. Tests don't send real signals; `signal.NotifyContext` lives only in `main.go` (thin, review-gated).
 4. **MalformedFrameInjection** — raw `net.Dial` to control port sends header `0xFFFFFFFF` + garbage; coordinator closes that conn without panic and, still pre-handshake, keeps listening; then a legit worker completes normally. Mid-session malformed frames are covered at protocol unit level.
@@ -371,7 +372,7 @@ export PATH="$PWD/testdata/stubtools:$PATH"
 # type "start" in both when prompted
 ```
 
-**Success proof:** virtual-interface warning printed; 3-2-1 countdown on both; `[n/8]` progress lines; both exit 0 (`echo $?`); `cablecheck-report-*/` on both sides with summary.txt/report.md/report.json/raw/; `sha256sum` of PC1 vs PC2 report.json identical; `./cablecheck report <pc1-dir>/report.json` regenerates md+summary (proves `report` subcommand); `./cablecheck doctor --local-ip 127.0.0.1 --allow-virtual-interface` all-green with stub PATH, and *without* stub PATH shows iperf3/ethtool missing with `pacman -S iperf3 ethtool` hint (negative demo). Interrupt demo: Ctrl-C in terminal 1 mid-test ⇒ exit 6, partial report, terminal 2 reports peer abort.
+**Success proof:** virtual-interface warning printed; 3-2-1 countdown on both; `[n/8]` progress lines; both exit 0 (`echo $?`); PC1 has report.html/summary.txt/report.md/report.json/raw/ while PC2 has only the transferred three-file core; `sha256sum` of PC1 vs PC2 report.json identical; `./cablecheck report <pc1-dir>/report.json` regenerates HTML+Markdown+text (proves `report` subcommand); `./cablecheck doctor --local-ip 127.0.0.1 --allow-virtual-interface` all-green with stub PATH, and *without* stub PATH shows iperf3/ethtool missing with `pacman -S iperf3 ethtool` hint (negative demo). Interrupt demo: Ctrl-C in terminal 1 mid-test ⇒ exit 6, partial report, terminal 2 reports peer abort.
 
 Because `--non-interactive` exists, this is also scriptable. `scripts/demo-e2e.sh` runs PC1 in background with port 0→fixed demo port, PC2 foreground, and asserts exit codes + report artifacts + hash equality. It's wired as `make demo-e2e` so the "demo" gate is push-button.
 

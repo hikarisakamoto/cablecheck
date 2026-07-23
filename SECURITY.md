@@ -54,7 +54,7 @@ Things I'd genuinely want to know about, because they break an invariant that's 
 to hold:
 
 - The session token leaking anywhere it shouldn't — a `report.json`/`report.md`/
-  `summary.txt` field, a log line, raw evidence.
+  `report.html`/`summary.txt` field, a log line, raw evidence.
 - Process termination signalling the wrong PID or process group (ownership is meant to be
   verified against `/proc` and the euid before anything is signalled).
 - Path traversal or escaping the directory you passed to `--output`.

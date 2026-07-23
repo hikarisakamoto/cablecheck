@@ -474,6 +474,9 @@ Transfer runs PC1 → PC2 during `generating_report`, only when PC1 hasn't disab
 | Total manifest cap | 16 MiB |
 | Retry | One extra attempt per rejected file |
 
+The self-contained `report.html` is a PC1-local projection and is deliberately
+not part of protocol v1 report transfer.
+
 The flow is:
 
 1. PC1 hashes the existing allowed files and sends `report` with name, size, digest, and total size.

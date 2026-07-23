@@ -91,9 +91,9 @@ func TestExampleClassifications(t *testing.T) {
 }
 
 // TestExamplesRegenerate asserts every committed report.json survives an
-// app.Regenerate round-trip byte-identically: the regenerated report.md and
-// summary.txt must equal the committed copies, proving the example JSON is a
-// faithful, self-describing record.
+// app.Regenerate round-trip byte-identically: every regenerated projection
+// must equal the committed copy, proving the example JSON is a faithful,
+// self-describing record.
 func TestExamplesRegenerate(t *testing.T) {
 	for _, sc := range seeds() {
 		t.Run(sc.Name, func(t *testing.T) {
@@ -107,6 +107,10 @@ func TestExamplesRegenerate(t *testing.T) {
 			wantSummary, err := os.ReadFile(filepath.Join(dir, "summary.txt"))
 			if err != nil {
 				t.Fatalf("read committed summary.txt: %v", err)
+			}
+			wantHTML, err := os.ReadFile(filepath.Join(dir, "report.html"))
+			if err != nil {
+				t.Fatalf("read committed report.html: %v", err)
 			}
 
 			out := t.TempDir()
@@ -122,11 +126,18 @@ func TestExamplesRegenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read regenerated summary.txt: %v", err)
 			}
+			gotHTML, err := os.ReadFile(filepath.Join(out, "report.html"))
+			if err != nil {
+				t.Fatalf("read regenerated report.html: %v", err)
+			}
 			if !bytes.Equal(gotMD, wantMD) {
 				t.Errorf("regenerated report.md differs from committed copy")
 			}
 			if !bytes.Equal(gotSummary, wantSummary) {
 				t.Errorf("regenerated summary.txt differs from committed copy")
+			}
+			if !bytes.Equal(gotHTML, wantHTML) {
+				t.Errorf("regenerated report.html differs from committed copy")
 			}
 		})
 	}

@@ -94,7 +94,7 @@ Usage:
 Commands:
   run      Run a coordinated cable test (start on both PCs, pc1 first)
   doctor   Check local dependencies and configuration
-  report   Re-render report.md/summary.txt from a report.json
+  report   Re-render report.md/summary.txt/report.html from a report.json
   version  Print version, protocol and schema information
 
 Run "cablecheck run -h" for the full flag reference.

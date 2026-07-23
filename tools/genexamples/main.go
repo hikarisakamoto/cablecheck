@@ -30,7 +30,7 @@ import (
 )
 
 // exampleFiles are the artifacts written per scenario, in a fixed order.
-var exampleFiles = []string{"report.json", "report.md", "summary.txt"}
+var exampleFiles = []string{"report.json", "report.md", "summary.txt", "report.html"}
 
 func main() {
 	out := flag.String("out", "examples", "output directory for the generated example scenarios")
@@ -62,7 +62,7 @@ func evaluated(seed *model.Report) *model.Report {
 
 // generateInto evaluates and renders every scenario into base/<name>/, creating
 // the directories with 0700 permissions. Each scenario yields report.json,
-// report.md and summary.txt.
+// report.md, summary.txt and report.html.
 func generateInto(base string) error {
 	for _, sc := range seeds() {
 		dir := filepath.Join(base, sc.Name)
@@ -78,6 +78,7 @@ func generateInto(base string) error {
 			"report.json": jsonBytes,
 			"report.md":   reporting.RenderMarkdown(rep),
 			"summary.txt": reporting.RenderSummary(rep),
+			"report.html": reporting.RenderHTML(rep),
 		}
 		for _, name := range exampleFiles {
 			dst := filepath.Join(dir, name)

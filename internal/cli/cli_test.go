@@ -204,10 +204,10 @@ func TestCLIDispatch(t *testing.T) {
 		if code != 0 {
 			t.Errorf("code = %d, want 0 (stderr: %s)", code, errOut)
 		}
-		if !strings.Contains(out, "report.md") {
+		if !strings.Contains(out, "report.md") || !strings.Contains(out, "report.html") {
 			t.Errorf("stdout misses the wrote-file confirmation:\n%s", out)
 		}
-		for _, name := range []string{"report.md", "summary.txt"} {
+		for _, name := range []string{"report.md", "summary.txt", "report.html"} {
 			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 				t.Errorf("%s was not regenerated: %v", name, err)
 			}

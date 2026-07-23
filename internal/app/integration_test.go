@@ -292,8 +292,8 @@ func assertQuickTrafficCalls(t *testing.T, side *intSide, wantBidirClient bool) 
 
 // assertHealthyArtifacts asserts PC1's complete happy-path artifact set:
 // report.json parses with a passing classification and the full traffic
-// suite's results, report.md carries all 23 section headers, summary.txt
-// exists, and raw/ is non-empty.
+// suite's results, report.md and report.html carry all 23 sections,
+// summary.txt exists, and raw/ is non-empty.
 func assertHealthyArtifacts(t *testing.T, pc1 *intSide) {
 	t.Helper()
 	rep, dir := readReport(t, pc1.cfg.OutputDir)
@@ -323,6 +323,13 @@ func assertHealthyArtifacts(t *testing.T, pc1 *intSide) {
 		if !strings.Contains(string(md), h) {
 			t.Errorf("report.md misses section header %q", h)
 		}
+	}
+	htmlReport, err := os.ReadFile(filepath.Join(dir, "report.html"))
+	if err != nil {
+		t.Fatalf("read report.html: %v", err)
+	}
+	if got := strings.Count(string(htmlReport), "<details open>"); got != len(markdownSectionHeaders) {
+		t.Errorf("report.html has %d open sections, want %d", got, len(markdownSectionHeaders))
 	}
 	if _, err := os.Stat(filepath.Join(dir, "summary.txt")); err != nil {
 		t.Errorf("summary.txt: %v", err)
@@ -355,6 +362,9 @@ func assertTransferredReportsMatch(t *testing.T, pc1, pc2 *intSide) {
 		if sha256.Sum256(a) != sha256.Sum256(b) {
 			t.Errorf("PC2 %s SHA-256 differs from PC1's copy", name)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dir2, "report.html")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("PC2 report.html should remain absent: %v", err)
 	}
 	assertNoPartFilesLeft(t, dir2)
 }

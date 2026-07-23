@@ -64,7 +64,7 @@ func writeReportJSON(t *testing.T, dir string, rep *model.Report) string {
 }
 
 func TestRegenerateFromJSON(t *testing.T) {
-	t.Run("ByteIdenticalMarkdownAndSummary", func(t *testing.T) {
+	t.Run("ByteIdenticalRenderedOutputs", func(t *testing.T) {
 		rep := regenReport()
 		dir := t.TempDir()
 		path := writeReportJSON(t, dir, rep)
@@ -91,6 +91,13 @@ func TestRegenerateFromJSON(t *testing.T) {
 		if wantSum := reporting.RenderSummary(rep); !bytes.Equal(gotSum, wantSum) {
 			t.Errorf("regenerated summary.txt differs from a direct render")
 		}
+		gotHTML, err := os.ReadFile(filepath.Join(dir, "report.html"))
+		if err != nil {
+			t.Fatalf("read regenerated report.html: %v", err)
+		}
+		if wantHTML := reporting.RenderHTML(rep); !bytes.Equal(gotHTML, wantHTML) {
+			t.Errorf("regenerated report.html differs from a direct render")
+		}
 	})
 
 	t.Run("OutputDirDefaultsNextToJSON", func(t *testing.T) {
@@ -102,7 +109,7 @@ func TestRegenerateFromJSON(t *testing.T) {
 		if err := Regenerate(path, "", &stdout); err != nil {
 			t.Fatalf("Regenerate: %v", err)
 		}
-		for _, name := range []string{"report.md", "summary.txt"} {
+		for _, name := range []string{"report.md", "summary.txt", "report.html"} {
 			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 				t.Errorf("%s was not written next to the JSON: %v", name, err)
 			}
@@ -120,9 +127,11 @@ func TestRegenerateFromJSON(t *testing.T) {
 		if !strings.Contains(err.Error(), "schema") {
 			t.Errorf("error %q does not mention the schema version", err)
 		}
-		// No files written for an unsupported schema.
-		if _, statErr := os.Stat(filepath.Join(dir, "report.md")); !errors.Is(statErr, os.ErrNotExist) {
-			t.Errorf("report.md was written despite the schema mismatch")
+		// No rendered files are written for an unsupported schema.
+		for _, name := range []string{"report.md", "summary.txt", "report.html"} {
+			if _, statErr := os.Stat(filepath.Join(dir, name)); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("%s was written despite the schema mismatch", name)
+			}
 		}
 	})
 

@@ -100,7 +100,7 @@ func (v *verdict) complete() protocol.Complete {
 }
 
 // finalize assembles the report from everything measured, evaluates it,
-// renders all three outputs into dir and stores the verdict. Re-rendering with
+// renders all four PC1 outputs into dir and stores the verdict. Re-rendering with
 // a session outcome intentionally re-evaluates after peer capabilities have
 // been merged: virtual interfaces, USB attachment and peer NIC properties are
 // classification facts, not presentation-only enrichment. failure is nil for
@@ -311,7 +311,8 @@ func appendPrefixed(dst []string, prefix string, extra []string) []string {
 	return dst
 }
 
-// writeReportFiles renders and writes report.json, report.md and summary.txt.
+// writeReportFiles renders and writes PC1's report.json, report.md,
+// summary.txt and self-contained report.html.
 func writeReportFiles(dir string, rep *model.Report) error {
 	jsonBytes, err := reporting.RenderJSON(rep)
 	if err != nil {
@@ -324,6 +325,7 @@ func writeReportFiles(dir string, rep *model.Report) error {
 		{"report.json", jsonBytes},
 		{"report.md", reporting.RenderMarkdown(rep)},
 		{"summary.txt", reporting.RenderSummary(rep)},
+		{"report.html", reporting.RenderHTML(rep)},
 	} {
 		if err := os.WriteFile(filepath.Join(dir, f.name), f.data, 0o600); err != nil {
 			return err
