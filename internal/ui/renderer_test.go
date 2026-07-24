@@ -83,7 +83,7 @@ func TestRendererSoakBudget(t *testing.T) {
 	r.Step(1, 8, "soak")
 	clk.Advance(15 * time.Second)
 	r.Progress(protocol.TestProgress{Stage: "cycle", Percent: 1})
-	if got := out.String(); !strings.Contains(got, "elapsed 15s ETA 45s") {
+	if got := out.String(); !strings.Contains(got, "soak 15s/1m (ETA 45s)") {
 		t.Fatalf("soak timing did not override protocol progress: %q", got)
 	}
 }
@@ -300,7 +300,7 @@ func TestRendererProgressBeforeFirstStepIsSuppressed(t *testing.T) {
 	if strings.Contains(got, "[0/0]") || !strings.Contains(got, "[1/5] cycle 1: counters") {
 		t.Fatalf("first valid soak step output = %q", got)
 	}
-	if !strings.Contains(got, "elapsed 5s ETA 55s") {
+	if !strings.Contains(got, "soak 5s/1m (ETA 55s)") {
 		t.Fatalf("pre-step progress did not preserve soak elapsed origin: %q", got)
 	}
 }
@@ -399,6 +399,57 @@ func TestRendererTimingBranches(t *testing.T) {
 			t.Fatalf("over-budget soak should clamp ETA to 0s: %q", got)
 		}
 	})
+}
+
+// TestCompactDuration pins the compact soak-label formatter: rounded to the
+// second, only non-zero h/m/s components, with a "0s" floor.
+func TestCompactDuration(t *testing.T) {
+	for _, tc := range []struct {
+		in   time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{-5 * time.Second, "0s"},
+		{500 * time.Millisecond, "1s"}, // rounds to the nearest second
+		{45 * time.Second, "45s"},
+		{12 * time.Minute, "12m"},
+		{time.Hour, "1h"},
+		{90 * time.Minute, "1h30m"},
+		{time.Hour + 30*time.Second, "1h30s"},
+		{48 * time.Minute, "48m"},
+	} {
+		if got := compactDuration(tc.in); got != tc.want {
+			t.Errorf("compactDuration(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestRendererSoakLabelFormat pins the full issue-exact soak detail string.
+func TestRendererSoakLabelFormat(t *testing.T) {
+	clk := clocktest.New(time.Unix(0, 0))
+	var out bytes.Buffer
+	r := newRenderer(&out, Options{Color: ColorNever, Clock: clk, Width: 120, SoakBudget: time.Hour}, false)
+	r.Step(1, 8, "soak")
+	clk.Advance(12 * time.Minute)
+	r.Progress(protocol.TestProgress{Stage: "cycle", Percent: 50})
+	if got := out.String(); !strings.Contains(got, "soak 12m/1h (ETA 48m)") {
+		t.Fatalf("soak label = %q, want it to contain %q", got, "soak 12m/1h (ETA 48m)")
+	}
+}
+
+// TestRendererSoakRoundingConsistency pins the boundary arithmetic: at 59.5s
+// of a 1m budget the elapsed value must round BEFORE the ETA subtraction,
+// rendering "soak 1m/1m (ETA 0s)" — never the contradictory "1m/1m (ETA 1s)".
+func TestRendererSoakRoundingConsistency(t *testing.T) {
+	clk := clocktest.New(time.Unix(0, 0))
+	var out bytes.Buffer
+	r := newRenderer(&out, Options{Color: ColorNever, Clock: clk, Width: 120, SoakBudget: time.Minute}, false)
+	r.Step(1, 8, "soak")
+	clk.Advance(59*time.Second + 500*time.Millisecond)
+	r.Progress(protocol.TestProgress{Stage: "cycle", Percent: 99})
+	if got := out.String(); !strings.Contains(got, "soak 1m/1m (ETA 0s)") {
+		t.Fatalf("boundary soak label = %q, want it to contain %q", got, "soak 1m/1m (ETA 0s)")
+	}
 }
 
 // TestRendererTinyPercentDoesNotOverflowETA guards the ETA projection against a

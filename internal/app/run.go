@@ -38,7 +38,7 @@ type suite struct {
 func (a *App) run(ctx context.Context) (ExitCode, error) {
 	defer a.closeListener()
 	clk := a.deps.Clock
-	baseLog := logging.NewStderr(a.deps.Stderr, a.cfg.Verbose)
+	baseLog := logging.NewStderr(a.deps.Stderr, a.cfg.Verbose, a.deps.StderrColor)
 
 	pf, err := a.preflight(ctx)
 	if err != nil {

@@ -50,6 +50,10 @@ type Deps struct {
 	Stdout io.Writer
 	// Stderr receives logging; nil discards.
 	Stderr io.Writer
+	// StderrColor is the color decision for the stderr logger, computed by
+	// the cli via ui.DecideColor against Stderr. It enables the colored
+	// verbose console handler only alongside --verbose on a TTY.
+	StderrColor bool
 	// StateDir overrides the pidfile state tree used for the stale-process
 	// scan; empty means the production default (and enables the real
 	// pidfile registry).

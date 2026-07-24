@@ -3,8 +3,9 @@
 // report directory, fanned out through a multi-handler.
 //
 // Token redaction is layered (docs/design/clieval.md §8): protocol code logs
-// envelope metadata only (MsgAttrs), BOTH handlers redact any attr keyed
-// "token" or "payload" via ReplaceAttr, and config.RunConfig implements
+// envelope metadata only (MsgAttrs), ALL handlers (stderr text, verbose-TTY
+// console, JSON debug file) redact any attr keyed "token" or "payload" via
+// the shared redactSecrets hook, and config.RunConfig implements
 // slog.LogValuer with the token pre-redacted. The one legitimate token
 // display (the PC1 banner) goes to stdout via fmt, never through slog.
 package logging
@@ -18,31 +19,57 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+
+	"cablecheck/internal/ui"
 )
 
 // redactedMarker replaces the value of every secret-keyed attribute.
 const redactedMarker = "[REDACTED]"
 
-// redactSecrets is the ReplaceAttr hook installed on BOTH handlers: any
-// attribute keyed "token" or "payload" (case-insensitive, at any group
-// depth) has its value replaced before it can reach a sink.
-func redactSecrets(_ []string, a slog.Attr) slog.Attr {
-	switch strings.ToLower(a.Key) {
-	case "token", "payload":
+// redactSecrets is the ReplaceAttr hook installed on every handler: an
+// attribute is redacted when its own key — or any enclosing group in its path
+// — is "token" or "payload" (case-insensitive). Checking the group path too
+// closes the leak where a secret rides under a group named for the secret
+// (e.g. slog.Group("token", ...) or WithGroup("payload")); the session token
+// must never reach a sink (AGENTS.md non-negotiable).
+func redactSecrets(groups []string, a slog.Attr) slog.Attr {
+	if isSecretKey(a.Key) {
 		a.Value = slog.StringValue(redactedMarker)
+		return a
+	}
+	for _, g := range groups {
+		if isSecretKey(g) {
+			a.Value = slog.StringValue(redactedMarker)
+			return a
+		}
 	}
 	return a
 }
 
-// NewStderr returns the operator-facing logger: a text handler on w at
-// LevelInfo, or LevelDebug when verbose. A nil w discards.
-func NewStderr(w io.Writer, verbose bool) *slog.Logger {
+// isSecretKey reports whether key names a secret-bearing attribute or group.
+func isSecretKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "token", "payload":
+		return true
+	}
+	return false
+}
+
+// NewStderr returns the operator-facing logger at LevelInfo, or LevelDebug
+// when verbose. On a TTY with verbose and color it installs the colored
+// console handler ("HH:MM:SS LEVEL msg key=val"); otherwise it keeps the
+// stdlib TextHandler, which stays byte-stable for pipes, files and CI (a
+// buffer is never a TTY). Both paths redact token/payload. A nil w discards.
+func NewStderr(w io.Writer, verbose, color bool) *slog.Logger {
 	if w == nil {
 		w = io.Discard
 	}
 	level := slog.LevelInfo
 	if verbose {
 		level = slog.LevelDebug
+	}
+	if verbose && color && ui.IsTerminal(w) {
+		return slog.New(newConsoleHandler(w, level, true))
 	}
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level:       level,

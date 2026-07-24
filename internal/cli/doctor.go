@@ -8,6 +8,8 @@ import (
 	"io"
 
 	"cablecheck/internal/app"
+	"cablecheck/internal/config"
+	"cablecheck/internal/ui"
 )
 
 // cmdDoctor checks local dependencies and configuration without contacting a
@@ -22,6 +24,7 @@ func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, bui
 	output := fs.String("output", ".", "parent directory whose writability is probed")
 	noSudo := fs.Bool("no-sudo", false, "skip the passwordless-sudo probe")
 	allowVirtual := fs.Bool("allow-virtual-interface", false, "annotate virtual interfaces as usable")
+	color := fs.String("color", "auto", "auto | always | never")
 	// --verbose is accepted for symmetry with run; doctor emits no slog output
 	// of its own, so the flag currently has no behavioral effect.
 	_ = fs.Bool("verbose", false, "verbose logging (accepted; no effect on doctor)")
@@ -37,6 +40,13 @@ func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, bui
 		return &app.ExitError{Code: app.ExitConfig,
 			Err: fmt.Errorf("doctor takes no positional arguments (got %q)", fs.Arg(0))}
 	}
+	// Same validation (and ValidationError => exit 4) as run's --color.
+	switch *color {
+	case "auto", "always", "never":
+	default:
+		return &config.ValidationError{Flag: "--color",
+			Msg: fmt.Sprintf("invalid color mode %q: must be auto, always, or never", *color)}
+	}
 
 	deps := app.Deps{
 		Stdout: stdout,
@@ -49,7 +59,7 @@ func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, bui
 		NoSudo:       *noSudo,
 		AllowVirtual: *allowVirtual,
 	})
-	app.RenderDoctor(stdout, checks)
+	app.RenderDoctor(stdout, checks, ui.DecideColor(mapColorMode(*color), stdout, nil))
 	return err
 }
 
@@ -66,6 +76,7 @@ Flags:
   --output string             parent directory whose writability is probed (default ".")
   --no-sudo                   skip the passwordless-sudo probe
   --allow-virtual-interface   annotate virtual interfaces as usable
+  --color string              auto | always | never (default auto)
   --verbose                   verbose logging
 `)
 }

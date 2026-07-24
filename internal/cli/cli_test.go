@@ -230,6 +230,26 @@ func TestCLIDispatch(t *testing.T) {
 			t.Errorf("stderr misses the positional diagnosis:\n%s", errOut)
 		}
 	})
+
+	t.Run("doctor rejects an invalid --color like run", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "doctor", "--color", "sometimes")
+		if code != 4 {
+			t.Errorf("code = %d, want 4", code)
+		}
+		if !strings.Contains(errOut, "--color") {
+			t.Errorf("stderr misses the --color diagnosis:\n%s", errOut)
+		}
+	})
+
+	t.Run("doctor help includes --color", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "doctor", "-h")
+		if code != 0 {
+			t.Errorf("code = %d, want 0", code)
+		}
+		if !strings.Contains(errOut, "--color") {
+			t.Errorf("doctor help misses --color:\n%s", errOut)
+		}
+	})
 }
 
 // cliValidReportJSON renders a minimal valid report.json via the reporting
