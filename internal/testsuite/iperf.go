@@ -229,6 +229,10 @@ func (m *IperfManager) RunTCPClient(ctx context.Context, local, peer netip.Addr,
 	}
 	parsed, err := parser.ParseIperf3(res.Stdout)
 	if err != nil {
+		// Parser failures can still carry useful decoded interval/CPU
+		// diagnostics. Preserve them behind the Incomplete marker; evaluators
+		// ignore every metric on incomplete TCP results.
+		partial.TCP = tcpFromIperf(parsed, dur, streams)
 		return partial, fmt.Errorf("testsuite: iperf3 client: %w", err)
 	}
 	return &TCPRunResult{TCP: tcpFromIperf(parsed, dur, streams)}, nil

@@ -49,6 +49,19 @@ func (e *DecodeError) Error() string {
 // Unwrap returns the underlying JSON error.
 func (e *DecodeError) Unwrap() error { return e.Err }
 
+// ParseError reports syntactically valid iperf3 JSON that lacks the semantic
+// data required to use the result as a measurement. The accompanying
+// Iperf3Result still carries everything that decoded successfully.
+type ParseError struct {
+	// Problem describes the missing or unusable semantic data.
+	Problem string
+}
+
+// Error describes why the decoded iperf3 document is not a usable result.
+func (e *ParseError) Error() string {
+	return "iperf3 output is semantically incomplete: " + e.Problem
+}
+
 // iperfSum is one summary row (per-interval or end-of-test) of iperf3 JSON.
 type iperfSum struct {
 	Start         float64 `json:"start"`
@@ -268,7 +281,9 @@ type Iperf3Result struct {
 //     ErrIperfClient alongside whatever decoded (exit-1 client output is
 //     still JSON — decode first, then check).
 //   - TCP totals prefer end.sum_sent / end.sum_received; retransmit counts
-//     stay pointers so "absent" never turns into 0.
+//     stay pointers so "absent" never turns into 0. A completed one-way TCP
+//     document must carry at least one of those summaries; otherwise parsing
+//     returns a *ParseError so schema drift cannot become a zero measurement.
 //   - Bidir runs (detected via end.streams[] rows whose direction flag is
 //     false, since -R is never used) ignore the top-level end sums entirely
 //     and aggregate per direction from the streams — 3.7-3.11 emit duplicate
@@ -393,6 +408,11 @@ func ParseIperf3(out []byte) (Iperf3Result, error) {
 	default: // one-way TCP
 		res.Sent = dirStats(w.End.SumSent)
 		res.Received = dirStats(w.End.SumReceived)
+		if res.Sent == nil && res.Received == nil {
+			return res, &ParseError{
+				Problem: "TCP result has neither end.sum_sent nor end.sum_received",
+			}
+		}
 	}
 
 	return res, nil

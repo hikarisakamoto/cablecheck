@@ -1,0 +1,61 @@
+{
+  "start": {
+    "version": "iperf 3.18",
+    "test_start": {
+      "protocol": "TCP",
+      "num_streams": 1,
+      "duration": 2
+    }
+  },
+  "intervals": [
+    {
+      "sum": {
+        "start": 0,
+        "end": 1,
+        "seconds": 1,
+        "bytes": 112500000,
+        "bits_per_second": 900000000,
+        "retransmits": 0,
+        "sender": true
+      }
+    },
+    {
+      "sum": {
+        "start": 1,
+        "end": 2,
+        "seconds": 1,
+        "bytes": 117500000,
+        "bits_per_second": 940000000,
+        "retransmits": 1,
+        "sender": true
+      }
+    }
+  ],
+  "end": {
+    "streams": [
+      {
+        "sender": {
+          "bytes": 230000000,
+          "bits_per_second": 920000000,
+          "retransmits": 1,
+          "sender": true
+        },
+        "receiver": {
+          "bytes": 229750000,
+          "bits_per_second": 919000000,
+          "sender": true
+        }
+      }
+    ],
+    "cpu_utilization_percent": {
+      "host_total": 8.5,
+      "host_user": 2.5,
+      "host_system": 6,
+      "remote_total": 10.25,
+      "remote_user": 3,
+      "remote_system": 7.25
+    },
+    "sender_tcp_congestion": "cubic",
+    "receiver_tcp_congestion": "cubic"
+  }
+}

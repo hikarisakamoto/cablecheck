@@ -3,10 +3,12 @@ package testsuite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"testing"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/parser"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
 )
@@ -172,6 +174,34 @@ func TestBidirFallbackTwoPorts(t *testing.T) {
 	}
 	if results.Incomplete {
 		t.Errorf("fallback run marked incomplete; the fallback is a limitation, not a failure")
+	}
+}
+
+func TestBidirFallbackExcludesIncompleteCPU(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-s"),
+		StdoutFile: fixturePath("iperf", "server_listening.txt")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_no_summary.json")})
+
+	rc := newFakeCaller(t)
+	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+	rc.reply(OpIperfClientRun, &TCPRunResult{TCP: model.TCPResult{
+		SenderBitsPerSecond: 5e8, ReceiverBitsPerSecond: 4.9e8}})
+	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+
+	results := &SessionResults{}
+	plan := newQuickPlan(newTestOps(t, fr), results)
+	err := plan.bidirFallback(context.Background(), rc, "fallback note")
+	var parseErr *parser.ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("bidirFallback error = %T %v, want wrapped *parser.ParseError", err, err)
+	}
+	if !results.Incomplete || results.Bidir == nil {
+		t.Fatalf("results = %+v, want incomplete bidirectional result", results)
+	}
+	if cpu := results.Bidir.CPUUtilization; cpu != (model.CPUUsage{}) {
+		t.Errorf("bidirectional CPU = %+v, want incomplete diagnostic CPU excluded", cpu)
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"cablecheck/internal/clock/clocktest"
+	"cablecheck/internal/model"
+	"cablecheck/internal/parser"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
 )
@@ -124,6 +126,47 @@ func TestTCPServerLifecycle(t *testing.T) {
 	}
 	if _, unregistered := reg.snapshot(); unregistered != 1 {
 		t.Errorf("second Stop unregistered again")
+	}
+}
+
+// TestTCPClientMissingSummaryIsIncomplete verifies that a clean process exit
+// cannot turn schema drift into a completed zero-throughput measurement. The
+// semantic parser error stays fatal while decoded diagnostics remain available
+// behind the Incomplete marker.
+func TestTCPClientMissingSummaryIsIncomplete(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_no_summary.json")})
+	m, _ := newTestManager(t, fr)
+
+	res, err := m.RunTCPClient(context.Background(),
+		netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"),
+		5201, 30*time.Second, 4, false)
+	var parseErr *parser.ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("err = %T %v, want wrapped *parser.ParseError", err, err)
+	}
+	if errors.Is(err, parser.ErrIperfClient) || errors.Is(err, parser.ErrIperfUnreachable) {
+		t.Errorf("semantic parse error misclassified as iperf client/reachability error: %v", err)
+	}
+	if res == nil {
+		t.Fatal("result = nil, want incomplete diagnostic result")
+	}
+	if !res.Incomplete {
+		t.Error("Incomplete = false, want true")
+	}
+	if res.TCP.Duration != model.Duration(30*time.Second) || res.TCP.ParallelStreams != 4 {
+		t.Errorf("run parameters = %s/%d, want 30s/4", res.TCP.Duration, res.TCP.ParallelStreams)
+	}
+	if res.TCP.SenderBitsPerSecond != 0 || res.TCP.ReceiverBitsPerSecond != 0 {
+		t.Errorf("aggregate throughput = %v/%v, want no completed measurement",
+			res.TCP.SenderBitsPerSecond, res.TCP.ReceiverBitsPerSecond)
+	}
+	if len(res.TCP.IntervalResults) != 2 || res.TCP.IntervalResults[1].BitsPerSecond != 940e6 {
+		t.Errorf("interval diagnostics = %+v, want decoded rows preserved", res.TCP.IntervalResults)
+	}
+	if res.TCP.CPUUtilization.HostTotal != 8.5 {
+		t.Errorf("CPU diagnostics = %+v, want decoded utilization preserved", res.TCP.CPUUtilization)
 	}
 }
 
