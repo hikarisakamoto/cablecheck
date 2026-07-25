@@ -85,8 +85,23 @@ func TestRenderBar(t *testing.T) {
 	}
 }
 
+// TestRenderBarPreservesElapsed guards the regression where a long sub
+// (progress text + metrics) pushed elapsed off the truncated tail, so the
+// elapsed timer intermittently vanished from the live line.
+func TestRenderBarPreservesElapsed(t *testing.T) {
+	sub := "transfer bitrate=1.21 retr=0 rtt=0.42"
+	elapsed := "elapsed 1m5s"
+	for _, w := range []int{80, 60, 50} {
+		got := renderBar(3, 7, w, "TCP forward", sub, elapsed)
+		if !strings.Contains(got, elapsed) {
+			t.Fatalf("width %d dropped elapsed: %q", w, got)
+		}
+	}
+}
+
 func TestRenderBarFormat(t *testing.T) {
-	want := "[1/2] load [#####-----] running elaps..."
+	// Tight detail budget: sub is truncated so elapsed survives intact.
+	want := "[1/2] load [#####-----] ru... elapsed 5s"
 	if got := renderBar(1, 2, 40, "load", "running", "elapsed 5s"); got != want {
 		t.Fatalf("renderBar() = %q, want %q", got, want)
 	}

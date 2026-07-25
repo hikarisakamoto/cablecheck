@@ -112,9 +112,9 @@ func parseRunFlags(args []string, stderr io.Writer) (*config.RunConfig, error) {
 }
 
 // rendererOptions derives the progress renderer options from the resolved run
-// configuration. SoakBudget drives the elapsed/ETA projection and is only
-// meaningful in soak mode; it stays zero for quick and standard so the renderer
-// falls back to step-fraction progress.
+// configuration. SoakBudget drives the soak elapsed/budget ratio and bar
+// fraction and is only meaningful in soak mode; it stays zero for quick and
+// standard so the renderer falls back to step-fraction progress.
 func rendererOptions(cfg *config.RunConfig) ui.Options {
 	soakBudget := time.Duration(0)
 	if cfg.Mode == config.ModeSoak {

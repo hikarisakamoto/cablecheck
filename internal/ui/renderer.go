@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"sort"
 	"strings"
@@ -253,47 +252,23 @@ func (r *Renderer) render(now time.Time) {
 	if r.soakBudget > 0 {
 		complete = clampFraction(now.Sub(r.start).Seconds() / r.soakBudget.Seconds())
 	}
-	r.writeLine(renderBarFraction(r.step, r.total, r.width, r.name, sub, r.timing(now, complete), complete))
+	r.writeLine(renderBarFraction(r.step, r.total, r.width, r.name, sub, r.timing(now), complete))
 }
 
-func (r *Renderer) timing(now time.Time, complete float64) string {
+func (r *Renderer) timing(now time.Time) string {
 	elapsed := now.Sub(r.start)
 	if elapsed < 0 {
 		elapsed = 0
 	}
 	if r.soakBudget > 0 {
-		// Round to whole seconds BEFORE deriving the ETA so the three numbers
-		// stay arithmetically consistent at boundaries: at 59.5s of a 1m
-		// budget, independent rounding would render "soak 1m/1m (ETA 1s)".
+		// Round elapsed to whole seconds so it reads consistently against the
+		// budget: at 59.5s of a 1m budget this renders "soak 1m/1m", not the
+		// mismatched "soak 59s/1m".
 		elapsedRounded := elapsed.Round(time.Second)
 		budget := r.soakBudget.Round(time.Second)
-		eta := budget - elapsedRounded
-		if eta < 0 {
-			eta = 0
-		}
-		return "soak " + compactDuration(elapsedRounded) + "/" + compactDuration(budget) +
-			" (ETA " + compactDuration(eta) + ")"
+		return "soak " + compactDuration(elapsedRounded) + "/" + compactDuration(budget)
 	}
-	result := "elapsed " + formatDuration(elapsed)
-	var eta time.Duration
-	if complete > 0 && complete < 1 {
-		// A tiny-but-positive completion fraction (e.g. a degenerate peer
-		// percent) can push the projection past the int64 nanosecond range,
-		// where the float64->Duration conversion wraps to a huge negative
-		// value the eta<0 guard would then misreport as "ETA 0s". Omit the
-		// ETA entirely when it is not representable rather than lie.
-		raw := float64(elapsed) * (1 - complete) / complete
-		if raw >= float64(math.MaxInt64) {
-			return result
-		}
-		eta = time.Duration(raw)
-	} else {
-		return result
-	}
-	if eta < 0 {
-		eta = 0
-	}
-	return result + " ETA " + formatDuration(eta)
+	return "elapsed " + formatDuration(elapsed)
 }
 
 func (r *Renderer) writeLine(line string) {
@@ -352,7 +327,7 @@ func formatDuration(value time.Duration) string {
 
 // compactDuration renders value rounded to the second, emitting only its
 // non-zero hour/minute/second components (e.g. 1h, 48m, 1h30m, 45s) with a
-// "0s" floor. It drives the compact soak label "soak 12m/1h (ETA 48m)".
+// "0s" floor. It drives the compact soak label "soak 12m/1h".
 func compactDuration(value time.Duration) string {
 	value = value.Round(time.Second)
 	if value < 0 {

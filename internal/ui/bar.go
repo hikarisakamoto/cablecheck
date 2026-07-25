@@ -45,13 +45,10 @@ func renderBar(step, total, width int, name, sub, elapsed string) string {
 func renderBarFraction(step, total, width int, name, sub, elapsed string, complete float64) string {
 	width = clampWidth(width)
 	numeric := fmt.Sprintf("[%d/%d] ", step, total)
-	detail := strings.TrimSpace(strings.Join(nonempty(sub, elapsed), " "))
 
 	// Keep a useful bar by trimming optional detail first, then the name.
-	detailBudget := width - runeLen(numeric) - runeLen(name) - minBarWidth - 4
-	if detailBudget < runeLen(detail) {
-		detail = truncateRunes(detail, max(0, detailBudget))
-	}
+	detailBudget := max(0, width-runeLen(numeric)-runeLen(name)-minBarWidth-4)
+	detail := fitDetail(sub, elapsed, detailBudget)
 	detailCost := 0
 	if detail != "" {
 		detailCost = runeLen(detail) + 1
@@ -81,6 +78,29 @@ func renderBarFraction(step, total, width int, name, sub, elapsed string, comple
 	return line
 }
 
+// fitDetail packs the progress detail ("sub elapsed") into budget runes while
+// protecting elapsed: it is short and fixed, so sub (progress text + metrics)
+// is truncated first. Elapsed itself is only trimmed as a last resort when the
+// budget cannot even hold it.
+func fitDetail(sub, elapsed string, budget int) string {
+	sub = strings.TrimSpace(sub)
+	elapsed = strings.TrimSpace(elapsed)
+	if elapsed == "" {
+		return truncateRunes(sub, budget)
+	}
+	if runeLen(elapsed) >= budget {
+		return truncateRunes(elapsed, budget)
+	}
+	if sub == "" {
+		return elapsed
+	}
+	sub = truncateRunes(sub, budget-runeLen(elapsed)-1)
+	if sub == "" {
+		return elapsed
+	}
+	return sub + " " + elapsed
+}
+
 func fraction(step, total int) float64 {
 	if total <= 0 {
 		return 0
@@ -99,16 +119,6 @@ func clampFraction(value float64) float64 {
 		return 1
 	}
 	return value
-}
-
-func nonempty(values ...string) []string {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if value != "" {
-			result = append(result, value)
-		}
-	}
-	return result
 }
 
 func runeLen(value string) int { return utf8.RuneCountInString(value) }
