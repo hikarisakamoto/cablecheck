@@ -261,11 +261,22 @@ func (r *Renderer) timing(now time.Time, complete float64) string {
 	if elapsed < 0 {
 		elapsed = 0
 	}
+	if r.soakBudget > 0 {
+		// Round to whole seconds BEFORE deriving the ETA so the three numbers
+		// stay arithmetically consistent at boundaries: at 59.5s of a 1m
+		// budget, independent rounding would render "soak 1m/1m (ETA 1s)".
+		elapsedRounded := elapsed.Round(time.Second)
+		budget := r.soakBudget.Round(time.Second)
+		eta := budget - elapsedRounded
+		if eta < 0 {
+			eta = 0
+		}
+		return "soak " + compactDuration(elapsedRounded) + "/" + compactDuration(budget) +
+			" (ETA " + compactDuration(eta) + ")"
+	}
 	result := "elapsed " + formatDuration(elapsed)
 	var eta time.Duration
-	if r.soakBudget > 0 {
-		eta = r.soakBudget - elapsed
-	} else if complete > 0 && complete < 1 {
+	if complete > 0 && complete < 1 {
 		// A tiny-but-positive completion fraction (e.g. a degenerate peer
 		// percent) can push the projection past the int64 nanosecond range,
 		// where the float64->Duration conversion wraps to a huge negative
@@ -337,4 +348,28 @@ func formatMetrics(metrics map[string]float64) string {
 
 func formatDuration(value time.Duration) string {
 	return value.Round(time.Second).String()
+}
+
+// compactDuration renders value rounded to the second, emitting only its
+// non-zero hour/minute/second components (e.g. 1h, 48m, 1h30m, 45s) with a
+// "0s" floor. It drives the compact soak label "soak 12m/1h (ETA 48m)".
+func compactDuration(value time.Duration) string {
+	value = value.Round(time.Second)
+	if value < 0 {
+		value = 0
+	}
+	h := value / time.Hour
+	m := (value % time.Hour) / time.Minute
+	s := (value % time.Minute) / time.Second
+	var b strings.Builder
+	if h > 0 {
+		fmt.Fprintf(&b, "%dh", h)
+	}
+	if m > 0 {
+		fmt.Fprintf(&b, "%dm", m)
+	}
+	if s > 0 || b.Len() == 0 {
+		fmt.Fprintf(&b, "%ds", s)
+	}
+	return b.String()
 }
