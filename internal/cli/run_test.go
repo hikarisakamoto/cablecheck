@@ -139,7 +139,7 @@ func TestRunPresentationFlags(t *testing.T) {
 
 // TestRendererOptionsSoakBudget pins the one piece of conditional logic in the
 // renderer wiring: SoakBudget carries the soak duration only in soak mode and
-// stays zero otherwise, so the ETA projection never divides by a stray budget.
+// stays zero otherwise, so quick/standard fall back to step-fraction progress.
 func TestRendererOptionsSoakBudget(t *testing.T) {
 	t.Run("soak mode carries the soak duration", func(t *testing.T) {
 		cfg, err := parseRunFlags(baseRunArgs("--mode", "soak", "--soak-duration", "2h"), &bytes.Buffer{})
