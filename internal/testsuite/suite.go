@@ -543,9 +543,12 @@ func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, not
 	}
 	if localRes != nil {
 		b.PC1ToPC2 = bidirDirFromTCP(localRes.TCP)
-		b.CPUUtilization = localRes.TCP.CPUUtilization
 		if localRes.Incomplete {
 			q.Results.Incomplete = true
+		} else {
+			// CPU from an incomplete diagnostic is not a measurement and must
+			// not trigger host-limitation rules in the final evaluation.
+			b.CPUUtilization = localRes.TCP.CPUUtilization
 		}
 	}
 	if tr, ok := remoteOut.(*TCPRunResult); ok {

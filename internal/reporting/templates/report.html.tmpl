@@ -126,7 +126,7 @@
     </div></details>
 
     <details open><summary>15. CPU Utilization</summary><div class="content">
-      {{if .CPURows}}<div class="table-wrap"><table><thead><tr><th>Test</th><th>Sender CPU</th><th>Receiver CPU</th></tr></thead><tbody>{{range .CPURows}}<tr><td>{{.Test}}</td><td>{{printf "%.1f%%" .CPU.HostTotal}}</td><td>{{printf "%.1f%%" .CPU.RemoteTotal}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">Not run: no throughput test reported CPU utilization.</p>{{end}}
+      {{if .CPURows}}<div class="table-wrap"><table><thead><tr><th>Test</th><th>Sender CPU</th><th>Receiver CPU</th></tr></thead><tbody>{{range .CPURows}}<tr><td>{{.Test}}{{if .Incomplete}} (incomplete){{end}}</td><td>{{if .Incomplete}}n/a{{else}}{{printf "%.1f%%" .CPU.HostTotal}}{{end}}</td><td>{{if .Incomplete}}n/a{{else}}{{printf "%.1f%%" .CPU.RemoteTotal}}{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="note">Not run: no throughput test reported CPU utilization.</p>{{end}}
     </div></details>
 
     <details open><summary>16. Cable Diagnostics</summary><div class="content">
@@ -171,7 +171,7 @@
 
 {{define "tcp"}}
   {{if .Bars}}{{template "throughputChart" .Bars}}{{end}}
-  <div class="table-wrap"><table><thead><tr><th>Run</th><th>Duration</th><th>Streams</th><th>Sender</th><th>Receiver</th><th>Retransmits</th><th>CoV</th><th>Min interval</th><th>Max interval</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{.Run}}{{if .Result.Incomplete}} (incomplete){{end}}</td><td>{{.Result.Duration}}</td><td>{{.Result.ParallelStreams}}</td><td>{{formatBps .Result.SenderBitsPerSecond}}</td><td>{{formatBps .Result.ReceiverBitsPerSecond}}</td><td>{{.Retrans}}</td><td>{{formatRatioPercent .Result.ThroughputVariation}}</td><td>{{formatBps .Result.MinimumIntervalBps}}</td><td>{{formatBps .Result.MaximumIntervalBps}}</td></tr>{{end}}</tbody></table></div>
+  <div class="table-wrap"><table><thead><tr><th>Run</th><th>Duration</th><th>Streams</th><th>Sender</th><th>Receiver</th><th>Retransmits</th><th>CoV</th><th>Min interval</th><th>Max interval</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{.Run}}{{if .Result.Incomplete}} (incomplete){{end}}</td><td>{{.Result.Duration}}</td><td>{{.Result.ParallelStreams}}</td><td>{{if .Result.Incomplete}}n/a{{else}}{{formatBps .Result.SenderBitsPerSecond}}{{end}}</td><td>{{if .Result.Incomplete}}n/a{{else}}{{formatBps .Result.ReceiverBitsPerSecond}}{{end}}</td><td>{{.Retrans}}</td><td>{{if .Result.Incomplete}}n/a{{else}}{{formatRatioPercent .Result.ThroughputVariation}}{{end}}</td><td>{{if .Result.Incomplete}}n/a{{else}}{{formatBps .Result.MinimumIntervalBps}}{{end}}</td><td>{{if .Result.Incomplete}}n/a{{else}}{{formatBps .Result.MaximumIntervalBps}}{{end}}</td></tr>{{end}}</tbody></table></div>
 {{end}}
 
 {{define "throughputChart"}}<div class="charts" aria-label="Delivered throughput">{{range .}}<div class="chart-row"><span class="chart-label">{{.Label}}</span><svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><rect class="chart-track" x="0" y="0" width="100" height="10" rx="3"></rect><rect class="bar-{{.Slug}}" x="0" y="0" width="{{chartPct .Value .Max}}" height="10" rx="3"></rect></svg><span class="chart-value">{{formatBps .Value}}</span></div>{{end}}</div>{{end}}

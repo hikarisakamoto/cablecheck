@@ -115,6 +115,74 @@ func TestIperf3TCPVersions(t *testing.T) {
 	})
 }
 
+// TestIperf3TCPRequiresThroughputSummary pins the semantic boundary between a
+// reported zero-rate measurement and a clean-exit document whose canonical
+// aggregate is absent. Interval and per-stream rows are diagnostics, not a
+// safe substitute for end.sum_sent/end.sum_received.
+func TestIperf3TCPRequiresThroughputSummary(t *testing.T) {
+	t.Run("missing_both", func(t *testing.T) {
+		res, err := ParseIperf3(fixture(t, "iperf", "tcp_no_summary.json"))
+		var parseErr *ParseError
+		if !errors.As(err, &parseErr) {
+			t.Fatalf("err = %T %v, want *ParseError", err, err)
+		}
+		if !strings.Contains(err.Error(), "end.sum_sent") || !strings.Contains(err.Error(), "end.sum_received") {
+			t.Errorf("err = %q, want both accepted summary field names", err)
+		}
+		if res.Version != "iperf 3.18" || res.Protocol != "TCP" || res.Streams != 1 || res.DurationSec != 2 {
+			t.Errorf("decoded metadata = %+v, want version/protocol/streams/duration preserved", res)
+		}
+		if res.Sent != nil || res.Received != nil {
+			t.Errorf("Sent/Received = %v/%v, want both nil", res.Sent, res.Received)
+		}
+		if len(res.Intervals) != 2 || res.Intervals[1].Bps != 940e6 {
+			t.Errorf("Intervals = %+v, want decoded diagnostic rows preserved", res.Intervals)
+		}
+		if res.CPU == nil || res.CPU.HostTotal != 8.5 {
+			t.Errorf("CPU = %+v, want decoded diagnostics preserved", res.CPU)
+		}
+	})
+
+	for _, tc := range []struct {
+		name     string
+		raw      string
+		wantSent bool
+	}{
+		{
+			name:     "reported_zero_sender_only",
+			raw:      `{"start":{"test_start":{"protocol":"TCP"}},"end":{"sum_sent":{"bits_per_second":0}}}`,
+			wantSent: true,
+		},
+		{
+			name: "reported_zero_receiver_only",
+			raw:  `{"start":{"test_start":{"protocol":"TCP"}},"end":{"sum_received":{"bits_per_second":0}}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := ParseIperf3([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("ParseIperf3: %v", err)
+			}
+			if tc.wantSent {
+				if res.Sent == nil || res.Sent.BitsPerSecond != 0 || res.Received != nil {
+					t.Errorf("Sent/Received = %+v/%+v, want a present zero sender summary only", res.Sent, res.Received)
+				}
+			} else if res.Received == nil || res.Received.BitsPerSecond != 0 || res.Sent != nil {
+				t.Errorf("Sent/Received = %+v/%+v, want a present zero receiver summary only", res.Sent, res.Received)
+			}
+		})
+	}
+
+	t.Run("null_summaries_are_absent", func(t *testing.T) {
+		raw := []byte(`{"start":{"test_start":{"protocol":"TCP"}},"end":{"sum_sent":null,"sum_received":null}}`)
+		_, err := ParseIperf3(raw)
+		var parseErr *ParseError
+		if !errors.As(err, &parseErr) {
+			t.Fatalf("err = %T %v, want *ParseError", err, err)
+		}
+	})
+}
+
 // TestIperf3UDP pins the UDP normalization: jitter/lost/total/percent come
 // from end.sum (server-observed, preferred over the per-stream rows, whose
 // values deliberately differ in the fixture), while out_of_order — which real
@@ -309,6 +377,10 @@ func TestIperf3ErrorObject(t *testing.T) {
 	// The JSON itself decoded fine: fields around the error are preserved.
 	if res.Version != "iperf 3.16" {
 		t.Errorf("Version = %q, want iperf 3.16 (decode success despite error field)", res.Version)
+	}
+	var parseErr *ParseError
+	if errors.As(err, &parseErr) {
+		t.Errorf("client error was replaced by semantic parse error: %v", err)
 	}
 }
 

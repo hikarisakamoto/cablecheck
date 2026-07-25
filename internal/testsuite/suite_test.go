@@ -3,6 +3,7 @@ package testsuite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/parser"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
@@ -378,6 +380,43 @@ func TestQuickPlanPreservesPartialTCPForward(t *testing.T) {
 	}
 	if !slices.Contains(rc.ops, OpIperfServerStop) {
 		t.Errorf("remote ops %q lack %s: the one-off server leaked after the abort", rc.ops, OpIperfServerStop)
+	}
+}
+
+// TestQuickPlanAbortsOnMissingTCPSummary covers the clean-exit schema-drift
+// path: the semantic parse error must remain fatal, while the decoded result is
+// recorded as incomplete and the remote one-off server is still stopped.
+func TestQuickPlanAbortsOnMissingTCPSummary(t *testing.T) {
+	fr := runnertest.New(t)
+	rc := newFakeCaller(t)
+	scriptPreTCPSteps(t, fr, rc)
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_no_summary.json")})
+	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+
+	results := &SessionResults{}
+	plan := newQuickPlan(newTestOps(t, fr), results)
+	err := plan.Run(context.Background(), rc)
+	var parseErr *parser.ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("plan.Run error = %T %v, want wrapped *parser.ParseError", err, err)
+	}
+	if !results.Incomplete {
+		t.Error("Results.Incomplete = false, want true")
+	}
+	if len(results.TCP) != 1 {
+		t.Fatalf("results.TCP has %d entries %+v, want one incomplete forward result", len(results.TCP), results.TCP)
+	}
+	got := results.TCP[0]
+	if !got.Incomplete || got.Direction != model.DirectionPC1ToPC2 {
+		t.Errorf("TCP result = %+v, want incomplete PC1 to PC2 result", got)
+	}
+	if len(got.IntervalResults) != 2 {
+		t.Errorf("TCP result lost decoded interval diagnostics: %+v", got)
+	}
+	if !slices.Contains(rc.ops, OpIperfServerStop) {
+		t.Errorf("remote ops %q lack %s: the one-off server leaked after parse failure", rc.ops, OpIperfServerStop)
 	}
 }
 

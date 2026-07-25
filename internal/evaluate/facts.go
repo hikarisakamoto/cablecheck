@@ -561,6 +561,9 @@ func maxCPUPct(r *model.Report) float64 {
 		}
 	}
 	for _, tr := range r.Tests.TCP {
+		if tr.Incomplete {
+			continue
+		}
 		consider(tr.CPUUtilization)
 	}
 	for _, u := range r.Tests.UDP {

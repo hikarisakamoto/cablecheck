@@ -397,6 +397,61 @@ func TestIntegration(t *testing.T) {
 	t.Run("NoBidirFallback", testNoBidirFallback)
 	t.Run("StaleIperf3Detection", testStaleIperf3Detection)
 	t.Run("PeerDisconnectMidTest", testPeerDisconnectMidTest)
+	t.Run("CleanExitIperfMissingSummary", testCleanExitIperfMissingSummary)
+}
+
+// testCleanExitIperfMissingSummary injects syntactically valid TCP JSON that
+// has interval traffic but no canonical end summary. The coordinator must
+// abort with an orchestration error and an INCONCLUSIVE partial report rather
+// than turning the absent measurement into a cable-POOR PERF-01 finding.
+func testCleanExitIperfMissingSummary(t *testing.T) {
+	testutil.LeakCheck(t)
+	ctx := context.Background()
+	gate := make(chan struct{})
+	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45701, planGate: gate})
+	pc1.fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixture("iperf", "tcp_no_summary.json"), Times: 1})
+	pc2 := startWorker(t, ctx, intSpec{iperfPort: 45703}, port)
+
+	waitForState(t, pc2.states, peer.StateTesting)
+	close(gate)
+
+	code1, err1 := pc1.app.Wait()
+	code2, err2 := pc2.app.Wait()
+	if code1 != ExitPeer || err1 == nil {
+		t.Errorf("pc1 = (%d, %v), want exit 5 with an error\npc1 %s\npc2 %s",
+			code1, err1, pc1.out.dump(), pc2.out.dump())
+	}
+	if code2 != ExitPeer || err2 == nil {
+		t.Errorf("pc2 = (%d, %v), want exit 5 with an error\npc2 %s", code2, err2, pc2.out.dump())
+	}
+
+	rep, _ := readReport(t, pc1.cfg.OutputDir)
+	if !rep.Partial || rep.Failure == nil {
+		t.Errorf("report partial/failure = %v/%+v, want a partial failed orchestration", rep.Partial, rep.Failure)
+	}
+	if rep.Classification != model.HealthInconclusive {
+		t.Errorf("classification = %s, want INCONCLUSIVE (reasons %v)", rep.Classification, rep.ClassificationReasons)
+	}
+	if len(rep.Tests.TCP) != 1 || !rep.Tests.TCP[0].Incomplete {
+		t.Errorf("TCP results = %+v, want one incomplete result", rep.Tests.TCP)
+	}
+	if rep.Failure != nil && (!strings.Contains(rep.Failure.Error, "end.sum_sent") ||
+		!strings.Contains(rep.Failure.Error, "end.sum_received")) {
+		t.Errorf("failure error = %q, want both missing summary fields", rep.Failure.Error)
+	}
+	var ids []string
+	for _, finding := range rep.Findings {
+		ids = append(ids, finding.RuleID)
+	}
+	for _, want := range []string{"LIM-01", "LIM-03"} {
+		if !slices.Contains(ids, want) {
+			t.Errorf("findings = %v, want %s", ids, want)
+		}
+	}
+	if slices.Contains(ids, "PERF-01") {
+		t.Errorf("findings = %v, must not contain PERF-01 for absent throughput", ids)
+	}
 }
 
 // testHappyPathQuickTCPOnly runs the full quick plan to double success, in

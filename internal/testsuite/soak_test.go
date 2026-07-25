@@ -14,6 +14,7 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/evaluate"
 	"cablecheck/internal/model"
+	"cablecheck/internal/parser"
 	"cablecheck/internal/runner/runnertest"
 	"cablecheck/internal/testutil"
 )
@@ -40,6 +41,19 @@ func newSoakPlan(ops *Ops, results *SessionResults, clk clock.Clock,
 		SoakLoad:       load,
 		CycleGap:       1500 * time.Millisecond,
 		Results:        results,
+	}
+}
+
+func TestStoppedBySoakBudgetDoesNotMaskIndependentParseError(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(errSoakBudgetExpired)
+
+	if !stoppedBySoakBudget(ctx, fmt.Errorf("operation stopped: %w", context.Canceled)) {
+		t.Error("budget cancellation was not recognized")
+	}
+	parseErr := &parser.ParseError{Problem: "TCP result has no throughput summary"}
+	if stoppedBySoakBudget(ctx, parseErr) {
+		t.Error("independent parse error was swallowed because the budget also expired")
 	}
 }
 

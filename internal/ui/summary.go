@@ -119,10 +119,13 @@ func makeTerminalSummaryView(rep *model.Report, dir string) terminalSummaryView 
 			return value.Direction, reporting.FormatPercent(value.LossPercent)
 		}),
 		TCPThroughput: perDirection(rep.Tests.TCP, func(value model.TCPResult) (string, string) {
+			if value.Incomplete {
+				return value.Direction, "n/a (incomplete)"
+			}
 			return value.Direction, reporting.FormatBps(value.ReceiverBitsPerSecond)
 		}),
 		TCPRetransmits: perDirection(rep.Tests.TCP, func(value model.TCPResult) (string, string) {
-			if value.Retransmissions == nil {
+			if value.Incomplete || value.Retransmissions == nil {
 				return value.Direction, "n/a"
 			}
 			return value.Direction, fmt.Sprintf("%d", *value.Retransmissions)

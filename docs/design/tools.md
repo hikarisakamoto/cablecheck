@@ -138,10 +138,10 @@ type IperfCaps struct {
 ```
 - `iperf3 --version` first line, regex `^iperf (\d+)\.(\d+)`. This is reliable for upstream feature *semantics* (the bidir JSON shape changed over time).
 - `iperf3 --help` usage text greps: `--bidir`, `--one-off`, `--json`, `--get-server-output`. This is reliable for *flag acceptance*, since the usage text is generated from the accepted option table and so catches distro patches and backports.
-- Rule: a capability is claimed only if **both** signals agree (`Bidir = ver>=3.7 && helpHas("--bidir")`). `JSON`, `Reverse`, and `UDP` are unconditional for any 3.x, present since 3.0/3.1. If `--version` doesn't say `iperf 3`, preflight fails with "iperf3 3.7+ required". Support window: 3.7–3.17.
+- Rule: a capability is claimed only if **both** signals agree (`Bidir = ver>=3.7 && helpHas("--bidir")`). `JSON`, `Reverse`, and `UDP` are unconditional for any 3.x, present since 3.0/3.1. If `--version` doesn't say `iperf 3`, preflight fails with "iperf3 3.7+ required". The supported range is 3.7 and newer with no upper bound; fixtures validate behavior through 3.17, while runtime output validation catches incompatible schema drift.
 - Both peers exchange `IperfCaps` in the capabilities message; effective caps = AND. No `--bidir` on either side means two coordinated one-way phases, reported as a limitation, never a cable failure.
 
-### JSON parsing across 3.7–3.17 (`internal/parser/iperf.go`)
+### JSON parsing on iperf3 3.7+ (`internal/parser/iperf.go`)
 Wire structs, all fields optional-tolerant (`json.Unmarshal` ignores unknowns):
 
 ```go
@@ -192,7 +192,7 @@ type iperfUDP struct {
 ```
 
 Version-difference handling (all encoded in `ParseIperf3`):
-- **TCP**: prefer `end.sum_sent`/`end.sum_received`, present across 3.7–3.17. `retransmits` shows up only on sender-side sums and streams, so model it as `*uint64` and propagate absence (absent isn't 0).
+- **TCP**: prefer `end.sum_sent`/`end.sum_received`, present in every validated version from 3.7 through 3.17. A clean one-way run must contain at least one of those canonical summaries. If both are absent, `ParseIperf3` returns a typed `*ParseError`; the suite preserves an incomplete diagnostic result and aborts instead of interpreting absence as zero throughput. A present summary that explicitly reports `bits_per_second: 0` remains a valid zero measurement. `retransmits` shows up only on sender-side sums and streams, so model it as `*uint64` and propagate absence (absent isn't 0).
 - **UDP**: only `end.sum` exists. On the sending client it carries **server-observed** loss and jitter, which is what we want. No retransmits ever.
 - **Bidir**: 3.7–3.11 have a known bug that emits duplicate or misattributed `sum_sent`/`sum_received` keys, and Go's decoder silently keeps the last. So in bidir mode we **ignore top-level end sums entirely** and aggregate from `end.streams[]`, partitioning by each stream's `sender.sender` boolean (`true` = client→server). Intervals work the same way: use `intervals[].sum` (fwd) plus `intervals[].sum_bidir_reverse` (rev), tolerating absence of the latter by re-deriving from the interval streams.
 - **3.16/3.17** (multithreaded): identical top-level shape. Per-interval stream timestamps may stagger a few ms, but interval analysis uses `sum` rows only, so it's immune.

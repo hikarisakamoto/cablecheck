@@ -16,6 +16,14 @@ import (
 
 var errSoakBudgetExpired = errors.New("soak duration expired")
 
+// stoppedBySoakBudget reports whether err came from cancellation of the soak
+// budget context. Checking the context cause alone is insufficient: an
+// independent operation failure can race with budget expiry and must remain
+// fatal rather than being mistaken for normal completion.
+func stoppedBySoakBudget(ctx context.Context, err error) bool {
+	return errors.Is(context.Cause(ctx), errSoakBudgetExpired) && errors.Is(err, context.Canceled)
+}
+
 // soakSteps are the display names of one soak cycle's steps, in order.
 var soakSteps = []string{
 	"cycle counter snapshot",
@@ -202,7 +210,7 @@ func (p *SoakPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error)
 		}
 		cycleResults, cycleCounters, finalCounters, err := p.runCycle(budgetCtx, rc, cycle)
 		if err != nil {
-			if errors.Is(context.Cause(budgetCtx), errSoakBudgetExpired) {
+			if stoppedBySoakBudget(budgetCtx, err) {
 				break
 			}
 			p.Results.Incomplete = true
@@ -222,7 +230,7 @@ func (p *SoakPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error)
 		}
 		remaining := deadline.Sub(p.Clock.Now())
 		if err := p.waitGap(budgetCtx, remaining); err != nil {
-			if errors.Is(context.Cause(budgetCtx), errSoakBudgetExpired) {
+			if stoppedBySoakBudget(budgetCtx, err) {
 				break
 			}
 			p.Results.Incomplete = true

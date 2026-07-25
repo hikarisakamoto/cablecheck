@@ -398,6 +398,7 @@ func TestFactsFromReportIgnoresIncompleteTCPDirection(t *testing.T) {
 				ThroughputVariation: 0.75,
 				Retransmissions:     uint64Ptr(99),
 				IntervalResults:     []model.TCPInterval{{BitsPerSecond: 0, Retransmits: uint64Ptr(99)}},
+				CPUUtilization:      model.CPUUsage{HostTotal: 99, RemoteTotal: 98},
 			},
 			{
 				Direction:             model.DirectionPC2ToPC1,
@@ -413,12 +414,21 @@ func TestFactsFromReportIgnoresIncompleteTCPDirection(t *testing.T) {
 	if f.Dir[0].TCPBitrate != 0 || f.Dir[0].TCPCoV != 0 || f.Dir[0].TCPCollapses != 0 || f.Dir[0].TCPRetransRate != 0 {
 		t.Errorf("incomplete TCP metrics leaked into facts: %+v", f.Dir[0])
 	}
+	if f.MaxCPUPct != 0 {
+		t.Errorf("MaxCPUPct = %v, want incomplete TCP CPU diagnostics ignored", f.MaxCPUPct)
+	}
 	res := Evaluate(f)
 	if res.Class != model.HealthInconclusive {
 		t.Errorf("class = %s, want INCONCLUSIVE for partial run (findings %v)", res.Class, findingIDs(res))
 	}
-	if slices.Contains(findingIDs(res), "PERF-01") {
-		t.Errorf("findings %v contain PERF-01 for an incomplete placeholder", findingIDs(res))
+	ids := findingIDs(res)
+	if slices.Contains(ids, "PERF-01") {
+		t.Errorf("findings %v contain PERF-01 for an incomplete placeholder", ids)
+	}
+	for _, want := range []string{"LIM-02", "LIM-03"} {
+		if !slices.Contains(ids, want) {
+			t.Errorf("findings %v lack %s for incomplete partial TCP evidence", ids, want)
+		}
 	}
 }
 
