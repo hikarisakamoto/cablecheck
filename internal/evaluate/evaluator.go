@@ -29,16 +29,23 @@ type Result struct {
 // into a classification, score and recommendations. It is pure and
 // deterministic: identical facts always yield an identical result.
 func Evaluate(f *Facts) Result {
+	return evaluate(f, Default())
+}
+
+// evaluate is the threshold-aware implementation behind Evaluate. Keeping it
+// package-private allows tests to prove that every consumer follows a supplied
+// policy without exposing user-selectable sensitivity.
+func evaluate(f *Facts, thresholds Thresholds) Result {
 	var findings []model.Finding
 	for _, rule := range Rules() {
-		if fd := rule.Evaluate(f); fd != nil {
+		if fd := rule.Evaluate(f, thresholds); fd != nil {
 			findings = append(findings, *fd)
 		}
 	}
 	class := classify(findings, f)
 	return Result{
 		Class:           class,
-		Score:           scoreFor(f, findings, class),
+		Score:           scoreFor(f, findings, class, thresholds),
 		Findings:        findings,
 		Recommendations: recommend(findings, class),
 		RulesVersion:    RulesVersion,

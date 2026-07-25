@@ -2,7 +2,6 @@ package evaluate
 
 import (
 	"fmt"
-	"time"
 
 	"cablecheck/internal/model"
 )
@@ -17,7 +16,7 @@ type Rule struct {
 	Category model.Category
 	// Evaluate inspects the facts and returns a finding, or nil when the
 	// rule passed or is not applicable.
-	Evaluate func(f *Facts) *model.Finding
+	Evaluate func(f *Facts, thresholds Thresholds) *model.Finding
 }
 
 // dirNames labels the two traffic directions for evidence text.
@@ -124,7 +123,7 @@ func phy06cond(f *Facts) bool {
 	return f.NegotiatedSpeed > 0 && f.ExpectedSpeed > 0 && f.NegotiatedSpeed < f.ExpectedSpeed
 }
 
-func rulePHY01(f *Facts) *model.Finding {
+func rulePHY01(f *Facts, _ Thresholds) *model.Finding {
 	if f.LinkUpAtEnd {
 		return nil
 	}
@@ -137,22 +136,22 @@ func rulePHY01(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY02(f *Facts) *model.Finding {
+func rulePHY02(f *Facts, thresholds Thresholds) *model.Finding {
 	total := crcTotal(f)
 	if total == 0 {
 		return nil
 	}
-	lossy := anyPingLossOver(f, 1)
+	lossy := anyPingLossOver(f, thresholds.CRCCorroboratingPingLossAbove)
 	sev := model.SevWarning
 	switch {
-	case total > 1000 || (total > 10 && lossy):
+	case total > thresholds.CRCFailedAbove || (total > thresholds.CRCPoorAbove && lossy):
 		sev = model.SevFailed
-	case total > 10:
+	case total > thresholds.CRCPoorAbove:
 		sev = model.SevPoor
 	}
 	ev := crcEvidence(f)
-	if total > 10 && lossy {
-		ev = append(ev, "ping loss above 1% corroborates the counter movement")
+	if total > thresholds.CRCPoorAbove && lossy {
+		ev = append(ev, fmt.Sprintf("ping loss above %g%% corroborates the counter movement", thresholds.CRCCorroboratingPingLossAbove))
 	}
 	return &model.Finding{
 		RuleID:   "PHY-02",
@@ -163,13 +162,13 @@ func rulePHY02(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY03(f *Facts) *model.Finding {
+func rulePHY03(f *Facts, thresholds Thresholds) *model.Finding {
 	events := carrierEvents(f)
 	if events == 0 {
 		return nil
 	}
 	sev := model.SevPoor
-	if events >= 3 {
+	if events >= thresholds.CarrierFailedAt {
 		sev = model.SevFailed
 	}
 	return &model.Finding{
@@ -181,7 +180,7 @@ func rulePHY03(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY04(f *Facts) *model.Finding {
+func rulePHY04(f *Facts, _ Thresholds) *model.Finding {
 	if f.Renegotiations < 1 {
 		return nil
 	}
@@ -194,7 +193,7 @@ func rulePHY04(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY05(f *Facts) *model.Finding {
+func rulePHY05(f *Facts, _ Thresholds) *model.Finding {
 	if !f.HalfDuplex {
 		return nil
 	}
@@ -207,7 +206,7 @@ func rulePHY05(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY06(f *Facts) *model.Finding {
+func rulePHY06(f *Facts, _ Thresholds) *model.Finding {
 	if !phy06cond(f) {
 		return nil
 	}
@@ -222,7 +221,7 @@ func rulePHY06(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY07(f *Facts) *model.Finding {
+func rulePHY07(f *Facts, _ Thresholds) *model.Finding {
 	if !phy06cond(f) || crcTotal(f) == 0 {
 		return nil
 	}
@@ -236,7 +235,7 @@ func rulePHY07(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY08(f *Facts) *model.Finding {
+func rulePHY08(f *Facts, _ Thresholds) *model.Finding {
 	if !f.CableTestRan {
 		return nil
 	}
@@ -275,13 +274,13 @@ func rulePHY08(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY09(f *Facts) *model.Finding {
+func rulePHY09(f *Facts, thresholds Thresholds) *model.Finding {
 	total := jabberTotal(f)
 	if total == 0 {
 		return nil
 	}
 	sev := model.SevWarning
-	if total > 10 {
+	if total > thresholds.FrameSizePoorAbove {
 		sev = model.SevPoor
 	}
 	return &model.Finding{
@@ -293,14 +292,14 @@ func rulePHY09(f *Facts) *model.Finding {
 	}
 }
 
-func rulePHY10(f *Facts) *model.Finding {
+func rulePHY10(f *Facts, thresholds Thresholds) *model.Finding {
 	if crcTotal(f) == 0 {
 		return nil
 	}
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if d.UDPAvailable && d.UDPTargetReached && d.UDPLossPct > 2 {
+		if d.UDPAvailable && d.UDPTargetReached && d.UDPLossPct > thresholds.UDPLossPoorAbove {
 			ev = append(ev, fmt.Sprintf("%s: UDP loss %.2f%% at target rate", dirNames[i], d.UDPLossPct))
 		}
 	}
@@ -311,12 +310,12 @@ func rulePHY10(f *Facts) *model.Finding {
 		RuleID:   "PHY-10",
 		Category: model.CategoryPhysical,
 		Severity: model.SevFailed,
-		Text:     "UDP loss above 2% correlates with physical error counter movement.",
+		Text:     fmt.Sprintf("UDP loss above %g%% correlates with physical error counter movement.", thresholds.UDPLossPoorAbove),
 		Evidence: append(ev, crcEvidence(f)...),
 	}
 }
 
-func ruleTR01(f *Facts) *model.Finding {
+func ruleTR01(f *Facts, thresholds Thresholds) *model.Finding {
 	worst := model.Severity(-1)
 	var ev []string
 	for i := range f.Dir {
@@ -325,7 +324,7 @@ func ruleTR01(f *Facts) *model.Finding {
 			continue
 		}
 		sev := model.SevWarning
-		if loss > 0.1 {
+		if loss > thresholds.PingLossPoorAbove {
 			sev = model.SevPoor
 		}
 		ev = append(ev, fmt.Sprintf("%s: %.2f%% ping loss", dirNames[i], loss))
@@ -345,7 +344,7 @@ func ruleTR01(f *Facts) *model.Finding {
 	}
 }
 
-func ruleTR02(f *Facts) *model.Finding {
+func ruleTR02(f *Facts, _ Thresholds) *model.Finding {
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
@@ -365,7 +364,7 @@ func ruleTR02(f *Facts) *model.Finding {
 	}
 }
 
-func ruleTR03(f *Facts) *model.Finding {
+func ruleTR03(f *Facts, _ Thresholds) *model.Finding {
 	total := f.Dir[0].FragErrors + f.Dir[1].FragErrors
 	if total == 0 {
 		return nil
@@ -379,7 +378,7 @@ func ruleTR03(f *Facts) *model.Finding {
 	}
 }
 
-func ruleTR04(f *Facts) *model.Finding {
+func ruleTR04(f *Facts, _ Thresholds) *model.Finding {
 	total := f.Dir[0].PingDuplicates + f.Dir[1].PingDuplicates
 	if total == 0 {
 		return nil
@@ -393,18 +392,18 @@ func ruleTR04(f *Facts) *model.Finding {
 	}
 }
 
-func ruleTR05(f *Facts) *model.Finding {
+func ruleTR05(f *Facts, thresholds Thresholds) *model.Finding {
 	worst := model.Severity(-1)
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if d.PingSpikes > 5 {
-			ev = append(ev, fmt.Sprintf("%s: %d RTT spikes above 10x the median", dirNames[i], d.PingSpikes))
+		if d.PingSpikes > thresholds.PingSpikesWarningAbove {
+			ev = append(ev, fmt.Sprintf("%s: %d RTT spikes above max(5x median, median+10 ms)", dirNames[i], d.PingSpikes))
 			if model.SevWarning > worst {
 				worst = model.SevWarning
 			}
 		}
-		if d.PingMaxGap > time.Second {
+		if d.PingMaxGap > thresholds.PingGapPoorAbove {
 			ev = append(ev, fmt.Sprintf("%s: longest reply gap %s", dirNames[i], d.PingMaxGap))
 			if model.SevPoor > worst {
 				worst = model.SevPoor
@@ -423,16 +422,16 @@ func ruleTR05(f *Facts) *model.Finding {
 	}
 }
 
-func ruleTR06(f *Facts) *model.Finding {
+func ruleTR06(f *Facts, thresholds Thresholds) *model.Finding {
 	worst := model.Severity(-1)
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if !d.TCPAvailable || d.TCPRetransRate < 0.001 {
+		if !d.TCPAvailable || d.TCPRetransRate < thresholds.TCPRetransWarningAt {
 			continue
 		}
 		sev := model.SevWarning
-		if d.TCPRetransRate > 0.01 {
+		if d.TCPRetransRate > thresholds.TCPRetransPoorAbove {
 			sev = model.SevPoor
 		}
 		ev = append(ev, fmt.Sprintf("%s: estimated retransmit rate %.2f%% (retransmits / (bytes/MSS %d))",
@@ -453,19 +452,19 @@ func ruleTR06(f *Facts) *model.Finding {
 	}
 }
 
-func ruleTR07(f *Facts) *model.Finding {
-	if f.MaxCPUPct > 90 {
+func ruleTR07(f *Facts, thresholds Thresholds) *model.Finding {
+	if f.MaxCPUPct > thresholds.CPUHostLimitedAbove {
 		return nil // host limitation rules speak instead (HOST-01)
 	}
 	worst := model.Severity(-1)
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if !d.UDPAvailable || !d.UDPTargetReached || d.UDPLossPct < 0.5 {
+		if !d.UDPAvailable || !d.UDPTargetReached || d.UDPLossPct < thresholds.UDPLossWarningAt {
 			continue
 		}
 		sev := model.SevWarning
-		if d.UDPLossPct > 2 {
+		if d.UDPLossPct > thresholds.UDPLossPoorAbove {
 			sev = model.SevPoor
 		}
 		line := fmt.Sprintf("%s: %.2f%% UDP loss at target rate", dirNames[i], d.UDPLossPct)
@@ -489,11 +488,11 @@ func ruleTR07(f *Facts) *model.Finding {
 	}
 }
 
-func ruleTR08(f *Facts) *model.Finding {
+func ruleTR08(f *Facts, thresholds Thresholds) *model.Finding {
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if d.UDPAvailable && d.UDPJitterMs > 5 {
+		if d.UDPAvailable && d.UDPJitterMs > thresholds.UDPJitterWarningAbove {
 			ev = append(ev, fmt.Sprintf("%s: %.2f ms jitter", dirNames[i], d.UDPJitterMs))
 		}
 	}
@@ -504,16 +503,16 @@ func ruleTR08(f *Facts) *model.Finding {
 		RuleID:   "TR-08",
 		Category: model.CategoryTransport,
 		Severity: model.SevWarning,
-		Text:     "UDP jitter above 5 ms on a direct link.",
+		Text:     fmt.Sprintf("UDP jitter above %g ms on a direct link.", thresholds.UDPJitterWarningAbove),
 		Evidence: ev,
 	}
 }
 
-func ruleTR09(f *Facts) *model.Finding {
+func ruleTR09(f *Facts, thresholds Thresholds) *model.Finding {
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if d.UDPAvailable && d.UDPOutOfOrderPct > 0.1 {
+		if d.UDPAvailable && d.UDPOutOfOrderPct > thresholds.UDPReorderWarningAbove {
 			ev = append(ev, fmt.Sprintf("%s: %.2f%% datagrams out of order", dirNames[i], d.UDPOutOfOrderPct))
 		}
 	}
@@ -529,7 +528,7 @@ func ruleTR09(f *Facts) *model.Finding {
 	}
 }
 
-func rulePERF01(f *Facts) *model.Finding {
+func rulePERF01(f *Facts, thresholds Thresholds) *model.Finding {
 	if f.NegotiatedSpeed == 0 {
 		return nil
 	}
@@ -543,11 +542,11 @@ func rulePERF01(f *Facts) *model.Finding {
 		ratio := float64(d.TCPBitrate) / float64(f.NegotiatedSpeed)
 		var sev model.Severity
 		switch {
-		case ratio >= 0.9:
+		case ratio >= thresholds.TCPThroughputPassAt:
 			continue
-		case ratio >= 0.7:
+		case ratio >= thresholds.TCPThroughputInfoAt:
 			sev = model.SevInfo
-		case ratio >= 0.4:
+		case ratio >= thresholds.TCPThroughputWarningAt:
 			sev = model.SevWarning
 		default:
 			sev = model.SevPoor
@@ -570,16 +569,16 @@ func rulePERF01(f *Facts) *model.Finding {
 	}
 }
 
-func rulePERF02(f *Facts) *model.Finding {
+func rulePERF02(f *Facts, thresholds Thresholds) *model.Finding {
 	worst := model.Severity(-1)
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if !d.TCPAvailable || d.TCPCoV < 0.15 {
+		if !d.TCPAvailable || d.TCPCoV < thresholds.TCPCoVWarningAt {
 			continue
 		}
 		sev := model.SevWarning
-		if d.TCPCoV > 0.30 {
+		if d.TCPCoV > thresholds.TCPCoVPoorAbove {
 			sev = model.SevPoor
 		}
 		ev = append(ev, fmt.Sprintf("%s: throughput coefficient of variation %.0f%%", dirNames[i], d.TCPCoV*100))
@@ -600,28 +599,29 @@ func rulePERF02(f *Facts) *model.Finding {
 	}
 }
 
-func rulePERF03(f *Facts) *model.Finding {
+func rulePERF03(f *Facts, thresholds Thresholds) *model.Finding {
 	total := f.Dir[0].TCPCollapses + f.Dir[1].TCPCollapses
 	if total == 0 {
 		return nil
 	}
 	sev := model.SevWarning
-	if total >= 3 {
+	if total >= thresholds.TCPCollapsePoorAt {
 		sev = model.SevPoor
 	}
+	boundaryPct := thresholds.TCPCollapseBelowMedian * 100
 	return &model.Finding{
 		RuleID:        "PERF-03",
 		Category:      model.CategoryPerformance,
 		Severity:      sev,
-		Text:          fmt.Sprintf("TCP throughput collapsed below half the median in %d interval(s).", total),
-		Evidence:      []string{fmt.Sprintf("%d interval(s) under 50%% of the median interval bitrate", total)},
+		Text:          fmt.Sprintf("TCP throughput collapsed below %g%% of the median in %d interval(s).", boundaryPct, total),
+		Evidence:      []string{fmt.Sprintf("%d interval(s) under %g%% of the median interval bitrate", total, boundaryPct)},
 		HostSensitive: true,
 	}
 }
 
-func rulePERF04(f *Facts) *model.Finding {
+func rulePERF04(f *Facts, thresholds Thresholds) *model.Finding {
 	ratio := asymmetryRatio(f)
-	if ratio <= 0.30 {
+	if ratio <= thresholds.TCPAsymmetryWarnAbove {
 		return nil
 	}
 	d0, d1 := &f.Dir[0], &f.Dir[1]
@@ -636,8 +636,8 @@ func rulePERF04(f *Facts) *model.Finding {
 	}
 }
 
-func ruleHOST01(f *Facts) *model.Finding {
-	if f.MaxCPUPct <= 90 {
+func ruleHOST01(f *Facts, thresholds Thresholds) *model.Finding {
+	if f.MaxCPUPct <= thresholds.CPUHostLimitedAbove {
 		return nil
 	}
 	return &model.Finding{
@@ -645,11 +645,11 @@ func ruleHOST01(f *Facts) *model.Finding {
 		Category: model.CategoryHost,
 		Severity: model.SevMarker,
 		Text:     "CPU was saturated during throughput testing — performance results may be host-limited.",
-		Evidence: []string{fmt.Sprintf("max iperf3 CPU utilization %.1f%% > 90%%", f.MaxCPUPct)},
+		Evidence: []string{fmt.Sprintf("max iperf3 CPU utilization %.1f%% > %g%%", f.MaxCPUPct, thresholds.CPUHostLimitedAbove)},
 	}
 }
 
-func ruleHOST02(f *Facts) *model.Finding {
+func ruleHOST02(f *Facts, _ Thresholds) *model.Finding {
 	if !f.VirtualInterface {
 		return nil
 	}
@@ -662,8 +662,8 @@ func ruleHOST02(f *Facts) *model.Finding {
 	}
 }
 
-func ruleHOST03(f *Facts) *model.Finding {
-	if !f.USBAdapter || rulePERF01(f) == nil {
+func ruleHOST03(f *Facts, thresholds Thresholds) *model.Finding {
+	if !f.USBAdapter || rulePERF01(f, thresholds) == nil {
 		return nil
 	}
 	return &model.Finding{
@@ -675,7 +675,7 @@ func ruleHOST03(f *Facts) *model.Finding {
 	}
 }
 
-func ruleLIM01(f *Facts) *model.Finding {
+func ruleLIM01(f *Facts, _ Thresholds) *model.Finding {
 	noTCP := !f.Dir[0].TCPAvailable && !f.Dir[1].TCPAvailable
 	noCounters := !f.PC1.CountersAvailable && !f.PC2.CountersAvailable
 	if !noTCP && !noCounters {
@@ -710,7 +710,7 @@ var noncriticalTests = map[string]bool{
 	"cable_test_tdr": true,
 }
 
-func ruleLIM02(f *Facts) *model.Finding {
+func ruleLIM02(f *Facts, _ Thresholds) *model.Finding {
 	var ev []string
 	if f.Dir[0].TCPAvailable != f.Dir[1].TCPAvailable {
 		missing := 0
@@ -736,7 +736,7 @@ func ruleLIM02(f *Facts) *model.Finding {
 	}
 }
 
-func ruleLIM03(f *Facts) *model.Finding {
+func ruleLIM03(f *Facts, _ Thresholds) *model.Finding {
 	if !f.Partial {
 		return nil
 	}
@@ -749,7 +749,7 @@ func ruleLIM03(f *Facts) *model.Finding {
 	}
 }
 
-func ruleLIM04(f *Facts) *model.Finding {
+func ruleLIM04(f *Facts, _ Thresholds) *model.Finding {
 	if !f.UDPRateAssumed {
 		return nil
 	}
@@ -762,7 +762,7 @@ func ruleLIM04(f *Facts) *model.Finding {
 	}
 }
 
-func ruleLIM05(f *Facts) *model.Finding {
+func ruleLIM05(f *Facts, _ Thresholds) *model.Finding {
 	if !f.ThroughputUnreachable {
 		return nil
 	}

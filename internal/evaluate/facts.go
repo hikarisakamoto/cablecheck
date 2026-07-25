@@ -53,13 +53,13 @@ type DirFacts struct {
 	// TCPBitrate is the measured TCP throughput (receiver side).
 	TCPBitrate model.Bitrate
 	// TCPRetransRate is retransmits / estimated segments (bytes/MSS, MSS
-	// fallback 1448), as a fraction (0.001 = 0.1%).
+	// fallback 1448), as a fraction.
 	TCPRetransRate float64
 	// TCPCoV is stdev/mean of per-interval bitrates, first interval
 	// excluded, as a fraction.
 	TCPCoV float64
-	// TCPCollapses counts intervals below 50% of the median interval
-	// bitrate (first interval excluded).
+	// TCPCollapses counts intervals below the configured share of median
+	// interval bitrate (first interval excluded).
 	TCPCollapses int
 	// UDPAvailable reports whether a UDP result exists for this direction.
 	UDPAvailable bool
@@ -71,8 +71,8 @@ type DirFacts struct {
 	// UDPOutOfOrderPct is the worst out-of-order datagram percentage among
 	// qualifying runs.
 	UDPOutOfOrderPct float64
-	// UDPTargetReached reports whether any run reached at least 90% of its
-	// target without that target exceeding 95% of negotiated speed.
+	// UDPTargetReached reports whether any run reached the configured share of
+	// its target without being near the configured saturation boundary.
 	UDPTargetReached bool
 	// PingLossPct is the standard ping loss percentage.
 	PingLossPct float64
@@ -131,8 +131,8 @@ type Facts struct {
 	// UDPRateAssumed reports whether the UDP target rate was assumed rather
 	// than derived from a known link speed.
 	UDPRateAssumed bool
-	// UDPNearSaturation reports whether the UDP target rate exceeded 95% of
-	// the negotiated link speed (loss there is expected, not evidence).
+	// UDPNearSaturation reports whether the UDP target rate exceeded the
+	// configured share of link speed where loss is expected, not evidence.
 	UDPNearSaturation bool
 	// Unavailable lists the names of planned tests that could not run.
 	Unavailable []string
@@ -186,6 +186,12 @@ func DeltaSet(before, after *model.CounterSnapshot) (model.CounterDeltaSet, bool
 // FactsFromReport assembles the flat evidence model from a pre-evaluation
 // report. It never mutates the report.
 func FactsFromReport(r *model.Report) *Facts {
+	return factsFromReport(r, Default())
+}
+
+// factsFromReport is the threshold-aware implementation behind
+// FactsFromReport.
+func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 	f := &Facts{LinkUpAtEnd: true}
 	var selfInflicted model.PeerCarrierEvents
 	if r.Tests.CableTest != nil {
@@ -241,7 +247,7 @@ func FactsFromReport(r *model.Report) *Facts {
 			d.TCPBitrate = bitrate
 		}
 		d.TCPCoV = max(d.TCPCoV, tr.ThroughputVariation)
-		d.TCPCollapses = max(d.TCPCollapses, collapses(tr.IntervalResults))
+		d.TCPCollapses = max(d.TCPCollapses, collapses(tr.IntervalResults, thresholds))
 		d.TCPRetransRate = max(d.TCPRetransRate, retransRate(tr))
 	}
 	for i, incomplete := range tcpIncomplete {
@@ -262,9 +268,9 @@ func FactsFromReport(r *model.Report) *Facts {
 		}
 		d := &f.Dir[i]
 		d.UDPAvailable = true
-		targetReached := u.TargetBps > 0 && u.ActualSenderBps >= 0.9*float64(u.TargetBps)
+		targetReached := u.TargetBps > 0 && u.ActualSenderBps >= thresholds.UDPTargetReachedAt*float64(u.TargetBps)
 		nearSaturation := f.NegotiatedSpeed > 0 &&
-			float64(u.TargetBps) > 0.95*float64(f.NegotiatedSpeed)
+			float64(u.TargetBps) > thresholds.UDPNearSaturationAbove*float64(f.NegotiatedSpeed)
 		if nearSaturation {
 			f.UDPNearSaturation = true
 		}
@@ -368,10 +374,10 @@ func retransRate(tr model.TCPResult) float64 {
 	return float64(*tr.Retransmissions) / segments
 }
 
-// collapses counts intervals whose bitrate fell below 50% of the median
-// interval bitrate. The first interval is excluded from both the median and
-// the count (TCP slow-start would otherwise flag every run at t=0).
-func collapses(ivs []model.TCPInterval) int {
+// collapses counts intervals whose bitrate fell below the configured share of
+// the median interval bitrate. The first interval is excluded from both the
+// median and the count (TCP slow-start would otherwise flag every run at t=0).
+func collapses(ivs []model.TCPInterval, thresholds Thresholds) int {
 	if len(ivs) < 2 {
 		return 0
 	}
@@ -385,7 +391,7 @@ func collapses(ivs []model.TCPInterval) int {
 	}
 	n := 0
 	for _, rate := range rates {
-		if rate < med/2 {
+		if rate < med*thresholds.TCPCollapseBelowMedian {
 			n++
 		}
 	}

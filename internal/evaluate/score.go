@@ -9,7 +9,7 @@ import (
 // scoreFor computes the 0-100 health score: start at 100, apply the deduction
 // table (§4.5 of the design), then clamp into the class band so score and
 // class can never contradict each other. INCONCLUSIVE runs get no score.
-func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass) *int {
+func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thresholds Thresholds) *int {
 	if class == model.HealthInconclusive {
 		return nil
 	}
@@ -30,7 +30,7 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass) *int 
 	}
 
 	// Per-direction transport deductions.
-	udpGated := f.MaxCPUPct <= 90
+	udpGated := f.MaxCPUPct <= thresholds.CPUHostLimitedAbove
 	for i := range f.Dir {
 		d := &f.Dir[i]
 		if d.PingLossPct > 0 {
@@ -38,17 +38,17 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass) *int 
 		}
 		if d.TCPAvailable {
 			switch {
-			case d.TCPRetransRate > 0.01:
+			case d.TCPRetransRate > thresholds.TCPRetransPoorAbove:
 				s -= 15
-			case d.TCPRetransRate >= 0.001:
+			case d.TCPRetransRate >= thresholds.TCPRetransWarningAt:
 				s -= 5
 			}
 		}
 		if udpGated && d.UDPAvailable && d.UDPTargetReached {
 			switch {
-			case d.UDPLossPct > 2:
+			case d.UDPLossPct > thresholds.UDPLossPoorAbove:
 				s -= 15
-			case d.UDPLossPct >= 0.5:
+			case d.UDPLossPct >= thresholds.UDPLossWarningAt:
 				s -= 5
 			}
 		}
@@ -65,9 +65,9 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass) *int 
 		}
 	}
 	switch {
-	case cov > 0.30:
+	case cov > thresholds.TCPCoVPoorAbove:
 		s -= 15
-	case cov >= 0.15:
+	case cov >= thresholds.TCPCoVWarningAt:
 		s -= 5
 	}
 	s -= math.Min(20, 5*float64(f.Dir[0].TCPCollapses+f.Dir[1].TCPCollapses))
@@ -83,20 +83,20 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass) *int 
 		switch {
 		case math.IsInf(ratio, 1):
 			// no TCP result; nothing to deduct
-		case ratio < 0.4:
+		case ratio < thresholds.TCPThroughputWarningAt:
 			s -= 25
-		case ratio < 0.7:
+		case ratio < thresholds.TCPThroughputInfoAt:
 			s -= 10
 		}
 	}
-	if asymmetryRatio(f) > 0.30 {
+	if asymmetryRatio(f) > thresholds.TCPAsymmetryWarnAbove {
 		s -= 5
 	}
-	if f.Dir[0].UDPJitterMs > 5 || f.Dir[1].UDPJitterMs > 5 {
+	if f.Dir[0].UDPJitterMs > thresholds.UDPJitterWarningAbove || f.Dir[1].UDPJitterMs > thresholds.UDPJitterWarningAbove {
 		s -= 5
 	}
 
-	v := clampToBand(int(math.Round(s)), class)
+	v := clampToBand(int(math.Round(s)), class, thresholds)
 	return &v
 }
 
@@ -114,27 +114,14 @@ func asymmetryRatio(f *Facts) float64 {
 	return math.Abs(a-b) / hi
 }
 
-// clampToBand forces the score into the band of the class: FAILED <=25,
-// POOR 26-50, WARNING 51-79, GOOD 80-94, EXCELLENT 95-100.
-func clampToBand(v int, class model.HealthClass) int {
-	lo, hi := 0, 100
-	switch class {
-	case model.HealthFailed:
-		lo, hi = 0, 25
-	case model.HealthPoor:
-		lo, hi = 26, 50
-	case model.HealthWarning:
-		lo, hi = 51, 79
-	case model.HealthGood:
-		lo, hi = 80, 94
-	case model.HealthExcellent:
-		lo, hi = 95, 100
+// clampToBand forces the score into the configured band of the class.
+func clampToBand(v int, class model.HealthClass, thresholds Thresholds) int {
+	band := thresholds.scoreBand(class)
+	if v < band.Min {
+		return band.Min
 	}
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
+	if v > band.Max {
+		return band.Max
 	}
 	return v
 }

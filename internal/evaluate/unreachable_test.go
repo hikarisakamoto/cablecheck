@@ -19,10 +19,10 @@ func recsContain(res Result, sub string) bool {
 // TestRuleLIM05 pins the data-port-unreachable limitation marker.
 func TestRuleLIM05(t *testing.T) {
 	rule := ruleByID(t, "LIM-05")
-	if fd := rule.Evaluate(&Facts{ThroughputUnreachable: true}); fd == nil || fd.Severity != model.SevMarker {
+	if fd := evaluateRule(rule, &Facts{ThroughputUnreachable: true}); fd == nil || fd.Severity != model.SevMarker {
 		t.Errorf("LIM-05 on unreachable throughput = %+v, want one SevMarker finding", fd)
 	}
-	if fd := rule.Evaluate(&Facts{}); fd != nil {
+	if fd := evaluateRule(rule, &Facts{}); fd != nil {
 		t.Errorf("LIM-05 without unreachable throughput = %+v, want nil", fd)
 	}
 }
