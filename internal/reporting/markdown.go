@@ -327,6 +327,17 @@ func sectionTCP(b *md, r *model.Report, number int, direction, title string) {
 	}
 	rows := make([][]string, 0, len(results))
 	for i, tr := range results {
+		if tr.Incomplete {
+			// A run that never produced its throughput summary carries no
+			// measurement: label it and render n/a rather than a bogus 0.
+			rows = append(rows, []string{
+				fmt.Sprintf("%d (incomplete)", i+1),
+				tr.Duration.String(),
+				fmt.Sprintf("%d", tr.ParallelStreams),
+				"n/a", "n/a", "n/a", "n/a", "n/a", "n/a",
+			})
+			continue
+		}
 		retrans := "not reported"
 		if tr.Retransmissions != nil {
 			retrans = fmt.Sprintf("%d", *tr.Retransmissions)
@@ -415,6 +426,11 @@ func sectionCPU(b *md, r *model.Report) {
 		})
 	}
 	for _, tr := range r.Tests.TCP {
+		if tr.Incomplete {
+			// CPU from a run that never completed is not a measurement.
+			rows = append(rows, []string{"TCP " + dirLabel(tr.Direction) + " (incomplete)", "n/a", "n/a"})
+			continue
+		}
 		add("TCP "+dirLabel(tr.Direction), tr.CPUUtilization)
 	}
 	if bd := r.Tests.Bidirectional; bd != nil {

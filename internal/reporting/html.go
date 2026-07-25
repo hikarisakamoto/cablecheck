@@ -95,8 +95,9 @@ type htmlBidirRow struct {
 }
 
 type htmlCPURow struct {
-	Test string
-	CPU  model.CPUUsage
+	Test       string
+	CPU        model.CPUUsage
+	Incomplete bool
 }
 
 type htmlToolRow struct {
@@ -198,7 +199,7 @@ func newHTMLView(r *model.Report) htmlView {
 	}
 
 	for _, result := range r.Tests.TCP {
-		v.CPURows = append(v.CPURows, htmlCPURow{Test: "TCP " + dirLabel(result.Direction), CPU: result.CPUUtilization})
+		v.CPURows = append(v.CPURows, htmlCPURow{Test: "TCP " + dirLabel(result.Direction), CPU: result.CPUUtilization, Incomplete: result.Incomplete})
 	}
 	if bidir := r.Tests.Bidirectional; bidir != nil {
 		v.CPURows = append(v.CPURows, htmlCPURow{Test: "Bidirectional", CPU: bidir.CPUUtilization})
@@ -239,7 +240,11 @@ func makeHTMLTCPSection(results []model.TCPResult, direction string, max float64
 	}
 	section := htmlTCPSection{Bars: throughputBars(selected, max)}
 	for i, result := range selected {
-		section.Rows = append(section.Rows, htmlTCPRow{Run: i + 1, Result: result, Retrans: optionalUint(result.Retransmissions)})
+		retrans := optionalUint(result.Retransmissions)
+		if result.Incomplete {
+			retrans = "n/a"
+		}
+		section.Rows = append(section.Rows, htmlTCPRow{Run: i + 1, Result: result, Retrans: retrans})
 	}
 	return section
 }

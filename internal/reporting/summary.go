@@ -30,10 +30,13 @@ func RenderSummary(r *model.Report) []byte {
 		return p.Direction, fmt.Sprintf("%.2f%%", p.LossPercent)
 	}))
 	addf("TCP throughput:   %s", perDirection(r.Tests.TCP, func(t model.TCPResult) (string, string) {
+		if t.Incomplete {
+			return t.Direction, "n/a (incomplete)"
+		}
 		return t.Direction, fmtBps(t.ReceiverBitsPerSecond)
 	}))
 	addf("TCP retransmits:  %s", perDirection(r.Tests.TCP, func(t model.TCPResult) (string, string) {
-		if t.Retransmissions == nil {
+		if t.Incomplete || t.Retransmissions == nil {
 			return t.Direction, "n/a"
 		}
 		return t.Direction, fmt.Sprintf("%d", *t.Retransmissions)

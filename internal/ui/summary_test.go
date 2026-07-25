@@ -60,6 +60,31 @@ func TestRendererSummaryPartialAndColor(t *testing.T) {
 	}
 }
 
+// TestRendererSummaryMarksIncompleteTCP verifies the terminal summary renders an
+// incomplete TCP run as "n/a (incomplete)" rather than surfacing its untrusted
+// leftover throughput as a measured value.
+func TestRendererSummaryMarksIncompleteTCP(t *testing.T) {
+	rep := &model.Report{
+		Tests: model.TestsSection{
+			TCP: []model.TCPResult{{
+				Direction:             model.DirectionPC1ToPC2,
+				Incomplete:            true,
+				ReceiverBitsPerSecond: 111_222_333,
+			}},
+		},
+	}
+	var out bytes.Buffer
+	newRenderer(&out, Options{Color: ColorNever, Width: 120}, false).Summary(rep, "/tmp/x")
+
+	got := out.String()
+	if !strings.Contains(got, "pc1->pc2 n/a (incomplete)") {
+		t.Errorf("terminal summary did not mark incomplete TCP throughput:\n%s", got)
+	}
+	if strings.Contains(got, "111.2") {
+		t.Errorf("terminal summary surfaced an incomplete run's throughput:\n%s", got)
+	}
+}
+
 func TestRendererSummaryRespectsConfiguredWidth(t *testing.T) {
 	rep := presentationReport()
 	rep.Recommendations = []string{"a deliberately long recommendation that must wrap without being discarded"}
