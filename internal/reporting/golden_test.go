@@ -6,13 +6,16 @@ import (
 	"flag"
 	stdhtml "html"
 	"html/template"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"cablecheck/internal/evaluate"
 	"cablecheck/internal/model"
 )
 
@@ -244,8 +247,267 @@ func goldenReport() *model.Report {
 	}
 }
 
+// cloneLinkSettings returns an independently mutable copy. goldenReport uses
+// one LinkSettings pointer for all four captures, so scenario tests must break
+// that alias before changing only one phase or side.
+func cloneLinkSettings(in *model.LinkSettings) *model.LinkSettings {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.SupportedPorts = slices.Clone(in.SupportedPorts)
+	out.SupportedModes = slices.Clone(in.SupportedModes)
+	out.AdvertisedModes = slices.Clone(in.AdvertisedModes)
+	out.PartnerModes = slices.Clone(in.PartnerModes)
+	out.Raw = maps.Clone(in.Raw)
+	return &out
+}
+
+// seedEvaluatedGoldenReport builds one coherent pre-evaluation report, applies
+// the scenario evidence, and runs the same evaluation fold as app.finalize.
+// Every call starts from fresh data and breaks goldenReport's intentional map
+// and pointer aliases before the scenario mutates them.
+func seedEvaluatedGoldenReport(mutate func(*model.Report)) (*model.Report, *evaluate.Facts) {
+	r := goldenReport()
+	r.CounterDeltas.PC1 = maps.Clone(r.CounterDeltas.PC1)
+	r.CounterDeltas.PC2 = maps.Clone(r.CounterDeltas.PC2)
+	r.Link.PC1.Before = cloneLinkSettings(r.Link.PC1.Before)
+	r.Link.PC1.After = cloneLinkSettings(r.Link.PC1.After)
+	r.Link.PC2.Before = cloneLinkSettings(r.Link.PC2.Before)
+	r.Link.PC2.After = cloneLinkSettings(r.Link.PC2.After)
+
+	r.Classification = ""
+	r.Score = nil
+	r.ClassificationReasons = nil
+	r.Findings = nil
+	r.Recommendations = nil
+	r.SkippedTests = nil
+
+	mutate(r)
+	facts := evaluate.FactsFromReport(r)
+	res := evaluate.Evaluate(facts)
+	r.Classification = res.Class
+	r.Score = res.Score
+	r.Findings = res.Findings
+	r.Recommendations = res.Recommendations
+	for _, finding := range res.Findings {
+		r.ClassificationReasons = append(r.ClassificationReasons, finding.Text)
+	}
+	return r, facts
+}
+
+func hasFinding(report *model.Report, ruleID string) bool {
+	for _, finding := range report.Findings {
+		if finding.RuleID == ruleID {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMarkdownGoldenHealthy(t *testing.T) {
 	checkGolden(t, "report-healthy.md", RenderMarkdown(goldenReport()))
+}
+
+func TestMarkdownGoldenVerdicts(t *testing.T) {
+	type scenario struct {
+		name        string
+		golden      string
+		wantClass   model.HealthClass
+		wantScore   int // asserted only when wantNoScore is false
+		wantRules   []string
+		wantNoScore bool
+		mutate      func(*model.Report)
+		checkFacts  func(*testing.T, *evaluate.Facts)
+	}
+
+	hotCPU := model.CPUUsage{
+		HostTotal: 96, HostUser: 70, HostSystem: 26,
+		RemoteTotal: 88, RemoteUser: 60, RemoteSystem: 28,
+	}
+	cases := []scenario{
+		{
+			name:      "crc-poor",
+			golden:    "report-crc-poor.md",
+			wantClass: model.HealthPoor,
+			wantScore: 50,
+			wantRules: []string{"PHY-02"},
+			mutate: func(r *model.Report) {
+				const addedCRC = 42
+				r.FinalCounters.PC1.Standard["rx_crc"] += addedCRC
+				r.FinalCounters.PC1.Driver["rx_crc_errors"] += addedCRC
+				r.FinalCounters.PC1.IPStats.RX.Errors += addedCRC
+				r.FinalCounters.PC1.IPStats.RX.CRCErrors += addedCRC
+				r.CounterDeltas.PC1["rx_crc"] = model.CounterDelta{Delta: addedCRC, OK: true}
+			},
+			checkFacts: func(t *testing.T, facts *evaluate.Facts) {
+				t.Helper()
+				if facts.PC1.CRCClassErrors != 42 || facts.PC2.CRCClassErrors != 0 {
+					t.Errorf("CRC facts = pc1:%d pc2:%d, want pc1:42 pc2:0", facts.PC1.CRCClassErrors, facts.PC2.CRCClassErrors)
+				}
+			},
+		},
+		{
+			name:      "disconnected-failed",
+			golden:    "report-disconnected-failed.md",
+			wantClass: model.HealthFailed,
+			wantScore: 25,
+			wantRules: []string{"PHY-01", "PHY-03"},
+			mutate: func(r *model.Report) {
+				downLink := func() *model.LinkSettings {
+					return &model.LinkSettings{
+						SpeedMbps: -1, Duplex: "unknown", LinkDetected: false,
+						AutoNeg: "on", Port: "Twisted Pair",
+					}
+				}
+				r.Link.PC1.After = downLink()
+				r.Link.PC2.After = downLink()
+				r.FinalCounters.PC1.Standard["link_resets"] += 4
+				r.FinalCounters.PC1.IPStats.TX.CarrierChanges += 4
+				r.CounterDeltas.PC1["link_resets"] = model.CounterDelta{Delta: 4, OK: true}
+				r.Tests = model.TestsSection{}
+				r.Partial = true
+				r.MonitoringEvents = []model.MonitoringEvent{
+					{At: r.StartedAt.Add(10 * time.Second), Type: "carrier_lost", Detail: "carrier lost on pc1 enp3s0"},
+					{At: r.StartedAt.Add(12 * time.Second), Type: "carrier_restored", Detail: "carrier restored on pc1 enp3s0"},
+					{At: r.StartedAt.Add(40 * time.Second), Type: "carrier_lost", Detail: "carrier lost on pc1 enp3s0"},
+				}
+				r.SkippedTests = []model.SkippedTest{
+					{Name: "ping", Reason: "link went down before ping completed"},
+					{Name: "full_size_ping", Reason: "link went down before full-size ping"},
+					{Name: "tcp", Reason: "link went down before TCP throughput"},
+					{Name: "bidirectional", Reason: "link went down before bidirectional stress"},
+					{Name: "udp", Reason: "link went down before UDP testing"},
+				}
+				r.RawFiles = r.RawFiles[:2]
+			},
+			checkFacts: func(t *testing.T, facts *evaluate.Facts) {
+				t.Helper()
+				if facts.LinkUpAtEnd {
+					t.Error("link-up fact = true, want false")
+				}
+				if facts.PC1.CarrierEvents != 4 || facts.PC2.CarrierEvents != 0 {
+					t.Errorf("carrier facts = pc1:%d pc2:%d, want pc1:4 pc2:0", facts.PC1.CarrierEvents, facts.PC2.CarrierEvents)
+				}
+			},
+		},
+		{
+			name:      "reduced-warning",
+			golden:    "report-reduced-warning.md",
+			wantClass: model.HealthWarning,
+			wantScore: 79,
+			wantRules: []string{"PHY-06"},
+			mutate: func(r *model.Report) {
+				for _, link := range []*model.LinkSettings{
+					r.Link.PC1.Before, r.Link.PC1.After, r.Link.PC2.Before, r.Link.PC2.After,
+				} {
+					link.SpeedMbps = 100
+					link.AdvertisedModes = []string{"100baseT/Full", "1000baseT/Full"}
+					link.PartnerModes = []string{"100baseT/Full", "1000baseT/Full"}
+				}
+				r.PC1.NIC.SpeedMbps = 100
+				r.PC2.NIC.SpeedMbps = 100
+				r.Configuration.UDPRate /= 10
+				for i := range r.Tests.TCP {
+					r.Tests.TCP[i].SenderBitsPerSecond /= 10
+					r.Tests.TCP[i].ReceiverBitsPerSecond /= 10
+					r.Tests.TCP[i].MinimumIntervalBps /= 10
+					r.Tests.TCP[i].MaximumIntervalBps /= 10
+				}
+				for i := range r.Tests.UDP {
+					r.Tests.UDP[i].TargetBps /= 10
+					r.Tests.UDP[i].ActualSenderBps /= 10
+					r.Tests.UDP[i].ActualReceiverBps /= 10
+					r.Tests.UDP[i].TotalPackets /= 10
+				}
+				r.Tests.Bidirectional.PC1ToPC2.SenderBitsPerSecond /= 10
+				r.Tests.Bidirectional.PC1ToPC2.ReceiverBitsPerSecond /= 10
+				r.Tests.Bidirectional.PC2ToPC1.SenderBitsPerSecond /= 10
+				r.Tests.Bidirectional.PC2ToPC1.ReceiverBitsPerSecond /= 10
+			},
+			checkFacts: func(t *testing.T, facts *evaluate.Facts) {
+				t.Helper()
+				if facts.NegotiatedSpeed != model.Bitrate(100_000_000) || facts.ExpectedSpeed != model.Bitrate(1_000_000_000) {
+					t.Errorf("speeds = negotiated:%s expected:%s, want 100 Mbit/s and 1 Gbit/s", facts.NegotiatedSpeed, facts.ExpectedSpeed)
+				}
+			},
+		},
+		{
+			name:        "hostlimited-inconclusive",
+			golden:      "report-hostlimited-inconclusive.md",
+			wantClass:   model.HealthInconclusive,
+			wantRules:   []string{"PERF-01", "HOST-01"},
+			wantNoScore: true,
+			mutate: func(r *model.Report) {
+				r.Tests.TCP[0].SenderBitsPerSecond = 251_000_000
+				r.Tests.TCP[0].ReceiverBitsPerSecond = 250_000_000
+				r.Tests.TCP[0].MinimumIntervalBps = 247_000_000
+				r.Tests.TCP[0].MaximumIntervalBps = 252_000_000
+				r.Tests.TCP[1].SenderBitsPerSecond = 249_000_000
+				r.Tests.TCP[1].ReceiverBitsPerSecond = 248_000_000
+				r.Tests.TCP[1].MinimumIntervalBps = 245_000_000
+				r.Tests.TCP[1].MaximumIntervalBps = 250_000_000
+				for i := range r.Tests.TCP {
+					r.Tests.TCP[i].CPUUtilization = hotCPU
+				}
+				// A CPU-bound host asked for the full 800 Mbit/s UDP rate can only
+				// generate a fraction of it, so the sender undershoots the target
+				// with no packet loss (undersend, not drops). Leaving UDP at line
+				// rate would contradict the host-limited story the TCP numbers tell.
+				r.Tests.UDP[0].ActualSenderBps = 251_000_000
+				r.Tests.UDP[0].ActualReceiverBps = 250_000_000
+				r.Tests.UDP[0].TotalPackets = 21_300
+				r.Tests.UDP[1].ActualSenderBps = 249_000_000
+				r.Tests.UDP[1].ActualReceiverBps = 248_000_000
+				r.Tests.UDP[1].TotalPackets = 21_100
+				for i := range r.Tests.UDP {
+					r.Tests.UDP[i].CPU = hotCPU
+				}
+				r.Tests.Bidirectional.PC1ToPC2.SenderBitsPerSecond = 242_000_000
+				r.Tests.Bidirectional.PC1ToPC2.ReceiverBitsPerSecond = 240_000_000
+				r.Tests.Bidirectional.PC2ToPC1.SenderBitsPerSecond = 239_000_000
+				r.Tests.Bidirectional.PC2ToPC1.ReceiverBitsPerSecond = 237_000_000
+				r.Tests.Bidirectional.CPUUtilization = hotCPU
+			},
+			checkFacts: func(t *testing.T, facts *evaluate.Facts) {
+				t.Helper()
+				if facts.MaxCPUPct <= evaluate.Default().CPUHostLimitedAbove {
+					t.Errorf("max CPU = %.1f%%, want above %.1f%%", facts.MaxCPUPct, evaluate.Default().CPUHostLimitedAbove)
+				}
+				for i, direction := range facts.Dir {
+					if !direction.TCPAvailable || direction.TCPBitrate >= model.Bitrate(400_000_000) {
+						t.Errorf("direction %d TCP facts = available:%t bitrate:%s, want available below 400 Mbit/s", i, direction.TCPAvailable, direction.TCPBitrate)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			report, facts := seedEvaluatedGoldenReport(tc.mutate)
+			tc.checkFacts(t, facts)
+			if report.Classification != tc.wantClass {
+				t.Fatalf("classification = %s, want %s", report.Classification, tc.wantClass)
+			}
+			switch {
+			case tc.wantNoScore:
+				if report.Score != nil {
+					t.Errorf("score = %d, want nil (INCONCLUSIVE carries no score)", *report.Score)
+				}
+			case report.Score == nil:
+				t.Error("score = nil, want numeric score")
+			case *report.Score != tc.wantScore:
+				t.Errorf("score = %d, want %d", *report.Score, tc.wantScore)
+			}
+			for _, ruleID := range tc.wantRules {
+				if !hasFinding(report, ruleID) {
+					t.Errorf("findings omit defining rule %s: %+v", ruleID, report.Findings)
+				}
+			}
+			checkGolden(t, tc.golden, RenderMarkdown(report))
+		})
+	}
 }
 
 func TestHTMLGoldenHealthy(t *testing.T) {
