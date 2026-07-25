@@ -61,6 +61,7 @@ build+publish. All builds use `CGO_ENABLED=0` for a static, dependency-free bina
 |---|---|
 | `make build` | Build the static `cablecheck` binary into the repo root. |
 | `make test` | `go test ./...` — fast, hermetic unit + integration tests. |
+| `make cover` | Run all tests with coverage, write `coverage.out`, and print function + total coverage. |
 | `make test-race` | `go test -race -shuffle=on ./...` — **mandatory gate**; catches data races and test-order coupling. |
 | `make fmt` | `gofmt -w .` — format in place. |
 | `make fmt-check` | Fail if any file is unformatted. |

@@ -1,18 +1,23 @@
-BIN     := cablecheck
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+BIN           := cablecheck
+COVER_PROFILE := coverage.out
+VERSION       ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE          ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS       := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
 
 export CGO_ENABLED=0
 
-.PHONY: build test test-race vet fmt fmt-check lint tidy-check dist examples demo-e2e clean check verify
+.PHONY: build test cover test-race vet fmt fmt-check lint tidy-check dist examples demo-e2e clean check verify
 
 build:
 	go build -trimpath $(LDFLAGS) -o $(BIN) ./cmd/cablecheck
 
 test:
 	go test ./...
+
+cover:
+	go test -coverprofile=$(COVER_PROFILE) ./...
+	go tool cover -func=$(COVER_PROFILE)
 
 test-race:
 	CGO_ENABLED=1 go test -race -shuffle=on ./...
@@ -44,7 +49,7 @@ demo-e2e: build
 	./scripts/demo-e2e.sh
 
 clean:
-	rm -rf $(BIN) dist/ cablecheck-report-*
+	rm -rf $(BIN) dist/ cablecheck-report-* $(COVER_PROFILE)
 
 check: fmt-check vet tidy-check test test-race build
 
