@@ -9,13 +9,14 @@ import (
 	"cablecheck/internal/model"
 )
 
-func TestDefaultThresholdsForRulesVersion110(t *testing.T) {
+func TestDefaultThresholdsForRulesVersion120(t *testing.T) {
 	want := Thresholds{
 		CRCPoorAbove:                  10,
 		CRCFailedAbove:                1000,
 		CRCCorroboratingPingLossAbove: 1,
 		CarrierFailedAt:               3,
 		FrameSizePoorAbove:            10,
+		NegotiatedSpeedPoorAt:         0.5,
 		PingLossPoorAbove:             0.1,
 		PingSpikesWarningAbove:        5,
 		PingGapPoorAbove:              time.Second,
@@ -25,9 +26,9 @@ func TestDefaultThresholdsForRulesVersion110(t *testing.T) {
 		UDPLossPoorAbove:              2,
 		UDPJitterWarningAbove:         5,
 		UDPReorderWarningAbove:        0.1,
-		TCPThroughputPassAt:           0.9,
-		TCPThroughputInfoAt:           0.7,
-		TCPThroughputWarningAt:        0.4,
+		TCPThroughput100M:             ThroughputBands{PassAt: 0.9, InfoAt: 0.9, WarningAt: 0.7, PassDisabled: true},
+		TCPThroughput1G:               ThroughputBands{PassAt: 0.9, InfoAt: 0.7, WarningAt: 0.4},
+		TCPThroughputFallback:         ThroughputBands{PassAt: 0.9, InfoAt: 0.7, WarningAt: 0.4},
 		TCPCoVWarningAt:               0.15,
 		TCPCoVPoorAbove:               0.30,
 		TCPCollapseBelowMedian:        0.5,
@@ -42,7 +43,7 @@ func TestDefaultThresholdsForRulesVersion110(t *testing.T) {
 		GoodScoreBand:                 ScoreBand{Min: 80, Max: 94},
 		ExcellentScoreBand:            ScoreBand{Min: 95, Max: 100},
 	}
-	if RulesVersion != "1.1.0" {
+	if RulesVersion != "1.2.0" {
 		t.Fatalf("RulesVersion = %q; review the pinned default thresholds before updating this test", RulesVersion)
 	}
 	if got := Default(); !reflect.DeepEqual(got, want) {
@@ -67,12 +68,21 @@ func TestDefaultThresholdsValid(t *testing.T) {
 	if thresholds.UDPLossWarningAt >= thresholds.UDPLossPoorAbove {
 		t.Error("UDP loss thresholds are not ordered")
 	}
+	if thresholds.NegotiatedSpeedPoorAt <= 0 || thresholds.NegotiatedSpeedPoorAt >= 1 {
+		t.Errorf("negotiated-speed poor ratio = %v, want (0,1)", thresholds.NegotiatedSpeedPoorAt)
+	}
 	if thresholds.TCPCoVWarningAt >= thresholds.TCPCoVPoorAbove {
 		t.Error("TCP CoV thresholds are not ordered")
 	}
-	if !(thresholds.TCPThroughputWarningAt < thresholds.TCPThroughputInfoAt &&
-		thresholds.TCPThroughputInfoAt < thresholds.TCPThroughputPassAt) {
-		t.Error("TCP throughput thresholds are not ordered")
+	for name, band := range map[string]ThroughputBands{
+		"100M":     thresholds.TCPThroughput100M,
+		"1G":       thresholds.TCPThroughput1G,
+		"fallback": thresholds.TCPThroughputFallback,
+	} {
+		ordered := 0 < band.WarningAt && band.WarningAt < band.InfoAt && band.InfoAt <= band.PassAt && band.PassAt <= 1
+		if !ordered || (!band.PassDisabled && band.InfoAt == band.PassAt) {
+			t.Errorf("TCP throughput %s thresholds are not ordered within (0,1]: %+v", name, band)
+		}
 	}
 	for name, value := range map[string]float64{
 		"TCP collapse ratio": thresholds.TCPCollapseBelowMedian,
@@ -125,6 +135,7 @@ func TestRulesHonorSuppliedThresholds(t *testing.T) {
 		}(), model.SevPoor, false},
 		{"carrier failed", "PHY-03", func(v *Thresholds) { v.CarrierFailedAt = 10 }, &Facts{PC1: SideFacts{CarrierEvents: 4, DeltaOK: true}}, model.SevPoor, false},
 		{"frame size poor", "PHY-09", func(v *Thresholds) { v.FrameSizePoorAbove = 20 }, &Facts{PC1: SideFacts{JabberSizeErrors: 15, DeltaOK: true}}, model.SevWarning, false},
+		{"reduced speed poor", "PHY-06", func(v *Thresholds) { v.NegotiatedSpeedPoorAt = 0.05 }, &Facts{NegotiatedSpeed: 100_000_000, ExpectedSpeed: 1_000_000_000}, model.SevWarning, false},
 		{"ping loss poor", "TR-01", func(v *Thresholds) { v.PingLossPoorAbove = 2 }, &Facts{Dir: [2]DirFacts{{PingLossPct: 1}}}, model.SevWarning, false},
 		{"ping spikes", "TR-05", func(v *Thresholds) { v.PingSpikesWarningAbove = 10 }, &Facts{Dir: [2]DirFacts{{PingSpikes: 6}}}, 0, true},
 		{"ping gap", "TR-05", func(v *Thresholds) { v.PingGapPoorAbove = 2 * time.Second }, &Facts{Dir: [2]DirFacts{{PingMaxGap: 1500 * time.Millisecond}}}, 0, true},
@@ -134,9 +145,11 @@ func TestRulesHonorSuppliedThresholds(t *testing.T) {
 		{"UDP loss poor", "TR-07", func(v *Thresholds) { v.UDPLossPoorAbove = 5 }, &Facts{Dir: [2]DirFacts{{UDPAvailable: true, UDPTargetReached: true, UDPLossPct: 3}}}, model.SevWarning, false},
 		{"UDP jitter", "TR-08", func(v *Thresholds) { v.UDPJitterWarningAbove = 10 }, &Facts{Dir: [2]DirFacts{{UDPAvailable: true, UDPJitterMs: 6}}}, 0, true},
 		{"UDP reorder", "TR-09", func(v *Thresholds) { v.UDPReorderWarningAbove = 1 }, &Facts{Dir: [2]DirFacts{{UDPAvailable: true, UDPOutOfOrderPct: 0.2}}}, 0, true},
-		{"throughput pass", "PERF-01", func(v *Thresholds) { v.TCPThroughputPassAt = 0.8 }, throughputFacts(85), 0, true},
-		{"throughput info", "PERF-01", func(v *Thresholds) { v.TCPThroughputInfoAt = 0.6 }, throughputFacts(65), model.SevInfo, false},
-		{"throughput warning", "PERF-01", func(v *Thresholds) { v.TCPThroughputWarningAt = 0.2 }, throughputFacts(30), model.SevWarning, false},
+		{"throughput pass", "PERF-01", func(v *Thresholds) {
+			v.TCPThroughput100M = ThroughputBands{PassAt: 0.8, InfoAt: 0.6, WarningAt: 0.2}
+		}, throughputFacts(85), 0, true},
+		{"throughput info", "PERF-01", func(v *Thresholds) { v.TCPThroughput100M.InfoAt = 0.6 }, throughputFacts(65), model.SevInfo, false},
+		{"throughput warning", "PERF-01", func(v *Thresholds) { v.TCPThroughput100M.WarningAt = 0.2 }, throughputFacts(30), model.SevWarning, false},
 		{"CoV warning", "PERF-02", func(v *Thresholds) { v.TCPCoVWarningAt = 0.25 }, &Facts{Dir: [2]DirFacts{{TCPAvailable: true, TCPCoV: 0.2}}}, 0, true},
 		{"CoV poor", "PERF-02", func(v *Thresholds) { v.TCPCoVPoorAbove = 0.5 }, &Facts{Dir: [2]DirFacts{{TCPAvailable: true, TCPCoV: 0.4}}}, model.SevWarning, false},
 		{"collapse poor", "PERF-03", func(v *Thresholds) { v.TCPCollapsePoorAt = 5 }, &Facts{Dir: [2]DirFacts{{TCPCollapses: 3}}}, model.SevWarning, false},
@@ -264,17 +277,15 @@ func TestScoreHonorsSuppliedThresholds(t *testing.T) {
 	})
 	t.Run("throughput ratio", func(t *testing.T) {
 		thresholds := fullBand()
-		thresholds.TCPThroughputInfoAt = 0.2
-		thresholds.TCPThroughputWarningAt = 0.1
+		thresholds.TCPThroughput100M.InfoAt = 0.2
+		thresholds.TCPThroughput100M.WarningAt = 0.1
 		thresholds.TCPAsymmetryWarnAbove = 0.5
 		facts := throughputFacts(30)
-		facts.Dir[1] = DirFacts{TCPAvailable: true, TCPBitrate: 20}
+		facts.Dir[1] = DirFacts{TCPAvailable: true, TCPBitrate: 20_000_000}
 		assertNoDeduction(t, facts, thresholds)
 	})
 	t.Run("asymmetry", func(t *testing.T) {
 		thresholds := fullBand()
-		thresholds.TCPThroughputInfoAt = 0
-		thresholds.TCPThroughputWarningAt = 0
 		thresholds.TCPAsymmetryWarnAbove = 0.5
 		assertNoDeduction(t, asymmetryFacts(100, 60), thresholds)
 	})
@@ -297,8 +308,8 @@ func TestScoreHonorsSuppliedThresholds(t *testing.T) {
 }
 
 func throughputFacts(percent uint64) *Facts {
-	f := &Facts{NegotiatedSpeed: 100}
-	f.Dir[0] = DirFacts{TCPAvailable: true, TCPBitrate: model.Bitrate(percent)}
+	f := &Facts{NegotiatedSpeed: 100_000_000}
+	f.Dir[0] = DirFacts{TCPAvailable: true, TCPBitrate: model.Bitrate(percent * 1_000_000)}
 	return f
 }
 

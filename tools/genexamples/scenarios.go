@@ -32,15 +32,15 @@ func seedHealthy() *model.Report {
 }
 
 // seedReducedSpeed: both NICs advertise 1000BASE-T but the link came up at
-// 100 Mb/s with otherwise clean physical evidence. PHY-06 fires WARNING; TCP
-// runs at ~94 Mb/s of the 100 Mb/s link (>=90%, no PERF-01). → WARNING.
+// 100 Mb/s with otherwise clean physical evidence. PHY-06 fires POOR because
+// negotiated speed is no more than half the expected speed. TCP runs at ~94
+// Mb/s and produces a PERF-01 info finding because <=100M never passes. → POOR.
 func seedReducedSpeed() *model.Report {
 	r := baseReport("reduced-speed")
-	// Link negotiated 100 Mb/s full duplex, but both sides still support
-	// 1000BASE-T, so ExpectedSpeed stays 1 Gb/s and PHY-06 fires.
-	// Both NICs still support and advertise 1000BASE-T (the partner is
-	// gigabit-capable); the link nonetheless negotiated 100 Mb/s, so
-	// ExpectedSpeed stays 1 Gb/s and PHY-06 fires.
+	r.Configuration.UDPRate = 80_000_000
+	// Link negotiated 100 Mb/s full duplex, but both NICs still support and
+	// advertise 1000BASE-T (the partner is gigabit-capable), so ExpectedSpeed
+	// stays 1 Gb/s and PHY-06 fires.
 	link100 := &model.LinkSettings{
 		SpeedMbps:       100,
 		Duplex:          "full",

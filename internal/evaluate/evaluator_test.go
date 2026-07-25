@@ -160,14 +160,14 @@ func TestClassifyFoldOrdering(t *testing.T) {
 		}
 	})
 
-	t.Run("physical warning yields warning", func(t *testing.T) {
+	t.Run("large negotiated speed reduction yields poor", func(t *testing.T) {
 		f := cleanFacts()
 		f.NegotiatedSpeed = 100_000_000 // PHY-06 vs 1G expected
 		f.Dir[0].TCPBitrate = 94_000_000
 		f.Dir[1].TCPBitrate = 94_000_000
 		res := Evaluate(f)
-		if res.Class != model.HealthWarning {
-			t.Errorf("class = %v, want WARNING (PHY-06 reduced speed)", res.Class)
+		if res.Class != model.HealthPoor {
+			t.Errorf("class = %v, want POOR (PHY-06 severe reduced speed)", res.Class)
 		}
 	})
 }
@@ -197,8 +197,8 @@ func TestEvaluateDeterministic(t *testing.T) {
 	if got := findingIDs(first); !reflect.DeepEqual(got, wantIDs) {
 		t.Errorf("finding order = %v, want %v (fixed Rules() order)", got, wantIDs)
 	}
-	if first.RulesVersion != "1.1.0" {
-		t.Errorf("RulesVersion = %q, want 1.1.0", first.RulesVersion)
+	if first.RulesVersion != "1.2.0" {
+		t.Errorf("RulesVersion = %q, want 1.2.0", first.RulesVersion)
 	}
 	if first.Score == nil {
 		t.Fatalf("score = nil, want a value for class %v", first.Class)

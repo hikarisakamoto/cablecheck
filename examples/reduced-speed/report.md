@@ -2,16 +2,18 @@
 
 ## 1. Overall Result
 
-**WARNING** — The cable works but shows signs that deserve attention.
+**POOR** — The cable exhibits significant problems and should be replaced.
 
 ## 2. Score & Rule Evidence
 
-- **Score:** 79/100
+- **Score:** 50/100
 - **Reason:** The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
+- **Reason:** TCP throughput does not meet the passing policy for this negotiated link speed.
 
 | Rule | Category | Severity | Finding |
 | --- | --- | --- | --- |
-| PHY-06 | physical | warning | The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration. |
+| PHY-06 | physical | poor | The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration. |
+| PERF-01 | performance | info | TCP throughput does not meet the passing policy for this negotiated link speed. |
 
 ## 3. Session Info
 
@@ -124,12 +126,16 @@
 
 ## 18. Findings Detail
 
-- **PHY-06** [physical/warning] The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
+- **PHY-06** [physical/poor] The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
   - negotiated 100M < expected 1G
+- **PERF-01** [performance/info] TCP throughput does not meet the passing policy for this negotiated link speed.
+  - pc1->pc2: 94.1M TCP = 94% of the 100M link
+  - pc2->pc1: 93.9M TCP = 94% of the 100M link
 
 ## 19. Recommendations
 
 1. Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool <if>`).
+2. Isolation test: same machines with a different cable, then the same cable between different machines.
 
 ## 20. Limitations & Unavailable Tests
 
@@ -146,7 +152,7 @@
 - **iperf3 port:** 44301
 - **TCP duration:** 30s
 - **UDP duration:** 20s
-- **UDP rate:** 800Mbit/s
+- **UDP rate:** 80Mbit/s
 - **Parallel streams:** 4
 - **Ping count:** 500
 - **Ping interval:** 20ms

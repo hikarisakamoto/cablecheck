@@ -71,21 +71,20 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 		s -= 5
 	}
 	s -= math.Min(20, 5*float64(f.Dir[0].TCPCollapses+f.Dir[1].TCPCollapses))
-	if !hostLimited && f.NegotiatedSpeed > 0 {
-		ratio := math.Inf(1)
+	if !hostLimited {
+		worst := model.Severity(-1)
 		for i := range f.Dir {
 			if f.Dir[i].TCPAvailable {
-				if r := float64(f.Dir[i].TCPBitrate) / float64(f.NegotiatedSpeed); r < ratio {
-					ratio = r
+				_, severity, deviation := classifyThroughput(f.Dir[i].TCPBitrate, f.NegotiatedSpeed, thresholds)
+				if deviation && severity > worst {
+					worst = severity
 				}
 			}
 		}
-		switch {
-		case math.IsInf(ratio, 1):
-			// no TCP result; nothing to deduct
-		case ratio < thresholds.TCPThroughputWarningAt:
+		switch worst {
+		case model.SevPoor:
 			s -= 25
-		case ratio < thresholds.TCPThroughputInfoAt:
+		case model.SevWarning:
 			s -= 10
 		}
 	}

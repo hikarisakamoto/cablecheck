@@ -235,8 +235,8 @@ The cable-test step widens both peers' control-channel idle timeout before the d
 |---|---|
 | `EXCELLENT` | Clean physical, transport, and performance evidence with sufficient coverage; score 95–100. |
 | `GOOD` | No warning-level fault, but an informational deviation or reduced noncritical coverage prevents `EXCELLENT`; score 80–94. |
-| `WARNING` | A warning-level physical, transport, or performance deviation—such as modest counter movement, reduced speed, low loss, or throughput below 70% of link rate; score 51–79. |
-| `POOR` | Strong physical evidence or a poor transport/performance result not explained solely by a host limit; score 26–50. |
+| `WARNING` | A warning-level physical, transport, or performance deviation—such as modest counter movement, a small negotiated-speed reduction, low loss, or speed-relative throughput in the warning tier; score 51–79. |
+| `POOR` | Strong physical evidence—including negotiation at no more than half the expected speed—or a poor transport/performance result not explained solely by a host limit; score 26–50. |
 | `FAILED` | Failure-level physical evidence, such as link down, at least three carrier events, severe CRC movement, an open/short cable-test result, or correlated UDP loss and physical errors; score 0–25. |
 | `INCONCLUSIVE` | The evidence cannot support a cable verdict: virtual interface, critical evidence missing, an otherwise clean partial run, poor performance explained by CPU/USB host limitation, or a throughput test that could not reach the peer's data port (firewall/routing on the receiving side). Score is JSON `null`. |
 

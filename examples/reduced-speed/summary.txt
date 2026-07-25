@@ -2,7 +2,7 @@ CableCheck summary
 ==================
 Test:     example-reduced-speed  (mode quick)
 Started:  2026-01-02T15:04:05Z   Duration: 1m30s
-Result:   WARNING   Score: 79/100
+Result:   POOR   Score: 50/100
 Link:     100 Mb/s full duplex  (pc1 enp3s0, pc2 enp4s0)
 
 Ping loss:        pc1->pc2 0.00%  |  pc2->pc1 0.00%
@@ -10,9 +10,11 @@ TCP throughput:   pc1->pc2 94.1 Mbit/s  |  pc2->pc1 93.9 Mbit/s
 TCP retransmits:  pc1->pc2 0  |  pc2->pc1 0
 UDP loss:         pc1->pc2 0.00%  |  pc2->pc1 0.00%
 
-Findings (top 1 of 1):
-  [warning] PHY-06: The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
-Recommendations (top 1 of 1):
+Findings (top 2 of 2):
+  [poor] PHY-06: The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
+  [info] PERF-01: TCP throughput does not meet the passing policy for this negotiated link speed.
+Recommendations (top 2 of 2):
   - Reduced link speed: 1000BASE-T needs all four pairs - test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool <if>`).
+  - Isolation test: same machines with a different cable, then the same cable between different machines.
 
 Full report: report.md and report.json in the report directory.

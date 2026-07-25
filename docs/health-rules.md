@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.1.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.2.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -19,9 +19,8 @@ operators; they do not define a second implementation.
 
 Changing a default value or its inclusive/exclusive comparison requires an
 explicit `RulesVersion` decision, boundary-test review, and review of the
-committed example reports. Merely moving the values into the policy does not
-change version `1.1.0` because the current values and comparisons are
-preserved.
+committed example reports. Version `1.2.0` introduces speed-scaled TCP
+throughput bands and grades severe negotiated-speed reductions as poor.
 
 ### Reference conditions and status labels
 
@@ -57,6 +56,7 @@ but do not establish CableCheck's health boundary.
 | CRC + ping corroboration | CRC movement `> 10` fails when any standard-ping direction is also `> 1%` loss. | Independent counter and packet-loss signals increase confidence that corruption is observable in traffic. | Conservative policy |
 | Carrier events | Failed at `>= 3` events on the worse reliable side; 1–2 is poor. | The worse side avoids double-counting one physical bounce observed by both peers; repeated bounces are decisive. | Conservative policy |
 | Frame-size errors | Poor when reliable aggregate movement is `> 10`; 1–10 warns. | Jabber, oversize, undersize, and length movement is abnormal, with a small-count warning band. | Conservative policy |
+| Negotiated-speed reduction | Poor when negotiated speed is `<= 50%` of expected speed; a smaller reduction warns. | A large capability loss, such as 100 Mbit/s on a 1 Gbit/s-capable pair, is strong physical evidence even when traffic fills the reduced link. | Conservative policy |
 | Standard-ping loss | Poor when loss is `> 0.1%`; any positive loss up to that boundary warns. | A direct cable should be lossless, while the first nonzero band avoids overstating a very small sample count. | Conservative policy |
 | RTT spike count | Warning when a direction has `> 5` parser-identified spikes. | Requires repeated outliers rather than one event. The parser identifies a spike above `max(5 × median, median + 10 ms)`; this threshold counts those events. | Conservative policy |
 | RTT reply gap | Poor when the longest gap is `> 1 s`. | A full-second interruption is operationally significant on a direct link. | Conservative policy |
@@ -68,9 +68,9 @@ but do not establish CableCheck's health boundary.
 | UDP loss poor | Poor when qualifying loss is `> 2%`; exactly 2% remains warning. | Sustained loss at this level is considered materially degraded; with CRC movement it also supplies PHY-10 correlation. | Conservative policy |
 | UDP jitter | Warning when qualifying jitter is `> 5 ms`. | Multi-millisecond variation is unexpected on a direct link, but the value is not an RFC health mandate. | Conservative policy |
 | UDP reordering | Warning when qualifying reordering is `> 0.1%`. | Reordering should not normally occur on a single direct path; the boundary avoids elevating one tiny fractional result. | Conservative policy |
-| TCP throughput pass | No PERF-01 finding at `>= 90%` of negotiated speed. | Allows ordinary protocol and host overhead. The healthy 1 Gbit/s example at about 94% is a regression reference, not a calibration population. | Fixture-backed conservative policy |
-| TCP throughput info | Info at `>= 70%` and `< 90%`. | Records a visible shortfall without asserting cable damage. | Conservative policy |
-| TCP throughput warning/poor | Warning at `>= 40%` and `< 70%`; poor below 40%. | Large shortfalls deserve escalation but remain host-sensitive. | Conservative policy |
+| TCP throughput on links `<= 100 Mbit/s` | Info at `>= 90%`, warning at `>= 70%` and `< 90%`, poor below 70%; this tier never passes silently. | Low-speed links remain visible even when filled; a marginal 100 Mbit/s link must not appear clean. The committed 94 Mbit/s case is a regression reference. | Fixture-backed conservative policy |
+| TCP throughput on links `> 100 Mbit/s` and `<= 1 Gbit/s` | Pass at `>= 90%`, info at `>= 70%` and `< 90%`, warning at `>= 40%` and `< 70%`, poor below 40%. | Allows ordinary protocol and host overhead. The healthy 1 Gbit/s example at about 94% is a regression reference. | Fixture-backed conservative policy |
+| TCP throughput on links `> 1 Gbit/s` | Uses the 1 Gbit/s 90/70/40 bands as an explicitly uncalibrated fallback. | No real high-speed capture exists yet; these values are conservative compatibility behavior, not authoritative 2.5G/5G/10G calibration. | Conservative caveat policy |
 | TCP coefficient of variation warning | Warning at `>= 15%`. | Flags repeated interval instability while allowing ordinary run-to-run variation. | Conservative policy |
 | TCP coefficient of variation poor | Poor when `> 30%`; exactly 30% remains warning. | Marks strongly unstable interval throughput. | Conservative policy |
 | TCP collapse interval | Count an interval when it is `< 50%` of the post-first-interval median. | Excludes slow start, then identifies a substantial within-run drop relative to that run. | Conservative policy |
@@ -91,7 +91,8 @@ but do not establish CableCheck's health boundary.
 | `PHY-03` | physical | Worst reliable per-side carrier-event delta is at least 3. | failed |
 | `PHY-04` | physical | The monitor observes at least one mid-test speed/duplex renegotiation. | poor |
 | `PHY-05` | physical | Either side negotiates half duplex. | poor |
-| `PHY-06` | physical | Negotiated and expected speeds are known, and negotiated speed is below expected speed. | warning |
+| `PHY-06` | physical | Negotiated and expected speeds are known, and negotiated speed is below expected but above 50% of expected. | warning |
+| `PHY-06` | physical | Negotiated speed is at most 50% of expected speed. | poor |
 | `PHY-07` | physical | `PHY-06`'s reduced-speed condition and at least one reliable CRC-class error occur together. | poor |
 | `PHY-08` | physical | Opt-in cable diagnostics report `UNSPECIFIED`. | warning |
 | `PHY-08` | physical | Opt-in cable diagnostics report `IMPEDANCE`. | poor |
@@ -141,18 +142,23 @@ CPU, or host can produce these symptoms without a bad cable.
 
 | ID | Category | Trigger | Finding severity |
 |---|---|---|---|
-| `PERF-01` | performance | TCP receiver bitrate is at least 90% of negotiated speed. | no finding |
-| `PERF-01` | performance | TCP receiver bitrate is at least 70% but below 90% of negotiated speed. | info |
-| `PERF-01` | performance | TCP receiver bitrate is at least 40% but below 70% of negotiated speed. | warning |
-| `PERF-01` | performance | TCP receiver bitrate is below 40% of negotiated speed. | poor |
+| `PERF-01` | performance | On links at or below 100 Mbit/s, TCP receiver bitrate is at least 90% of negotiated speed. | info |
+| `PERF-01` | performance | On links at or below 100 Mbit/s, TCP receiver bitrate is at least 70% but below 90%. | warning |
+| `PERF-01` | performance | On links at or below 100 Mbit/s, TCP receiver bitrate is below 70%. | poor |
+| `PERF-01` | performance | On links above 100 Mbit/s, TCP receiver bitrate is at least 90% of negotiated speed. | no finding |
+| `PERF-01` | performance | On links above 100 Mbit/s, TCP receiver bitrate is at least 70% but below 90%. | info |
+| `PERF-01` | performance | On links above 100 Mbit/s, TCP receiver bitrate is at least 40% but below 70%. | warning |
+| `PERF-01` | performance | On links above 100 Mbit/s, TCP receiver bitrate is below 40%. | poor |
 | `PERF-02` | performance | TCP interval coefficient of variation is at least 15% and at most 30%. | warning |
 | `PERF-02` | performance | TCP interval coefficient of variation is greater than 30%. | poor |
 | `PERF-03` | performance | Across both directions, 1–2 TCP intervals after the first fall below 50% of the median of the post-first intervals. | warning |
 | `PERF-03` | performance | At least 3 such intervals fall below 50% of the median. | poor |
 | `PERF-04` | performance | Both TCP directions exist and `abs(a-b) / max(a,b)` is greater than 30%. | warning |
 
-`PERF-01` doesn't run when negotiated speed is unknown. When more than one
-direction qualifies, a rule emits the worst applicable severity.
+`PERF-01` doesn't run when negotiated speed is unknown. Links above 1 Gbit/s
+currently use the explicitly uncalibrated 1 Gbit/s fallback bands pending real
+high-speed captures. When more than one direction qualifies, a rule emits the
+worst applicable severity.
 
 ## Host markers
 
@@ -228,16 +234,15 @@ classification's band. `INCONCLUSIVE` has a null score.
 | Worst TCP coefficient of variation 15%–30% | 5 |
 | Worst TCP coefficient of variation greater than 30% | 15 |
 | TCP collapse intervals | 5 each, capped at 20 |
-| Worst TCP ratio 40%–below 70% of negotiated speed | 10 |
-| Worst TCP ratio below 40% of negotiated speed | 25 |
+| Worst TCP ratio in the warning tier (70%–below 90% at `<= 100 Mbit/s`; 40%–below 70% otherwise) | 10 |
+| Worst TCP ratio in the poor tier (below 70% at `<= 100 Mbit/s`; below 40% otherwise) | 25 |
 | TCP directional asymmetry greater than 30% | 5 |
 | UDP jitter greater than 5 ms in either direction | 5 once |
 
 The TCP-ratio deduction is omitted when `HOST-01` or `HOST-03` marks the run as
 host-limited. UDP-loss deductions require CPU at most 90%, an available result,
-and a qualifying target reached. A `PERF-01` info result in the 70%–below-90%
-range has no direct score deduction, but its `GOOD` classification still clamps
-the score to that band.
+and a qualifying target reached. A `PERF-01` info result has no direct score
+deduction, but its `GOOD` classification still clamps the score to that band.
 
 | Classification | Score band |
 |---|---:|
@@ -263,12 +268,14 @@ These examples use the committed reports under [`examples/`](../examples/).
 loss, and no error-counter movement. Nothing fires, so the result is
 `EXCELLENT`, score 100.
 
-### Reduced speed: WARNING
+### Reduced speed: POOR
 
 [`examples/reduced-speed/report.json`](../examples/reduced-speed/report.json)
-shows 100 Mbit/s negotiated while both NICs support 1 Gbit/s. `PHY-06` fires at
-warning severity. The 15-point reduced-speed deduction leaves a raw score of
-85, which the warning band clamps down to 79. Result: `WARNING`, score 79.
+shows 100 Mbit/s negotiated while both NICs support 1 Gbit/s. Because 100
+Mbit/s is only 10% of the expected speed, `PHY-06` fires at poor severity.
+Throughput around 94 Mbit/s also produces the low-speed tier's informational
+`PERF-01` finding. The 15-point reduced-speed deduction leaves a raw score of
+85, which the poor band clamps down to 50. Result: `POOR`, score 50.
 
 ### CRC errors: FAILED in the committed example
 

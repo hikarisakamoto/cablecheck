@@ -52,8 +52,9 @@ func factsHealthyGigabit() *Facts {
 }
 
 // factsReducedSpeed: both NICs are 1 Gb/s-capable but the link came up at
-// 100 Mb/s with otherwise clean physical evidence. PHY-06 fires WARNING. TCP
-// runs at ~94 Mb/s of the 100 Mb/s link (≥90%, no PERF-01). → WARNING.
+// 100 Mb/s with otherwise clean physical evidence. PHY-06 fires POOR because
+// the link negotiated at no more than half its expected speed. TCP runs at
+// ~94 Mb/s of the 100 Mb/s link and produces a PERF-01 info finding. → POOR.
 func factsReducedSpeed() *Facts {
 	f := &Facts{
 		NegotiatedSpeed: 100_000_000,
@@ -145,7 +146,7 @@ func TestClassifyGoldenScenarios(t *testing.T) {
 		wantRule string // a rule that must fire with non-empty evidence
 	}{
 		{"healthy-gigabit", factsHealthyGigabit(), model.HealthExcellent, 0, ""},
-		{"reduced-speed-100M-on-1G", factsReducedSpeed(), model.HealthWarning, 1, "PHY-06"},
+		{"reduced-speed-100M-on-1G", factsReducedSpeed(), model.HealthPoor, 2, "PHY-06"},
 		{"crc-errors", factsCRCErrors(), model.HealthPoor, 2, "PHY-02"},
 		{"host-limited", factsHostLimited(), model.HealthInconclusive, 3, "PERF-01"},
 		{"disconnected", factsDisconnected(), model.HealthFailed, 2, "PHY-01"},

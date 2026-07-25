@@ -12,6 +12,15 @@ type ScoreBand struct {
 	Max int
 }
 
+// ThroughputBands is the ordered ratio policy for TCP receiver throughput.
+// Ratios are measured bitrate divided by the actual negotiated link speed.
+type ThroughputBands struct {
+	PassAt       float64
+	InfoAt       float64
+	WarningAt    float64
+	PassDisabled bool
+}
+
 // Thresholds is the complete set of calibrated decision boundaries used by
 // fact extraction, rules, and scoring. Structural checks such as availability,
 // non-zero evidence, and valid denominators are intentionally not thresholds.
@@ -25,6 +34,7 @@ type Thresholds struct {
 	CRCCorroboratingPingLossAbove float64
 	CarrierFailedAt               uint64
 	FrameSizePoorAbove            uint64
+	NegotiatedSpeedPoorAt         float64
 
 	PingLossPoorAbove      float64
 	PingSpikesWarningAbove int
@@ -36,9 +46,9 @@ type Thresholds struct {
 	UDPJitterWarningAbove  float64
 	UDPReorderWarningAbove float64
 
-	TCPThroughputPassAt    float64
-	TCPThroughputInfoAt    float64
-	TCPThroughputWarningAt float64
+	TCPThroughput100M      ThroughputBands
+	TCPThroughput1G        ThroughputBands
+	TCPThroughputFallback  ThroughputBands
 	TCPCoVWarningAt        float64
 	TCPCoVPoorAbove        float64
 	TCPCollapseBelowMedian float64
@@ -65,6 +75,7 @@ func Default() Thresholds {
 		CRCCorroboratingPingLossAbove: 1,
 		CarrierFailedAt:               3,
 		FrameSizePoorAbove:            10,
+		NegotiatedSpeedPoorAt:         0.5,
 
 		PingLossPoorAbove:      0.1,
 		PingSpikesWarningAbove: 5,
@@ -76,9 +87,16 @@ func Default() Thresholds {
 		UDPJitterWarningAbove:  5,
 		UDPReorderWarningAbove: 0.1,
 
-		TCPThroughputPassAt:    0.9,
-		TCPThroughputInfoAt:    0.7,
-		TCPThroughputWarningAt: 0.4,
+		// Authoritative, fixture-backed <=1G bands. The <=100M tier never passes
+		// silently (InfoAt == PassAt with PassDisabled) so a marginal 100M link
+		// cannot look clean.
+		TCPThroughput100M: ThroughputBands{PassAt: 0.9, InfoAt: 0.9, WarningAt: 0.7, PassDisabled: true},
+		TCPThroughput1G:   ThroughputBands{PassAt: 0.9, InfoAt: 0.7, WarningAt: 0.4},
+		// >1G is an explicitly UNCALIBRATED caveat: it mirrors the 1G numbers
+		// today but is a SEPARATE literal so recalibrating 1G never silently
+		// retunes high-speed links. Replace with real 2.5G/5G/10G captures before
+		// treating these as authoritative (see #25).
+		TCPThroughputFallback:  ThroughputBands{PassAt: 0.9, InfoAt: 0.7, WarningAt: 0.4},
 		TCPCoVWarningAt:        0.15,
 		TCPCoVPoorAbove:        0.30,
 		TCPCollapseBelowMedian: 0.5,
@@ -94,6 +112,23 @@ func Default() Thresholds {
 		WarningScoreBand:   ScoreBand{Min: 51, Max: 79},
 		GoodScoreBand:      ScoreBand{Min: 80, Max: 94},
 		ExcellentScoreBand: ScoreBand{Min: 95, Max: 100},
+	}
+}
+
+// perfBands selects the throughput policy for a negotiated link speed.
+// Speeds above 1 Gbit/s use an explicitly conservative fallback until those
+// tiers can be calibrated from real high-speed captures. Unknown speed has no
+// applicable policy because a throughput ratio cannot be computed.
+func (t Thresholds) perfBands(speed model.Bitrate) (ThroughputBands, bool) {
+	switch {
+	case speed == 0:
+		return ThroughputBands{}, false
+	case speed <= 100_000_000:
+		return t.TCPThroughput100M, true
+	case speed <= 1_000_000_000:
+		return t.TCPThroughput1G, true
+	default:
+		return t.TCPThroughputFallback, true
 	}
 }
 

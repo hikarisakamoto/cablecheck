@@ -51,7 +51,7 @@ func TestExampleClassifications(t *testing.T) {
 		wantNilScore bool
 	}{
 		"healthy":       {wantClasses: []model.HealthClass{model.HealthExcellent, model.HealthGood}, wantMinScore: 80},
-		"reduced-speed": {wantClasses: []model.HealthClass{model.HealthWarning}},
+		"reduced-speed": {wantClasses: []model.HealthClass{model.HealthPoor}},
 		"crc-errors":    {wantClasses: []model.HealthClass{model.HealthPoor, model.HealthFailed}},
 		"host-limited":  {wantClasses: []model.HealthClass{model.HealthInconclusive}, wantNilScore: true},
 		"failed":        {wantClasses: []model.HealthClass{model.HealthFailed}},
@@ -87,6 +87,19 @@ func TestExampleClassifications(t *testing.T) {
 	// Every named scenario must have a pinned expectation and vice versa.
 	if len(byName) != len(cases) {
 		t.Errorf("seed count %d != pinned-case count %d", len(byName), len(cases))
+	}
+}
+
+func TestReducedSpeedExampleUsesReportedUDPRate(t *testing.T) {
+	report := seedReducedSpeed()
+	const want = model.Bitrate(80_000_000)
+	if report.Configuration.UDPRate != want {
+		t.Fatalf("configured UDP rate = %s, want %s", report.Configuration.UDPRate, want)
+	}
+	for i, result := range report.Tests.UDP {
+		if model.Bitrate(result.TargetBps) != want {
+			t.Errorf("UDP result %d target = %s, want %s", i, model.Bitrate(result.TargetBps), want)
+		}
 	}
 }
 
