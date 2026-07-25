@@ -21,6 +21,10 @@ func ruleByID(t *testing.T, id string) Rule {
 	return Rule{}
 }
 
+func evaluateRule(rule Rule, f *Facts) *model.Finding {
+	return rule.Evaluate(f, Default())
+}
+
 // sideWithCRC builds SideFacts with reliable counters and the given CRC-class
 // error delta.
 func sideWithCRC(n uint64) SideFacts {
@@ -29,6 +33,7 @@ func sideWithCRC(n uint64) SideFacts {
 
 func TestRulePHY02CRCBands(t *testing.T) {
 	rule := ruleByID(t, "PHY-02")
+	thresholds := Default()
 	cases := []struct {
 		name     string
 		pc1, pc2 SideFacts
@@ -38,13 +43,13 @@ func TestRulePHY02CRCBands(t *testing.T) {
 	}{
 		{name: "zero errors pass", pc1: sideWithCRC(0), pc2: sideWithCRC(0), none: true},
 		{name: "one error warns", pc1: sideWithCRC(1), want: model.SevWarning},
-		{name: "ten errors warn", pc1: sideWithCRC(10), want: model.SevWarning},
-		{name: "eleven errors poor", pc1: sideWithCRC(11), want: model.SevPoor},
+		{name: "poor boundary warns", pc1: sideWithCRC(thresholds.CRCPoorAbove), want: model.SevWarning},
+		{name: "above poor boundary is poor", pc1: sideWithCRC(thresholds.CRCPoorAbove + 1), want: model.SevPoor},
 		{name: "sides sum before banding", pc1: sideWithCRC(6), pc2: sideWithCRC(6), want: model.SevPoor},
-		{name: "thousand errors poor", pc1: sideWithCRC(1000), want: model.SevPoor},
-		{name: "over thousand failed", pc1: sideWithCRC(1001), want: model.SevFailed},
+		{name: "failed boundary stays poor", pc1: sideWithCRC(thresholds.CRCFailedAbove), want: model.SevPoor},
+		{name: "above failed boundary fails", pc1: sideWithCRC(thresholds.CRCFailedAbove + 1), want: model.SevFailed},
 		{name: "over ten with ping loss failed", pc1: sideWithCRC(50), loss: 1.5, want: model.SevFailed},
-		{name: "loss of exactly one percent stays poor", pc1: sideWithCRC(50), loss: 1.0, want: model.SevPoor},
+		{name: "corroborating loss boundary stays poor", pc1: sideWithCRC(50), loss: thresholds.CRCCorroboratingPingLossAbove, want: model.SevPoor},
 		{name: "few errors with loss stay warning", pc1: sideWithCRC(5), loss: 2, want: model.SevWarning},
 		{
 			name: "unreliable deltas are not counted",
@@ -56,7 +61,7 @@ func TestRulePHY02CRCBands(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &Facts{PC1: tc.pc1, PC2: tc.pc2, LinkUpAtEnd: true}
 			f.Dir[0].PingLossPct = tc.loss
-			fd := rule.Evaluate(f)
+			fd := evaluateRule(rule, f)
 			if tc.none {
 				if fd != nil {
 					t.Errorf("PHY-02 = %+v, want no finding", fd)
@@ -89,7 +94,7 @@ func TestRulePHY08PairFaults(t *testing.T) {
 					Pair: "C", Status: status, HasFault: true, FaultMeters: 32,
 				}},
 			}}})
-			finding := rule.Evaluate(f)
+			finding := evaluateRule(rule, f)
 			if finding == nil || finding.Severity != model.SevFailed {
 				t.Errorf("PHY-08(%s) = %+v, want FAILED-tier finding", status, finding)
 				continue
@@ -105,7 +110,7 @@ func TestRulePHY08PairFaults(t *testing.T) {
 			status model.PairStatus
 			want   model.Severity
 		}{{model.PairImpedance, model.SevPoor}, {model.PairUnspecified, model.SevWarning}} {
-			finding := rule.Evaluate(&Facts{CableTestRan: true, CableTestPairs: []model.CablePairResult{{Pair: "A", Status: tc.status}}})
+			finding := evaluateRule(rule, &Facts{CableTestRan: true, CableTestPairs: []model.CablePairResult{{Pair: "A", Status: tc.status}}})
 			if finding == nil || finding.Severity != tc.want {
 				t.Errorf("PHY-08(%s) = %+v, want severity %v", tc.status, finding, tc.want)
 			}
@@ -116,7 +121,7 @@ func TestRulePHY08PairFaults(t *testing.T) {
 		f := FactsFromReport(&model.Report{Tests: model.TestsSection{CableTest: &model.CableTestResult{
 			Available: false, UnavailableReason: "driver does not support cable test",
 		}}})
-		if finding := rule.Evaluate(f); finding != nil {
+		if finding := evaluateRule(rule, f); finding != nil {
 			t.Errorf("PHY-08(unavailable) = %+v, want no fault", finding)
 		}
 	})
@@ -124,6 +129,7 @@ func TestRulePHY08PairFaults(t *testing.T) {
 
 func TestRuleTR01PingLoss(t *testing.T) {
 	rule := ruleByID(t, "TR-01")
+	thresholds := Default()
 	cases := []struct {
 		name         string
 		loss0, loss1 float64
@@ -132,8 +138,8 @@ func TestRuleTR01PingLoss(t *testing.T) {
 	}{
 		{name: "zero loss passes", none: true},
 		{name: "trace loss warns", loss0: 0.05, want: model.SevWarning},
-		{name: "boundary tenth percent warns", loss0: 0.1, want: model.SevWarning},
-		{name: "fifth of a percent poor", loss0: 0.2, want: model.SevPoor},
+		{name: "poor boundary warns", loss0: thresholds.PingLossPoorAbove, want: model.SevWarning},
+		{name: "above poor boundary is poor", loss0: math.Nextafter(thresholds.PingLossPoorAbove, math.Inf(1)), want: model.SevPoor},
 		{name: "one percent poor", loss0: 1.0, want: model.SevPoor},
 		{name: "heavy loss stays poor not failed", loss0: 5, want: model.SevPoor},
 		{name: "worst direction wins", loss0: 0.05, loss1: 2, want: model.SevPoor},
@@ -143,7 +149,7 @@ func TestRuleTR01PingLoss(t *testing.T) {
 			f := &Facts{LinkUpAtEnd: true}
 			f.Dir[0].PingLossPct = tc.loss0
 			f.Dir[1].PingLossPct = tc.loss1
-			fd := rule.Evaluate(f)
+			fd := evaluateRule(rule, f)
 			if tc.none {
 				if fd != nil {
 					t.Errorf("TR-01 = %+v, want no finding", fd)
@@ -183,7 +189,7 @@ func TestRuleTR06Retrans(t *testing.T) {
 		if math.Abs(f.Dir[0].TCPRetransRate-want) > 1e-12 {
 			t.Fatalf("TCPRetransRate = %v, want %v", f.Dir[0].TCPRetransRate, want)
 		}
-		fd := rule.Evaluate(f)
+		fd := evaluateRule(rule, f)
 		if fd == nil {
 			t.Fatalf("TR-06 = nil, want WARNING at 0.5%% estimated rate")
 		}
@@ -196,22 +202,24 @@ func TestRuleTR06Retrans(t *testing.T) {
 	})
 
 	t.Run("bands", func(t *testing.T) {
+		thresholds := Default()
 		cases := []struct {
 			name string
 			rate float64
 			want model.Severity
 			none bool
 		}{
-			{name: "under a tenth of a percent passes", rate: 0.0005, none: true},
-			{name: "tenth of a percent warns", rate: 0.001, want: model.SevWarning},
+			{name: "below warning boundary passes", rate: math.Nextafter(thresholds.TCPRetransWarningAt, math.Inf(-1)), none: true},
+			{name: "warning boundary warns", rate: thresholds.TCPRetransWarningAt, want: model.SevWarning},
 			{name: "half percent warns", rate: 0.005, want: model.SevWarning},
-			{name: "two percent poor", rate: 0.02, want: model.SevPoor},
+			{name: "poor boundary still warns", rate: thresholds.TCPRetransPoorAbove, want: model.SevWarning},
+			{name: "above poor boundary is poor", rate: math.Nextafter(thresholds.TCPRetransPoorAbove, math.Inf(1)), want: model.SevPoor},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				f := &Facts{LinkUpAtEnd: true}
 				f.Dir[0] = DirFacts{TCPAvailable: true, TCPRetransRate: tc.rate}
-				fd := rule.Evaluate(f)
+				fd := evaluateRule(rule, f)
 				if tc.none {
 					if fd != nil {
 						t.Errorf("TR-06 = %+v, want no finding", fd)
@@ -231,6 +239,7 @@ func TestRuleTR06Retrans(t *testing.T) {
 
 func TestRuleTR07UDPGating(t *testing.T) {
 	rule := ruleByID(t, "TR-07")
+	thresholds := Default()
 	base := func(loss float64) *Facts {
 		f := &Facts{LinkUpAtEnd: true}
 		f.Dir[0] = DirFacts{UDPAvailable: true, UDPTargetReached: true, UDPLossPct: loss}
@@ -238,40 +247,65 @@ func TestRuleTR07UDPGating(t *testing.T) {
 	}
 
 	t.Run("poor at five percent loss", func(t *testing.T) {
-		fd := rule.Evaluate(base(5))
+		fd := evaluateRule(rule, base(5))
 		if fd == nil || fd.Severity != model.SevPoor {
 			t.Errorf("TR-07 = %+v, want poor", fd)
 		}
 	})
 	t.Run("warning at one percent loss", func(t *testing.T) {
-		fd := rule.Evaluate(base(1))
+		fd := evaluateRule(rule, base(1))
 		if fd == nil || fd.Severity != model.SevWarning {
 			t.Errorf("TR-07 = %+v, want warning", fd)
 		}
 	})
 	t.Run("passes under half a percent", func(t *testing.T) {
-		if fd := rule.Evaluate(base(0.3)); fd != nil {
+		if fd := evaluateRule(rule, base(math.Nextafter(thresholds.UDPLossWarningAt, math.Inf(-1)))); fd != nil {
 			t.Errorf("TR-07 = %+v, want no finding", fd)
+		}
+	})
+	t.Run("warning boundary is inclusive", func(t *testing.T) {
+		fd := evaluateRule(rule, base(thresholds.UDPLossWarningAt))
+		if fd == nil || fd.Severity != model.SevWarning {
+			t.Errorf("TR-07 = %+v, want warning", fd)
+		}
+	})
+	t.Run("poor boundary stays warning", func(t *testing.T) {
+		fd := evaluateRule(rule, base(thresholds.UDPLossPoorAbove))
+		if fd == nil || fd.Severity != model.SevWarning {
+			t.Errorf("TR-07 = %+v, want warning", fd)
+		}
+	})
+	t.Run("above poor boundary is poor", func(t *testing.T) {
+		fd := evaluateRule(rule, base(math.Nextafter(thresholds.UDPLossPoorAbove, math.Inf(1))))
+		if fd == nil || fd.Severity != model.SevPoor {
+			t.Errorf("TR-07 = %+v, want poor", fd)
 		}
 	})
 	t.Run("no finding when target rate unreached", func(t *testing.T) {
 		f := base(5)
 		f.Dir[0].UDPTargetReached = false
-		if fd := rule.Evaluate(f); fd != nil {
+		if fd := evaluateRule(rule, f); fd != nil {
 			t.Errorf("TR-07 = %+v, want no finding when sender missed target", fd)
 		}
 	})
 	t.Run("no finding when cpu saturated", func(t *testing.T) {
 		f := base(5)
 		f.MaxCPUPct = 95
-		if fd := rule.Evaluate(f); fd != nil {
+		if fd := evaluateRule(rule, f); fd != nil {
 			t.Errorf("TR-07 = %+v, want no finding when MaxCPUPct > 90", fd)
+		}
+	})
+	t.Run("CPU boundary remains eligible", func(t *testing.T) {
+		f := base(5)
+		f.MaxCPUPct = thresholds.CPUHostLimitedAbove
+		if fd := evaluateRule(rule, f); fd == nil || fd.Severity != model.SevPoor {
+			t.Errorf("TR-07 = %+v, want poor at exact CPU boundary", fd)
 		}
 	})
 	t.Run("qualified reduced-rate fact survives a separate near-line-rate run", func(t *testing.T) {
 		f := base(5)
 		f.UDPNearSaturation = true
-		if fd := rule.Evaluate(f); fd == nil || fd.Severity != model.SevPoor {
+		if fd := evaluateRule(rule, f); fd == nil || fd.Severity != model.SevPoor {
 			t.Errorf("TR-07 = %+v, want qualifying loss evaluated despite a separate near-saturation run", fd)
 		}
 	})

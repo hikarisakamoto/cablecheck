@@ -172,7 +172,7 @@ func TestPC2SelfInflictedCableFlapDoesNotFirePHY03(t *testing.T) {
 	if facts.PC2.CarrierEvents != 0 {
 		t.Errorf("PC2.CarrierEvents = %d, want 0 after subtracting its cable-test flap", facts.PC2.CarrierEvents)
 	}
-	if finding := ruleByID(t, "PHY-03").Evaluate(facts); finding != nil {
+	if finding := evaluateRule(ruleByID(t, "PHY-03"), facts); finding != nil {
 		t.Errorf("PHY-03 = %+v, want no self-inflicted finding", finding)
 	}
 }
@@ -192,7 +192,7 @@ func TestPC2GenuineCarrierFaultStillFiresPHY03(t *testing.T) {
 	if facts.PC2.CarrierEvents != 1 {
 		t.Errorf("PC2.CarrierEvents = %d, want one genuine reset retained", facts.PC2.CarrierEvents)
 	}
-	if finding := ruleByID(t, "PHY-03").Evaluate(facts); finding == nil {
+	if finding := evaluateRule(ruleByID(t, "PHY-03"), facts); finding == nil {
 		t.Errorf("PHY-03 = nil, want genuine PC2 carrier fault finding")
 	}
 }

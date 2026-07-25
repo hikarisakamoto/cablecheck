@@ -8,6 +8,77 @@ evidence dominates host-sensitive performance symptoms.
 Threshold comparisons in the tables are exact. "Greater than 1%" does not
 include exactly 1%.
 
+## Calibration and provenance
+
+The [`Default` threshold policy](../internal/evaluate/thresholds.go) is the
+executable source of truth for fact qualification, rule severity boundaries,
+host gating, and score bands. The values are deliberately internal and fixed:
+CableCheck does not offer a sensitivity preset that could turn the same
+evidence into a more favorable result. The tables below restate that policy for
+operators; they do not define a second implementation.
+
+Changing a default value or its inclusive/exclusive comparison requires an
+explicit `RulesVersion` decision, boundary-test review, and review of the
+committed example reports. Merely moving the values into the policy does not
+change version `1.1.0` because the current values and comparisons are
+preserved.
+
+### Reference conditions and status labels
+
+Thresholds assume two known computers on a trusted direct Ethernet link. NIC
+counter evidence is used only when before/after deltas are reliable. TCP
+throughput is receiver bitrate divided by negotiated link speed. UDP loss,
+jitter, and reordering are admitted only from runs that reached the target and
+whose requested rate was not near known link capacity. TCP retransmit rate is
+an estimate based on transmitted bytes and the 1448-byte fallback MSS described
+below. Count thresholds are absolute across quick, standard, and soak modes;
+they are not normalized by duration.
+
+The provenance status is intentionally conservative:
+
+- **Conservative policy**: an engineering boundary chosen to avoid calling
+  ordinary measurement noise a cable fault. It is not the result of a field
+  calibration campaign.
+- **Fixture-backed conservative policy**: additionally exercised by committed
+  regression examples, but those examples are not population measurements.
+- **Measurement gate**: decides whether a result is suitable evidence rather
+  than whether the cable is healthy.
+- **Presentation policy**: keeps a numeric score consistent with the rule-based
+  class; it is not a physical measurement.
+
+No current verdict threshold is claimed to be standards-mandated or broadly
+field-calibrated. Protocol definitions explain how some metrics are measured,
+but do not establish CableCheck's health boundary.
+
+| Threshold | Default and exact comparison | Reference condition and rationale | Status |
+|---|---|---|---|
+| CRC warning/poor | Poor when reliable aggregate CRC-class movement is `> 10`; 1–10 warns. | Any movement is anomalous on a direct link; the first band avoids escalating a small absolute count immediately. | Conservative policy |
+| CRC failed | Failed when reliable aggregate movement is `> 1000`. | A large absolute error count is treated as independently compelling physical evidence. | Conservative policy |
+| CRC + ping corroboration | CRC movement `> 10` fails when any standard-ping direction is also `> 1%` loss. | Independent counter and packet-loss signals increase confidence that corruption is observable in traffic. | Conservative policy |
+| Carrier events | Failed at `>= 3` events on the worse reliable side; 1–2 is poor. | The worse side avoids double-counting one physical bounce observed by both peers; repeated bounces are decisive. | Conservative policy |
+| Frame-size errors | Poor when reliable aggregate movement is `> 10`; 1–10 warns. | Jabber, oversize, undersize, and length movement is abnormal, with a small-count warning band. | Conservative policy |
+| Standard-ping loss | Poor when loss is `> 0.1%`; any positive loss up to that boundary warns. | A direct cable should be lossless, while the first nonzero band avoids overstating a very small sample count. | Conservative policy |
+| RTT spike count | Warning when a direction has `> 5` parser-identified spikes. | Requires repeated outliers rather than one event. The parser identifies a spike above `max(5 × median, median + 10 ms)`; this threshold counts those events. | Conservative policy |
+| RTT reply gap | Poor when the longest gap is `> 1 s`. | A full-second interruption is operationally significant on a direct link. | Conservative policy |
+| TCP retransmit warning | Warning at an estimated rate `>= 0.1%`. | A small allowance recognizes that the rate uses an estimated segment count rather than observed segments. | Conservative policy |
+| TCP retransmit poor | Poor when the estimated rate is `> 1%`; exactly 1% remains warning. | Separates elevated retransmission from a strongly degraded stream. | Conservative policy |
+| UDP target reached | Admit a run when actual sender bitrate is `>= 90%` of target. | Rejects loss from a sender that could not generate the requested load. | Measurement gate |
+| UDP near saturation | Exclude a run when requested bitrate is `> 95%` of known negotiated speed. | Near-line-rate UDP can create self-inflicted queue loss rather than cable evidence. | Measurement gate |
+| UDP loss warning | Warning at `>= 0.5%` qualifying loss. | Allows a small margin before treating UDP loss as a health finding. | Conservative policy |
+| UDP loss poor | Poor when qualifying loss is `> 2%`; exactly 2% remains warning. | Sustained loss at this level is considered materially degraded; with CRC movement it also supplies PHY-10 correlation. | Conservative policy |
+| UDP jitter | Warning when qualifying jitter is `> 5 ms`. | Multi-millisecond variation is unexpected on a direct link, but the value is not an RFC health mandate. | Conservative policy |
+| UDP reordering | Warning when qualifying reordering is `> 0.1%`. | Reordering should not normally occur on a single direct path; the boundary avoids elevating one tiny fractional result. | Conservative policy |
+| TCP throughput pass | No PERF-01 finding at `>= 90%` of negotiated speed. | Allows ordinary protocol and host overhead. The healthy 1 Gbit/s example at about 94% is a regression reference, not a calibration population. | Fixture-backed conservative policy |
+| TCP throughput info | Info at `>= 70%` and `< 90%`. | Records a visible shortfall without asserting cable damage. | Conservative policy |
+| TCP throughput warning/poor | Warning at `>= 40%` and `< 70%`; poor below 40%. | Large shortfalls deserve escalation but remain host-sensitive. | Conservative policy |
+| TCP coefficient of variation warning | Warning at `>= 15%`. | Flags repeated interval instability while allowing ordinary run-to-run variation. | Conservative policy |
+| TCP coefficient of variation poor | Poor when `> 30%`; exactly 30% remains warning. | Marks strongly unstable interval throughput. | Conservative policy |
+| TCP collapse interval | Count an interval when it is `< 50%` of the post-first-interval median. | Excludes slow start, then identifies a substantial within-run drop relative to that run. | Conservative policy |
+| TCP collapse count | Poor at `>= 3` counted intervals; 1–2 warns. | Repeated collapses carry more weight than an isolated interval. | Conservative policy |
+| TCP directional asymmetry | Warning when `abs(a-b) / max(a,b)` is `> 30%`. | A large directional difference is notable but host-sensitive. | Conservative policy |
+| Host CPU | Mark host limitation and suppress qualifying UDP evidence when maximum iperf3 CPU is `> 90%`; exactly 90% remains eligible. | A highly utilized endpoint can confound performance evidence; iperf3 CPU percentage is not treated as a graded starvation measure. | Conservative policy |
+| Score bands | Failed 0–25, poor 26–50, warning 51–79, good 80–94, excellent 95–100; inconclusive has no score. | Clamping prevents the secondary numeric score from contradicting the rule-derived class. | Presentation policy |
+
 ## Physical rules
 
 | ID | Category | Trigger | Finding severity |
@@ -42,7 +113,7 @@ annotated separately and removed from the ordinary carrier-event evidence.
 | `TR-02` | transport | Full-size ping has any loss in a direction whose standard ping has exactly 0% loss. | poor |
 | `TR-03` | transport | At least one fragmentation-needed/full-size don't-fragment error occurs. | warning |
 | `TR-04` | transport | At least one duplicate ping reply occurs. | warning |
-| `TR-05` | transport | A direction has more than 5 RTT spikes above 10 times its median. | warning |
+| `TR-05` | transport | A direction has more than 5 parser-identified RTT spikes. | warning |
 | `TR-05` | transport | A direction's maximum reply gap is greater than 1 second. | poor |
 | `TR-06` | transport | Estimated TCP retransmit rate is at least 0.1% and at most 1%. | warning |
 | `TR-06` | transport | Estimated TCP retransmit rate is greater than 1%. | poor |
@@ -76,8 +147,8 @@ CPU, or host can produce these symptoms without a bad cable.
 | `PERF-01` | performance | TCP receiver bitrate is below 40% of negotiated speed. | poor |
 | `PERF-02` | performance | TCP interval coefficient of variation is at least 15% and at most 30%. | warning |
 | `PERF-02` | performance | TCP interval coefficient of variation is greater than 30%. | poor |
-| `PERF-03` | performance | Across both directions, 1–2 TCP intervals after the first fall below half the median of the post-first intervals. | warning |
-| `PERF-03` | performance | At least 3 such intervals fall below half the median. | poor |
+| `PERF-03` | performance | Across both directions, 1–2 TCP intervals after the first fall below 50% of the median of the post-first intervals. | warning |
+| `PERF-03` | performance | At least 3 such intervals fall below 50% of the median. | poor |
 | `PERF-04` | performance | Both TCP directions exist and `abs(a-b) / max(a,b)` is greater than 30%. | warning |
 
 `PERF-01` doesn't run when negotiated speed is unknown. When more than one

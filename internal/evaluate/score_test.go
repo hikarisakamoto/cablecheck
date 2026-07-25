@@ -6,24 +6,14 @@ import (
 	"cablecheck/internal/model"
 )
 
-// band returns the inclusive score band for a class, mirroring §4.5 of the
-// design: FAILED <=25, POOR 26-50, WARNING 51-79, GOOD 80-94, EXCELLENT 95-100.
+// band returns the configured inclusive score band for a class.
 func band(t *testing.T, class model.HealthClass) (int, int) {
 	t.Helper()
-	switch class {
-	case model.HealthFailed:
-		return 0, 25
-	case model.HealthPoor:
-		return 26, 50
-	case model.HealthWarning:
-		return 51, 79
-	case model.HealthGood:
-		return 80, 94
-	case model.HealthExcellent:
-		return 95, 100
+	if class == model.HealthInconclusive {
+		t.Fatalf("no score band for class %v", class)
 	}
-	t.Fatalf("no score band for class %v", class)
-	return 0, 0
+	b := Default().scoreBand(class)
+	return b.Min, b.Max
 }
 
 func TestScoreClampedToClassBand(t *testing.T) {
