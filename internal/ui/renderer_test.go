@@ -43,7 +43,7 @@ func (b *notifyingBuffer) String() string {
 	return b.buf.String()
 }
 
-func TestRendererElapsedETAAndMetrics(t *testing.T) {
+func TestRendererElapsedAndMetrics(t *testing.T) {
 	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	clk := clocktest.New(start)
 	var out bytes.Buffer
@@ -62,11 +62,14 @@ func TestRendererElapsedETAAndMetrics(t *testing.T) {
 		"starting test plan: 2 steps\n",
 		"[1/2] throughput",
 		"running a=1.5 z=2",
-		"elapsed 10s ETA 30s",
+		"elapsed 10s",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, " ETA ") {
+		t.Fatalf("ETA must not be rendered: %q", got)
 	}
 	if strings.Contains(got, "fallback") {
 		t.Fatalf("Text did not take precedence over Stage: %q", got)
@@ -83,7 +86,7 @@ func TestRendererSoakBudget(t *testing.T) {
 	r.Step(1, 8, "soak")
 	clk.Advance(15 * time.Second)
 	r.Progress(protocol.TestProgress{Stage: "cycle", Percent: 1})
-	if got := out.String(); !strings.Contains(got, "soak 15s/1m (ETA 45s)") {
+	if got := out.String(); !strings.Contains(got, "soak 15s/1m") {
 		t.Fatalf("soak timing did not override protocol progress: %q", got)
 	}
 }
@@ -300,7 +303,7 @@ func TestRendererProgressBeforeFirstStepIsSuppressed(t *testing.T) {
 	if strings.Contains(got, "[0/0]") || !strings.Contains(got, "[1/5] cycle 1: counters") {
 		t.Fatalf("first valid soak step output = %q", got)
 	}
-	if !strings.Contains(got, "soak 5s/1m (ETA 55s)") {
+	if !strings.Contains(got, "soak 5s/1m") {
 		t.Fatalf("pre-step progress did not preserve soak elapsed origin: %q", got)
 	}
 }
@@ -356,8 +359,8 @@ func TestOverallFraction(t *testing.T) {
 }
 
 // TestRendererIndeterminateProgress checks that a Percent == -1 update (the
-// documented indeterminate value) does not advance the bar: the fraction stays
-// at the completed-steps value, so the ETA is derived from that alone.
+// documented indeterminate value) renders the stage text alongside elapsed
+// time without advancing the bar into an error state.
 func TestRendererIndeterminateProgress(t *testing.T) {
 	clk := clocktest.New(time.Unix(0, 0))
 	var out bytes.Buffer
@@ -367,16 +370,18 @@ func TestRendererIndeterminateProgress(t *testing.T) {
 	clk.Advance(5 * time.Second)
 	r.Progress(protocol.TestProgress{Stage: "working", Percent: -1})
 	got := out.String()
-	// complete stays at (2-1)/4 = 0.25, so ETA = 5s * (0.75/0.25) = 15s.
-	for _, want := range []string{"working", "elapsed 5s ETA 15s"} {
+	for _, want := range []string{"working", "elapsed 5s"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("indeterminate progress missing %q: %q", want, got)
 		}
 	}
+	if strings.Contains(got, " ETA ") {
+		t.Fatalf("ETA must not be rendered: %q", got)
+	}
 }
 
-// TestRendererTimingBranches covers the elapsed-only (no ETA) branch and the
-// over-budget soak clamp that renders "ETA 0s".
+// TestRendererTimingBranches covers the step-based elapsed frame and the
+// over-budget soak frame, both of which must render elapsed without any ETA.
 func TestRendererTimingBranches(t *testing.T) {
 	t.Run("start frame is elapsed-only", func(t *testing.T) {
 		clk := clocktest.New(time.Unix(0, 0))
@@ -388,15 +393,19 @@ func TestRendererTimingBranches(t *testing.T) {
 		}
 	})
 
-	t.Run("over-budget soak clamps ETA to zero", func(t *testing.T) {
+	t.Run("over-budget soak shows honest elapsed past the budget", func(t *testing.T) {
 		clk := clocktest.New(time.Unix(0, 0))
 		var out bytes.Buffer
 		r := newRenderer(&out, Options{Color: ColorNever, Clock: clk, Width: 120, SoakBudget: time.Minute}, false)
 		r.Step(1, 4, "soak")
 		clk.Advance(90 * time.Second)
 		r.Progress(protocol.TestProgress{Stage: "cycle", Percent: 50})
-		if got := out.String(); !strings.Contains(got, "ETA 0s") {
-			t.Fatalf("over-budget soak should clamp ETA to 0s: %q", got)
+		got := out.String()
+		if !strings.Contains(got, "soak 1m30s/1m") {
+			t.Fatalf("over-budget soak should show elapsed past budget: %q", got)
+		}
+		if strings.Contains(got, " ETA ") || strings.Contains(got, "(ETA") {
+			t.Fatalf("ETA must not be rendered: %q", got)
 		}
 	})
 }
@@ -432,14 +441,14 @@ func TestRendererSoakLabelFormat(t *testing.T) {
 	r.Step(1, 8, "soak")
 	clk.Advance(12 * time.Minute)
 	r.Progress(protocol.TestProgress{Stage: "cycle", Percent: 50})
-	if got := out.String(); !strings.Contains(got, "soak 12m/1h (ETA 48m)") {
-		t.Fatalf("soak label = %q, want it to contain %q", got, "soak 12m/1h (ETA 48m)")
+	if got := out.String(); !strings.Contains(got, "soak 12m/1h") {
+		t.Fatalf("soak label = %q, want it to contain %q", got, "soak 12m/1h")
 	}
 }
 
-// TestRendererSoakRoundingConsistency pins the boundary arithmetic: at 59.5s
-// of a 1m budget the elapsed value must round BEFORE the ETA subtraction,
-// rendering "soak 1m/1m (ETA 0s)" — never the contradictory "1m/1m (ETA 1s)".
+// TestRendererSoakRoundingConsistency pins the boundary arithmetic: at 59.5s of
+// a 1m budget the elapsed value rounds to whole seconds before display, so it
+// reads "soak 1m/1m" against the budget rather than the mismatched "soak 59s/1m".
 func TestRendererSoakRoundingConsistency(t *testing.T) {
 	clk := clocktest.New(time.Unix(0, 0))
 	var out bytes.Buffer
@@ -447,26 +456,7 @@ func TestRendererSoakRoundingConsistency(t *testing.T) {
 	r.Step(1, 8, "soak")
 	clk.Advance(59*time.Second + 500*time.Millisecond)
 	r.Progress(protocol.TestProgress{Stage: "cycle", Percent: 99})
-	if got := out.String(); !strings.Contains(got, "soak 1m/1m (ETA 0s)") {
-		t.Fatalf("boundary soak label = %q, want it to contain %q", got, "soak 1m/1m (ETA 0s)")
-	}
-}
-
-// TestRendererTinyPercentDoesNotOverflowETA guards the ETA projection against a
-// degenerate near-zero completion fraction: the int64-overflowing projection
-// must be omitted, not wrapped into a misleading "ETA 0s".
-func TestRendererTinyPercentDoesNotOverflowETA(t *testing.T) {
-	clk := clocktest.New(time.Unix(0, 0))
-	var out bytes.Buffer
-	r := newRenderer(&out, Options{Color: ColorNever, Clock: clk, Width: 120}, false)
-	r.Step(1, 1, "phase")
-	clk.Advance(3 * time.Second)
-	r.Progress(protocol.TestProgress{Stage: "x", Percent: 1e-9})
-	got := out.String()
-	if !strings.Contains(got, "elapsed 3s") {
-		t.Fatalf("missing elapsed: %q", got)
-	}
-	if strings.Contains(got, " ETA ") {
-		t.Fatalf("unrepresentable ETA must be omitted, not wrapped: %q", got)
+	if got := out.String(); !strings.Contains(got, "soak 1m/1m") {
+		t.Fatalf("boundary soak label = %q, want it to contain %q", got, "soak 1m/1m")
 	}
 }
