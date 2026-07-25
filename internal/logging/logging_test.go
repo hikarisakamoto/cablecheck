@@ -308,6 +308,47 @@ func TestConsoleHandlerQuoting(t *testing.T) {
 	}
 }
 
+// TestConsoleHandlerC1AndUnicodeWhitespace guards the two escape/grammar holes
+// the original rune-based checks missed: an invalid-UTF-8 C1 byte (0x9B, the
+// 8-bit CSI) in the message — which decodes to utf8.RuneError, not a control
+// rune — and non-ASCII whitespace (NBSP) in an attribute value. Both must be
+// strconv-quoted so no raw C1 byte ever reaches the TTY and every key=val
+// segment stays a single strings.Fields token.
+func TestConsoleHandlerC1AndUnicodeWhitespace(t *testing.T) {
+	var buf bytes.Buffer
+	h := newConsoleHandler(&buf, slog.LevelDebug, false)
+	rec := slog.NewRecord(time.Time{}, slog.LevelInfo, "x\x9by", 0)
+	rec.Add("nbsp", "a\u00a0b")
+	if err := h.Handle(context.Background(), rec); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	got := buf.String()
+	if strings.ContainsRune(got, 0x9b) {
+		t.Errorf("raw C1 byte 0x9b leaked to the sink: %q", got)
+	}
+	if strings.ContainsRune(got, '\u00a0') {
+		t.Errorf("raw NBSP leaked to the sink: %q", got)
+	}
+	for _, want := range []string{
+		`"x\x9by"`,        // C1-byte message => quoted, byte escaped
+		`nbsp="a\u00a0b"`, // NBSP value => quoted, whitespace escaped
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %s:\n%q", want, got)
+		}
+	}
+	// With both escaped, the value stays one whitespace-split token.
+	nbspFields := 0
+	for _, f := range strings.Fields(strings.TrimSuffix(got, "\n")) {
+		if strings.HasPrefix(f, "nbsp=") {
+			nbspFields++
+		}
+	}
+	if nbspFields != 1 {
+		t.Errorf("nbsp value split across %d fields, want 1: %q", nbspFields, got)
+	}
+}
+
 // TestAttachDebugFileExclusive pins O_EXCL: attaching to an existing path
 // must fail rather than truncate or append.
 func TestAttachDebugFileExclusive(t *testing.T) {

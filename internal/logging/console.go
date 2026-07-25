@@ -52,8 +52,11 @@ func (h *consoleHandler) Handle(_ context.Context, r slog.Record) error {
 	buf = append(buf, ' ')
 	// A message carrying control bytes (peer-supplied text, wrapped errors)
 	// could split the line or smuggle ANSI sequences to the TTY; quote it
-	// then. Plain spaces stay readable and unquoted.
-	if strings.ContainsFunc(r.Message, unicode.IsControl) {
+	// then. Invalid UTF-8 counts too: a lone C1 byte such as 0x9B (the 8-bit
+	// CSI) decodes to utf8.RuneError, which IsControl misses, so it would
+	// otherwise reach the TTY raw — check validity as well. Plain spaces stay
+	// readable and unquoted.
+	if !utf8.ValidString(r.Message) || strings.ContainsFunc(r.Message, unicode.IsControl) {
 		buf = strconv.AppendQuote(buf, r.Message)
 	} else {
 		buf = append(buf, r.Message...)
@@ -139,9 +142,10 @@ func (h *consoleHandler) appendAttr(buf *[]byte, groups []string, a slog.Attr) {
 }
 
 // appendMaybeQuoted appends s, strconv-quoted when leaving it raw could break
-// the line format or the TTY: empty, or containing a control rune (incl. ESC),
-// an invalid UTF-8 byte, a space, '"' or '='. Mirrors the stdlib TextHandler's
-// quoting rule so "key=val" segments stay unambiguous.
+// the line format or the TTY: empty, or containing an invalid UTF-8 byte, a
+// non-printable rune (incl. every control byte and ESC), any Unicode
+// whitespace (ASCII space, tab, NBSP, …), '"' or '='. Mirrors the stdlib
+// TextHandler's quoting rule so "key=val" segments stay unambiguous.
 func appendMaybeQuoted(buf []byte, s string) []byte {
 	if needsQuoting(s) {
 		return strconv.AppendQuote(buf, s)
@@ -150,12 +154,17 @@ func appendMaybeQuoted(buf []byte, s string) []byte {
 }
 
 // needsQuoting reports whether s must be strconv-quoted in a key=val segment.
+// It mirrors slog.TextHandler: quote on invalid UTF-8, any non-printable rune,
+// any Unicode whitespace, or the grammar separators '"' and '='. Using
+// !IsPrint (which subsumes IsControl) and IsSpace (which subsumes the ASCII
+// space) closes the gap where non-ASCII whitespace like NBSP would otherwise
+// pass through and let strings.Fields split one value into two tokens.
 func needsQuoting(s string) bool {
 	if s == "" {
 		return true
 	}
 	for _, r := range s {
-		if r == utf8.RuneError || unicode.IsControl(r) || r == ' ' || r == '"' || r == '=' {
+		if r == utf8.RuneError || !unicode.IsPrint(r) || unicode.IsSpace(r) || r == '"' || r == '=' {
 			return true
 		}
 	}
