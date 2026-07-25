@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -283,7 +284,7 @@ func TestDoctorOutputFormat(t *testing.T) {
 	outDir := t.TempDir()
 	checks, _ := Doctor(context.Background(), deps, DoctorOptions{
 		OutputDir: outDir, SysfsRoot: root, AllowVirtual: true})
-	RenderDoctor(&out.stdout, checks)
+	RenderDoctor(&out.stdout, checks, false)
 
 	text := out.stdout.String()
 	if !strings.Contains(text, "[FAIL]") {
@@ -292,6 +293,9 @@ func TestDoctorOutputFormat(t *testing.T) {
 	if !strings.Contains(text, "[PASS]") {
 		t.Errorf("rendered output lacks a [PASS] line:\n%s", text)
 	}
+	if strings.Contains(text, "\x1b[") {
+		t.Errorf("color=false rendering must be plain, got ANSI:\n%s", text)
+	}
 	// Summary line "N PASS, N WARN, N FAIL".
 	pass := countStatus(checks, CheckPass)
 	warn := countStatus(checks, CheckWarn)
@@ -299,5 +303,19 @@ func TestDoctorOutputFormat(t *testing.T) {
 	summary := formatDoctorSummary(pass, warn, fail)
 	if !strings.Contains(text, summary) {
 		t.Errorf("rendered output lacks the summary line %q:\n%s", summary, text)
+	}
+
+	// With color on, each status tag is wrapped in its SGR; the summary and
+	// name columns stay plain so alignment is unaffected.
+	var colored bytes.Buffer
+	RenderDoctor(&colored, checks, true)
+	ct := colored.String()
+	for _, want := range []string{"\x1b[32m[PASS]\x1b[0m", "\x1b[31m[FAIL]\x1b[0m"} {
+		if !strings.Contains(ct, want) {
+			t.Errorf("colored rendering lacks %q:\n%s", want, ct)
+		}
+	}
+	if !strings.Contains(ct, summary) {
+		t.Errorf("colored rendering must keep the plain summary line %q:\n%s", summary, ct)
 	}
 }

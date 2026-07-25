@@ -27,6 +27,7 @@ func cmdRun(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		Stdin:           stdin,
 		Stdout:          stdout,
 		Stderr:          stderr,
+		StderrColor:     ui.DecideColor(mapColorMode(cfg.Color), stderr, nil),
 		Build:           build,
 		OnStep:          progress.Step,
 		OnProgress:      progress.Progress,

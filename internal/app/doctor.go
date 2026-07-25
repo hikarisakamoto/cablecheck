@@ -13,6 +13,7 @@ import (
 	"cablecheck/internal/parser"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/testsuite"
+	"cablecheck/internal/ui"
 )
 
 // CheckStatus is the outcome of a single doctor check.
@@ -326,8 +327,11 @@ func orUnknownStr(s string) string {
 	return s
 }
 
-// RenderDoctor writes the aligned check lines and the summary to w.
-func RenderDoctor(w io.Writer, checks []CheckResult) {
+// RenderDoctor writes the aligned check lines and the summary to w. When
+// color is set the leading [PASS]/[WARN]/[FAIL] tag is colored (green/yellow/
+// red); the padded name column stays plain so the ANSI bytes never disturb
+// alignment. With color off the output is byte-identical to plain text.
+func RenderDoctor(w io.Writer, checks []CheckResult, color bool) {
 	width := 0
 	for _, c := range checks {
 		if len(c.Name) > width {
@@ -344,9 +348,24 @@ func RenderDoctor(w io.Writer, checks []CheckResult) {
 		case CheckFail:
 			fail++
 		}
-		fmt.Fprintf(w, "[%s] %-*s  %s\n", c.Status, width, c.Name, c.Detail)
+		fmt.Fprintf(w, "%s %-*s  %s\n", colorStatus(c.Status, color), width, c.Name, c.Detail)
 	}
 	fmt.Fprintf(w, "\n%s\n", formatDoctorSummary(pass, warn, fail))
+}
+
+// colorStatus returns the bracketed status tag, colored by outcome when color
+// is enabled: PASS green, WARN yellow, FAIL red.
+func colorStatus(s CheckStatus, color bool) string {
+	tag := "[" + string(s) + "]"
+	switch s {
+	case CheckPass:
+		return ui.Green(tag, color)
+	case CheckWarn:
+		return ui.Yellow(tag, color)
+	case CheckFail:
+		return ui.Red(tag, color)
+	}
+	return tag
 }
 
 // formatDoctorSummary renders the "N PASS, N WARN, N FAIL" tally line.

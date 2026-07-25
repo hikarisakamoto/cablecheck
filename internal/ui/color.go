@@ -39,6 +39,11 @@ func DecideColor(mode ColorMode, w io.Writer, env func(string) string) bool {
 	}
 }
 
+// IsTerminal reports whether w is a character device (a TTY). It is the
+// exported form of the internal probe DecideColor uses, so other packages
+// (doctor, logging) can gate colored output on the same rule.
+func IsTerminal(w io.Writer) bool { return isTerminal(w) }
+
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok || f == nil {
@@ -54,6 +59,16 @@ func colorize(text, sgr string, enabled bool) string {
 	}
 	return sgr + text + ansiReset
 }
+
+// Green, Yellow, Red, Cyan and Dim wrap text in the corresponding SGR when
+// enabled, returning it unchanged otherwise. They are the shared primitives
+// behind the doctor status tags and the verbose slog console handler; the
+// codes match the palette used by HealthColor/SeverityColor.
+func Green(text string, enabled bool) string  { return colorize(text, "\x1b[32m", enabled) }
+func Yellow(text string, enabled bool) string { return colorize(text, "\x1b[33m", enabled) }
+func Red(text string, enabled bool) string    { return colorize(text, "\x1b[31m", enabled) }
+func Cyan(text string, enabled bool) string   { return colorize(text, "\x1b[36m", enabled) }
+func Dim(text string, enabled bool) string    { return colorize(text, "\x1b[2m", enabled) }
 
 // HealthColor colors text according to a report health classification.
 func HealthColor(class model.HealthClass, text string, enabled bool) string {
