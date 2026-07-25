@@ -26,8 +26,8 @@
       "text": "20s"
     },
     "udpRate": {
-      "bps": 800000000,
-      "text": "800M"
+      "bps": 80000000,
+      "text": "80M"
     },
     "parallelStreams": 4,
     "pingCount": 500,
@@ -477,25 +477,38 @@
   "monitoringEvents": null,
   "warnings": null,
   "skippedTests": null,
-  "classification": "WARNING",
-  "score": 79,
+  "classification": "POOR",
+  "score": 50,
   "classificationReasons": [
-    "The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration."
+    "The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.",
+    "TCP throughput does not meet the passing policy for this negotiated link speed."
   ],
   "recommendations": [
-    "Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool \u003cif\u003e`)."
+    "Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool \u003cif\u003e`).",
+    "Isolation test: same machines with a different cable, then the same cable between different machines."
   ],
   "partial": false,
   "findings": [
     {
       "ruleId": "PHY-06",
       "category": "physical",
-      "severity": "warning",
+      "severity": "poor",
       "text": "The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.",
       "evidence": [
         "negotiated 100M \u003c expected 1G"
       ],
       "hostSensitive": false
+    },
+    {
+      "ruleId": "PERF-01",
+      "category": "performance",
+      "severity": "info",
+      "text": "TCP throughput does not meet the passing policy for this negotiated link speed.",
+      "evidence": [
+        "pc1-\u003epc2: 94.1M TCP = 94% of the 100M link",
+        "pc2-\u003epc1: 93.9M TCP = 94% of the 100M link"
+      ],
+      "hostSensitive": true
     }
   ],
   "link": {

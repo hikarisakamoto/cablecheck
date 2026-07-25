@@ -7,12 +7,12 @@
 ## 2. Score & Rule Evidence
 
 - **Score:** n/a (INCONCLUSIVE runs carry no score)
-- **Reason:** TCP throughput is below the negotiated link speed.
+- **Reason:** TCP throughput does not meet the passing policy for this negotiated link speed.
 - **Reason:** CPU was saturated during throughput testing — performance results may be host-limited.
 
 | Rule | Category | Severity | Finding |
 | --- | --- | --- | --- |
-| PERF-01 | performance | poor | TCP throughput is below the negotiated link speed. |
+| PERF-01 | performance | poor | TCP throughput does not meet the passing policy for this negotiated link speed. |
 | HOST-01 | host | marker | CPU was saturated during throughput testing — performance results may be host-limited. |
 
 ## 3. Session Info
@@ -126,7 +126,7 @@
 
 ## 18. Findings Detail
 
-- **PERF-01** [performance/poor] TCP throughput is below the negotiated link speed.
+- **PERF-01** [performance/poor] TCP throughput does not meet the passing policy for this negotiated link speed.
   - pc1->pc2: 250M TCP = 25% of the 1G link
   - pc2->pc1: 248M TCP = 25% of the 1G link
 - **HOST-01** [host/marker] CPU was saturated during throughput testing — performance results may be host-limited.

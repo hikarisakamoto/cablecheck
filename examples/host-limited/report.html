@@ -69,8 +69,8 @@
 
     <details open><summary>2. Score &amp; Rule Evidence</summary><div class="content">
       
-      <dl><dt>Score</dt><dd>n/a (INCONCLUSIVE runs carry no score)</dd><dt>Reason</dt><dd>TCP throughput is below the negotiated link speed.</dd><dt>Reason</dt><dd>CPU was saturated during throughput testing — performance results may be host-limited.</dd></dl>
-      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody><tr><td>PERF-01</td><td>performance</td><td><span class="chip severity-poor">Poor</span></td><td>TCP throughput is below the negotiated link speed.</td></tr><tr><td>HOST-01</td><td>host</td><td><span class="chip severity-marker">Marker</span></td><td>CPU was saturated during throughput testing — performance results may be host-limited.</td></tr></tbody></table></div>
+      <dl><dt>Score</dt><dd>n/a (INCONCLUSIVE runs carry no score)</dd><dt>Reason</dt><dd>TCP throughput does not meet the passing policy for this negotiated link speed.</dd><dt>Reason</dt><dd>CPU was saturated during throughput testing — performance results may be host-limited.</dd></dl>
+      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody><tr><td>PERF-01</td><td>performance</td><td><span class="chip severity-poor">Poor</span></td><td>TCP throughput does not meet the passing policy for this negotiated link speed.</td></tr><tr><td>HOST-01</td><td>host</td><td><span class="chip severity-marker">Marker</span></td><td>CPU was saturated during throughput testing — performance results may be host-limited.</td></tr></tbody></table></div>
       
     </div></details>
 
@@ -148,7 +148,7 @@
     </div></details>
 
     <details open><summary>18. Findings Detail</summary><div class="content">
-      <article class="finding"><div class="finding-head"><strong>PERF-01</strong><span class="chip severity-poor">Poor</span><span>performance</span></div><p>TCP throughput is below the negotiated link speed.</p><ul><li>pc1-&gt;pc2: 250M TCP = 25% of the 1G link</li><li>pc2-&gt;pc1: 248M TCP = 25% of the 1G link</li></ul></article><article class="finding"><div class="finding-head"><strong>HOST-01</strong><span class="chip severity-marker">Marker</span><span>host</span></div><p>CPU was saturated during throughput testing — performance results may be host-limited.</p><ul><li>max iperf3 CPU utilization 98.4% &gt; 90%</li></ul></article>
+      <article class="finding"><div class="finding-head"><strong>PERF-01</strong><span class="chip severity-poor">Poor</span><span>performance</span></div><p>TCP throughput does not meet the passing policy for this negotiated link speed.</p><ul><li>pc1-&gt;pc2: 250M TCP = 25% of the 1G link</li><li>pc2-&gt;pc1: 248M TCP = 25% of the 1G link</li></ul></article><article class="finding"><div class="finding-head"><strong>HOST-01</strong><span class="chip severity-marker">Marker</span><span>host</span></div><p>CPU was saturated during throughput testing — performance results may be host-limited.</p><ul><li>max iperf3 CPU utilization 98.4% &gt; 90%</li></ul></article>
     </div></details>
 
     <details open><summary>19. Recommendations</summary><div class="content">

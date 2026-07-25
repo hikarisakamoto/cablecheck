@@ -392,11 +392,11 @@ func TestMarkdownGoldenVerdicts(t *testing.T) {
 			},
 		},
 		{
-			name:      "reduced-warning",
-			golden:    "report-reduced-warning.md",
-			wantClass: model.HealthWarning,
-			wantScore: 79,
-			wantRules: []string{"PHY-06"},
+			name:      "reduced-poor",
+			golden:    "report-reduced-poor.md",
+			wantClass: model.HealthPoor,
+			wantScore: 50,
+			wantRules: []string{"PHY-06", "PERF-01"},
 			mutate: func(r *model.Report) {
 				for _, link := range []*model.LinkSettings{
 					r.Link.PC1.Before, r.Link.PC1.After, r.Link.PC2.Before, r.Link.PC2.After,

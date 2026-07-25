@@ -206,14 +206,18 @@ func rulePHY05(f *Facts, _ Thresholds) *model.Finding {
 	}
 }
 
-func rulePHY06(f *Facts, _ Thresholds) *model.Finding {
+func rulePHY06(f *Facts, thresholds Thresholds) *model.Finding {
 	if !phy06cond(f) {
 		return nil
+	}
+	severity := model.SevWarning
+	if float64(f.NegotiatedSpeed)/float64(f.ExpectedSpeed) <= thresholds.NegotiatedSpeedPoorAt {
+		severity = model.SevPoor
 	}
 	return &model.Finding{
 		RuleID:   "PHY-06",
 		Category: model.CategoryPhysical,
-		Severity: model.SevWarning,
+		Severity: severity,
 		Text: fmt.Sprintf("The link negotiated %s although both NICs support %s. "+
 			"Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.",
 			f.NegotiatedSpeed, f.ExpectedSpeed),
@@ -529,9 +533,6 @@ func ruleTR09(f *Facts, thresholds Thresholds) *model.Finding {
 }
 
 func rulePERF01(f *Facts, thresholds Thresholds) *model.Finding {
-	if f.NegotiatedSpeed == 0 {
-		return nil
-	}
 	worst := model.Severity(-1)
 	var ev []string
 	for i := range f.Dir {
@@ -539,17 +540,9 @@ func rulePERF01(f *Facts, thresholds Thresholds) *model.Finding {
 		if !d.TCPAvailable {
 			continue
 		}
-		ratio := float64(d.TCPBitrate) / float64(f.NegotiatedSpeed)
-		var sev model.Severity
-		switch {
-		case ratio >= thresholds.TCPThroughputPassAt:
+		ratio, sev, deviation := classifyThroughput(d.TCPBitrate, f.NegotiatedSpeed, thresholds)
+		if !deviation {
 			continue
-		case ratio >= thresholds.TCPThroughputInfoAt:
-			sev = model.SevInfo
-		case ratio >= thresholds.TCPThroughputWarningAt:
-			sev = model.SevWarning
-		default:
-			sev = model.SevPoor
 		}
 		ev = append(ev, fmt.Sprintf("%s: %s TCP = %.0f%% of the %s link", dirNames[i], d.TCPBitrate, ratio*100, f.NegotiatedSpeed))
 		if sev > worst {
@@ -563,7 +556,7 @@ func rulePERF01(f *Facts, thresholds Thresholds) *model.Finding {
 		RuleID:        "PERF-01",
 		Category:      model.CategoryPerformance,
 		Severity:      worst,
-		Text:          "TCP throughput is below the negotiated link speed.",
+		Text:          "TCP throughput does not meet the passing policy for this negotiated link speed.",
 		Evidence:      ev,
 		HostSensitive: true,
 	}

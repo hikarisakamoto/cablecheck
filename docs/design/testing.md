@@ -267,7 +267,7 @@ All from `testdata/ip/*.json` fixtures through FakeRunner — never the real `ip
 ### internal/evaluate
 - `TestCounterDelta` — table: normal increase; after<before (wrap/reset) ⇒ `(0, ok=false)` conservative; missing-in-after; missing-in-before; zero-delta.
 - `TestRuleXxx` (one per rule) — CRC delta>0 under load ⇒ physical/POOR-tier finding; zero phys errors + low throughput + CPU≥90% ⇒ host-limited ⇒ INCONCLUSIVE override; UDP loss near saturation alone ⇒ note, not POOR (must correlate); half duplex ⇒ WARNING; cable-test open ⇒ FAILED-tier; UNAVAILABLE never downgrades.
-- `TestClassifyGoldenScenarios` — 5 golden inputs mirroring the example reports (healthy-gigabit ⇒ EXCELLENT/GOOD, 100M-negotiation ⇒ WARNING, crc-errors ⇒ POOR, host-limited ⇒ INCONCLUSIVE, disconnected ⇒ FAILED); asserts classification, exit-code mapping (0/1/2/3/2), and that every classification carries ≥1 Finding with evidence strings.
+- `TestClassifyGoldenScenarios` — 5 golden inputs mirroring the example reports (healthy-gigabit ⇒ EXCELLENT/GOOD, 100M-negotiation ⇒ POOR, crc-errors ⇒ POOR, host-limited ⇒ INCONCLUSIVE, disconnected ⇒ FAILED); asserts classification, exit-code mapping (0/2/2/3/2), and that every classification carries ≥1 Finding with evidence strings.
 - `TestScoreDeterministic` — same input twice ⇒ identical score + rule trace.
 
 ### internal/model

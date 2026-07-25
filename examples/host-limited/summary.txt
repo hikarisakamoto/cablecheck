@@ -11,7 +11,7 @@ TCP retransmits:  pc1->pc2 0  |  pc2->pc1 0
 UDP loss:         pc1->pc2 0.00%  |  pc2->pc1 0.00%
 
 Findings (top 2 of 2):
-  [poor] PERF-01: TCP throughput is below the negotiated link speed.
+  [poor] PERF-01: TCP throughput does not meet the passing policy for this negotiated link speed.
   [marker] HOST-01: CPU was saturated during throughput testing - performance results may be host-limited.
 Recommendations (top 2 of 2):
   - Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.

@@ -50,27 +50,27 @@
 </head>
 <body>
 <main>
-  <header class="hero verdict-warning">
+  <header class="hero verdict-poor">
     <p class="eyebrow">CableCheck · Ethernet link health</p>
     <div class="hero-grid">
       <div>
-        <h1>Warning</h1>
-        <p>The cable works but shows signs that deserve attention.</p>
+        <h1>Poor</h1>
+        <p>The cable exhibits significant problems and should be replaced.</p>
       </div>
-      <div class="score">79/100</div>
+      <div class="score">50/100</div>
     </div>
-    <div class="chips" aria-label="Finding severities"><span class="chip severity-warning">Warning</span></div>
+    <div class="chips" aria-label="Finding severities"><span class="chip severity-poor">Poor</span><span class="chip severity-info">Info</span></div>
   </header>
 
   <div class="sections">
     <details open><summary>1. Overall Result</summary><div class="content">
-      <p><strong>WARNING</strong> — The cable works but shows signs that deserve attention.</p>
+      <p><strong>POOR</strong> — The cable exhibits significant problems and should be replaced.</p>
     </div></details>
 
     <details open><summary>2. Score &amp; Rule Evidence</summary><div class="content">
       
-      <dl><dt>Score</dt><dd>79/100</dd><dt>Reason</dt><dd>The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.</dd></dl>
-      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody><tr><td>PHY-06</td><td>physical</td><td><span class="chip severity-warning">Warning</span></td><td>The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.</td></tr></tbody></table></div>
+      <dl><dt>Score</dt><dd>50/100</dd><dt>Reason</dt><dd>The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.</dd><dt>Reason</dt><dd>TCP throughput does not meet the passing policy for this negotiated link speed.</dd></dl>
+      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody><tr><td>PHY-06</td><td>physical</td><td><span class="chip severity-poor">Poor</span></td><td>The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.</td></tr><tr><td>PERF-01</td><td>performance</td><td><span class="chip severity-info">Info</span></td><td>TCP throughput does not meet the passing policy for this negotiated link speed.</td></tr></tbody></table></div>
       
     </div></details>
 
@@ -148,11 +148,11 @@
     </div></details>
 
     <details open><summary>18. Findings Detail</summary><div class="content">
-      <article class="finding"><div class="finding-head"><strong>PHY-06</strong><span class="chip severity-warning">Warning</span><span>physical</span></div><p>The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.</p><ul><li>negotiated 100M &lt; expected 1G</li></ul></article>
+      <article class="finding"><div class="finding-head"><strong>PHY-06</strong><span class="chip severity-poor">Poor</span><span>physical</span></div><p>The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.</p><ul><li>negotiated 100M &lt; expected 1G</li></ul></article><article class="finding"><div class="finding-head"><strong>PERF-01</strong><span class="chip severity-info">Info</span><span>performance</span></div><p>TCP throughput does not meet the passing policy for this negotiated link speed.</p><ul><li>pc1-&gt;pc2: 94.1M TCP = 94% of the 100M link</li><li>pc2-&gt;pc1: 93.9M TCP = 94% of the 100M link</li></ul></article>
     </div></details>
 
     <details open><summary>19. Recommendations</summary><div class="content">
-      <ol><li>Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool &lt;if&gt;`).</li></ol>
+      <ol><li>Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool &lt;if&gt;`).</li><li>Isolation test: same machines with a different cable, then the same cable between different machines.</li></ol>
     </div></details>
 
     <details open><summary>20. Limitations &amp; Unavailable Tests</summary><div class="content">
@@ -160,7 +160,7 @@
     </div></details>
 
     <details open><summary>21. Configuration Used</summary><div class="content">
-      <dl><dt>Role</dt><dd>pc1</dd><dt>Local IP</dt><dd>192.168.100.1</dd><dt>Peer IP</dt><dd>192.168.100.2</dd><dt>Interface</dt><dd>enp3s0</dd><dt>Mode</dt><dd>quick</dd><dt>Control port</dt><dd>44300</dd><dt>iperf3 port</dt><dd>44301</dd><dt>TCP duration</dt><dd>30s</dd><dt>UDP duration</dt><dd>20s</dd><dt>UDP rate</dt><dd>800Mbit/s</dd><dt>Parallel streams</dt><dd>4</dd><dt>Ping count</dt><dd>500</dd><dt>Ping interval</dt><dd>20ms</dd><dt>TCP repeats</dt><dd>1</dd><dt>Monitor interval</dt><dd>1s</dd><dt>Cable test requested</dt><dd>no</dd><dt>Cable test TDR requested</dt><dd>no</dd><dt>Output directory</dt><dd>.</dd><dt>Verbose</dt><dd>no</dd><dt>Non-interactive</dt><dd>no</dd><dt>No sudo</dt><dd>no</dd><dt>No report transfer</dt><dd>no</dd><dt>Allow virtual interface</dt><dd>no</dd><dt>Token auto-generated</dt><dd>yes</dd></dl>
+      <dl><dt>Role</dt><dd>pc1</dd><dt>Local IP</dt><dd>192.168.100.1</dd><dt>Peer IP</dt><dd>192.168.100.2</dd><dt>Interface</dt><dd>enp3s0</dd><dt>Mode</dt><dd>quick</dd><dt>Control port</dt><dd>44300</dd><dt>iperf3 port</dt><dd>44301</dd><dt>TCP duration</dt><dd>30s</dd><dt>UDP duration</dt><dd>20s</dd><dt>UDP rate</dt><dd>80Mbit/s</dd><dt>Parallel streams</dt><dd>4</dd><dt>Ping count</dt><dd>500</dd><dt>Ping interval</dt><dd>20ms</dd><dt>TCP repeats</dt><dd>1</dd><dt>Monitor interval</dt><dd>1s</dd><dt>Cable test requested</dt><dd>no</dd><dt>Cable test TDR requested</dt><dd>no</dd><dt>Output directory</dt><dd>.</dd><dt>Verbose</dt><dd>no</dd><dt>Non-interactive</dt><dd>no</dd><dt>No sudo</dt><dd>no</dd><dt>No report transfer</dt><dd>no</dd><dt>Allow virtual interface</dt><dd>no</dd><dt>Token auto-generated</dt><dd>yes</dd></dl>
     </div></details>
 
     <details open><summary>22. Tool Versions</summary><div class="content">

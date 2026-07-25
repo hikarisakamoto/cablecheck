@@ -480,7 +480,7 @@
   "classification": "INCONCLUSIVE",
   "score": null,
   "classificationReasons": [
-    "TCP throughput is below the negotiated link speed.",
+    "TCP throughput does not meet the passing policy for this negotiated link speed.",
     "CPU was saturated during throughput testing — performance results may be host-limited."
   ],
   "recommendations": [
@@ -493,7 +493,7 @@
       "ruleId": "PERF-01",
       "category": "performance",
       "severity": "poor",
-      "text": "TCP throughput is below the negotiated link speed.",
+      "text": "TCP throughput does not meet the passing policy for this negotiated link speed.",
       "evidence": [
         "pc1-\u003epc2: 250M TCP = 25% of the 1G link",
         "pc2-\u003epc1: 248M TCP = 25% of the 1G link"
