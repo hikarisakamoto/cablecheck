@@ -36,6 +36,10 @@ type SideFacts struct {
 	JabberSizeErrors uint64
 	// FifoOverrun is the delta of rx_fifo.
 	FifoOverrun uint64
+	// MissedErrors is the delta of rx_missed.
+	MissedErrors uint64
+	// CarrierPHYErrors is the delta of tx_carrier + phy_errors.
+	CarrierPHYErrors uint64
 	// DeltaOK is false on counter reset/wrap, a key missing from one
 	// capture, or capture failure.
 	DeltaOK bool
@@ -332,6 +336,8 @@ func sideFacts(before, after *model.CounterSnapshot, selfInflictedCarrier uint64
 		CarrierEvents:     carrierEvents,
 		JabberSizeErrors:  sum("jabber", "oversize", "undersize", "rx_length"),
 		FifoOverrun:       sum("rx_fifo"),
+		MissedErrors:      sum("rx_missed"),
+		CarrierPHYErrors:  sum("tx_carrier", "phy_errors"),
 		DeltaOK:           ok && available,
 		CountersAvailable: available,
 	}

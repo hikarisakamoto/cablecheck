@@ -23,7 +23,7 @@ type Rule struct {
 var dirNames = [2]string{"pc1->pc2", "pc2->pc1"}
 
 // Rules returns the full rule list in its fixed, deterministic evaluation
-// order: PHY-01..10, TR-01..09, PERF-01..04, HOST-01..03, LIM-01..05.
+// order: PHY-01..11, TR-01..09, PERF-01..04, HOST-01..04, LIM-01..05.
 func Rules() []Rule {
 	return []Rule{
 		{ID: "PHY-01", Category: model.CategoryPhysical, Evaluate: rulePHY01},
@@ -36,6 +36,7 @@ func Rules() []Rule {
 		{ID: "PHY-08", Category: model.CategoryPhysical, Evaluate: rulePHY08},
 		{ID: "PHY-09", Category: model.CategoryPhysical, Evaluate: rulePHY09},
 		{ID: "PHY-10", Category: model.CategoryPhysical, Evaluate: rulePHY10},
+		{ID: "PHY-11", Category: model.CategoryPhysical, Evaluate: rulePHY11},
 		{ID: "TR-01", Category: model.CategoryTransport, Evaluate: ruleTR01},
 		{ID: "TR-02", Category: model.CategoryTransport, Evaluate: ruleTR02},
 		{ID: "TR-03", Category: model.CategoryTransport, Evaluate: ruleTR03},
@@ -52,6 +53,7 @@ func Rules() []Rule {
 		{ID: "HOST-01", Category: model.CategoryHost, Evaluate: ruleHOST01},
 		{ID: "HOST-02", Category: model.CategoryHost, Evaluate: ruleHOST02},
 		{ID: "HOST-03", Category: model.CategoryHost, Evaluate: ruleHOST03},
+		{ID: "HOST-04", Category: model.CategoryHost, Evaluate: ruleHOST04},
 		{ID: "LIM-01", Category: model.CategoryLimitation, Evaluate: ruleLIM01},
 		{ID: "LIM-02", Category: model.CategoryLimitation, Evaluate: ruleLIM02},
 		{ID: "LIM-03", Category: model.CategoryLimitation, Evaluate: ruleLIM03},
@@ -69,6 +71,20 @@ func crcTotal(f *Facts) uint64 {
 	}
 	if f.PC2.DeltaOK {
 		total += f.PC2.CRCClassErrors
+	}
+	return total
+}
+
+// carrierPHYTotal sums transmit-carrier and PHY error deltas from reliable
+// sides. Unlike carrier events, these are per-packet/error observations rather
+// than two views of one link transition, so both sides contribute.
+func carrierPHYTotal(f *Facts) uint64 {
+	var total uint64
+	if f.PC1.DeltaOK {
+		total += f.PC1.CarrierPHYErrors
+	}
+	if f.PC2.DeltaOK {
+		total += f.PC2.CarrierPHYErrors
 	}
 	return total
 }
@@ -107,6 +123,19 @@ func crcEvidence(f *Facts) []string {
 	}
 	if f.PC2.DeltaOK && f.PC2.CRCClassErrors > 0 {
 		ev = append(ev, fmt.Sprintf("pc2: CRC-class error counters +%d during the test", f.PC2.CRCClassErrors))
+	}
+	return ev
+}
+
+// carrierPHYEvidence lists per-side transmit-carrier/PHY deltas whose capture
+// pairs are reliable.
+func carrierPHYEvidence(f *Facts) []string {
+	var ev []string
+	if f.PC1.DeltaOK && f.PC1.CarrierPHYErrors > 0 {
+		ev = append(ev, fmt.Sprintf("pc1: transmit-carrier/PHY error counters +%d during the test", f.PC1.CarrierPHYErrors))
+	}
+	if f.PC2.DeltaOK && f.PC2.CarrierPHYErrors > 0 {
+		ev = append(ev, fmt.Sprintf("pc2: transmit-carrier/PHY error counters +%d during the test", f.PC2.CarrierPHYErrors))
 	}
 	return ev
 }
@@ -316,6 +345,27 @@ func rulePHY10(f *Facts, thresholds Thresholds) *model.Finding {
 		Severity: model.SevFailed,
 		Text:     fmt.Sprintf("UDP loss above %g%% correlates with physical error counter movement.", thresholds.UDPLossPoorAbove),
 		Evidence: append(ev, crcEvidence(f)...),
+	}
+}
+
+func rulePHY11(f *Facts, thresholds Thresholds) *model.Finding {
+	total := carrierPHYTotal(f)
+	if total == 0 {
+		return nil
+	}
+	sev := model.SevWarning
+	switch {
+	case total > thresholds.CarrierPHYFailedAbove:
+		sev = model.SevFailed
+	case total > thresholds.CarrierPHYPoorAbove:
+		sev = model.SevPoor
+	}
+	return &model.Finding{
+		RuleID:   "PHY-11",
+		Category: model.CategoryPhysical,
+		Severity: sev,
+		Text:     fmt.Sprintf("Transmit-carrier/PHY error counters incremented by %d during the test.", total),
+		Evidence: carrierPHYEvidence(f),
 	}
 }
 
@@ -665,6 +715,33 @@ func ruleHOST03(f *Facts, thresholds Thresholds) *model.Finding {
 		Severity: model.SevMarker,
 		Text:     "A USB network adapter was used and throughput fell short — USB adapters are a known bottleneck.",
 		Evidence: []string{"tested interface is USB-attached"},
+	}
+}
+
+func ruleHOST04(f *Facts, _ Thresholds) *model.Finding {
+	var ev []string
+	appendSide := func(name string, side SideFacts) {
+		if !side.DeltaOK {
+			return
+		}
+		if side.FifoOverrun > 0 {
+			ev = append(ev, fmt.Sprintf("%s: rx_fifo +%d during the test", name, side.FifoOverrun))
+		}
+		if side.MissedErrors > 0 {
+			ev = append(ev, fmt.Sprintf("%s: rx_missed +%d during the test", name, side.MissedErrors))
+		}
+	}
+	appendSide("pc1", f.PC1)
+	appendSide("pc2", f.PC2)
+	if len(ev) == 0 {
+		return nil
+	}
+	return &model.Finding{
+		RuleID:   "HOST-04",
+		Category: model.CategoryHost,
+		Severity: model.SevMarker,
+		Text:     "NIC receive-ring counters moved — performance results may be limited by how quickly the host drained packets.",
+		Evidence: ev,
 	}
 }
 

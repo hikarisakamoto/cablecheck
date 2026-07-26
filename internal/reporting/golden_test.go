@@ -348,6 +348,45 @@ func TestMarkdownGoldenVerdicts(t *testing.T) {
 			},
 		},
 		{
+			name:      "nic-counters-warning",
+			golden:    "report-nic-counters-warning.md",
+			wantClass: model.HealthWarning,
+			wantScore: 79,
+			wantRules: []string{"PHY-11", "HOST-04"},
+			mutate: func(r *model.Report) {
+				before, after := r.InitialCounters.PC1, r.FinalCounters.PC1
+				before.Standard["tx_carrier"] = 10
+				after.Standard["tx_carrier"] = 11
+				before.Standard["phy_errors"] = 20
+				after.Standard["phy_errors"] = 22
+				after.Standard["rx_fifo"] += 2
+				after.Standard["rx_missed"] += 3
+
+				before.Driver["tx_carrier_errors"] = 10
+				after.Driver["tx_carrier_errors"] = 11
+				before.Driver["phy_errors"] = 20
+				after.Driver["phy_errors"] = 22
+				before.IPStats.TX.CarrierErrors = 10
+				after.IPStats.TX.CarrierErrors = 11
+				after.IPStats.RX.FifoErrors += 2
+				after.IPStats.RX.MissedErrors += 3
+
+				r.CounterDeltas.PC1["tx_carrier"] = model.CounterDelta{Delta: 1, OK: true}
+				r.CounterDeltas.PC1["phy_errors"] = model.CounterDelta{Delta: 2, OK: true}
+				r.CounterDeltas.PC1["rx_fifo"] = model.CounterDelta{Delta: 2, OK: true}
+				r.CounterDeltas.PC1["rx_missed"] = model.CounterDelta{Delta: 3, OK: true}
+			},
+			checkFacts: func(t *testing.T, facts *evaluate.Facts) {
+				t.Helper()
+				if facts.PC1.CarrierPHYErrors != 3 {
+					t.Errorf("PC1.CarrierPHYErrors = %d, want 3", facts.PC1.CarrierPHYErrors)
+				}
+				if facts.PC1.FifoOverrun != 2 || facts.PC1.MissedErrors != 3 {
+					t.Errorf("PC1 host-drain facts = fifo:%d missed:%d, want fifo:2 missed:3", facts.PC1.FifoOverrun, facts.PC1.MissedErrors)
+				}
+			},
+		},
+		{
 			name:      "disconnected-failed",
 			golden:    "report-disconnected-failed.md",
 			wantClass: model.HealthFailed,

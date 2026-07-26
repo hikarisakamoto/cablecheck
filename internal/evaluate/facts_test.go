@@ -106,12 +106,14 @@ func TestCounterDelta(t *testing.T) {
 		before := snap(map[string]uint64{
 			"rx_crc": 10, "rx_frame": 0, "rx_align": 1, "rx_symbol": 0,
 			"jabber": 0, "oversize": 2, "undersize": 0, "rx_length": 0,
-			"rx_fifo": 3, "link_resets": 2,
+			"rx_fifo": 3, "rx_missed": 5, "tx_carrier": 7, "phy_errors": 11,
+			"link_resets": 2,
 		})
 		after := snap(map[string]uint64{
 			"rx_crc": 15, "rx_frame": 3, "rx_align": 1, "rx_symbol": 0,
 			"jabber": 1, "oversize": 2, "undersize": 0, "rx_length": 4,
-			"rx_fifo": 5, "link_resets": 4,
+			"rx_fifo": 5, "rx_missed": 8, "tx_carrier": 9, "phy_errors": 16,
+			"link_resets": 4,
 		})
 		r := &model.Report{
 			InitialCounters: model.PeerCounters{PC1: &before, PC2: &before},
@@ -132,6 +134,12 @@ func TestCounterDelta(t *testing.T) {
 		}
 		if f.PC1.FifoOverrun != 2 {
 			t.Errorf("PC1.FifoOverrun = %d, want 2", f.PC1.FifoOverrun)
+		}
+		if f.PC1.MissedErrors != 3 {
+			t.Errorf("PC1.MissedErrors = %d, want 3", f.PC1.MissedErrors)
+		}
+		if f.PC1.CarrierPHYErrors != 7 { // (9-7) + (16-11)
+			t.Errorf("PC1.CarrierPHYErrors = %d, want 7", f.PC1.CarrierPHYErrors)
 		}
 		if f.PC1.CarrierEvents != 2 {
 			t.Errorf("PC1.CarrierEvents = %d, want 2", f.PC1.CarrierEvents)

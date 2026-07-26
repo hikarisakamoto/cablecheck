@@ -81,6 +81,44 @@ func TestClassifyFoldOrdering(t *testing.T) {
 		}
 	})
 
+	t.Run("receive ring pressure makes performance poor inconclusive", func(t *testing.T) {
+		f := cleanFacts()
+		f.Dir[0].TCPBitrate = 300_000_000
+		f.Dir[1].TCPBitrate = 300_000_000
+		f.PC1.FifoOverrun = 2 // HOST-04 marker
+		res := Evaluate(f)
+		if res.Class != model.HealthInconclusive {
+			t.Errorf("class = %v, want INCONCLUSIVE (receive-ring pressure is host-limited)", res.Class)
+		}
+		if res.Score != nil {
+			t.Errorf("score = %v, want nil for INCONCLUSIVE", *res.Score)
+		}
+	})
+
+	t.Run("receive ring marker alone does not degrade a clean run", func(t *testing.T) {
+		f := cleanFacts()
+		f.PC1.MissedErrors = 1
+		res := Evaluate(f)
+		if res.Class != model.HealthExcellent {
+			t.Errorf("class = %v, want EXCELLENT for a marker without a performance symptom", res.Class)
+		}
+		if !hasFinding(res.Findings, "HOST-04") {
+			t.Errorf("findings = %v, want HOST-04", findingIDs(res))
+		}
+	})
+
+	t.Run("physical warning prevents host softening", func(t *testing.T) {
+		f := cleanFacts()
+		f.Dir[0].TCPBitrate = 300_000_000
+		f.Dir[1].TCPBitrate = 300_000_000
+		f.PC1.FifoOverrun = 1
+		f.PC1.CarrierPHYErrors = 1
+		res := Evaluate(f)
+		if res.Class != model.HealthPoor {
+			t.Errorf("class = %v, want POOR when physical warning corroborates poor performance", res.Class)
+		}
+	})
+
 	t.Run("performance poor without host marker stays poor", func(t *testing.T) {
 		f := cleanFacts()
 		f.Dir[0].TCPBitrate = 300_000_000
@@ -197,8 +235,8 @@ func TestEvaluateDeterministic(t *testing.T) {
 	if got := findingIDs(first); !reflect.DeepEqual(got, wantIDs) {
 		t.Errorf("finding order = %v, want %v (fixed Rules() order)", got, wantIDs)
 	}
-	if first.RulesVersion != "1.2.0" {
-		t.Errorf("RulesVersion = %q, want 1.2.0", first.RulesVersion)
+	if first.RulesVersion != "1.3.0" {
+		t.Errorf("RulesVersion = %q, want 1.3.0", first.RulesVersion)
 	}
 	if first.Score == nil {
 		t.Fatalf("score = nil, want a value for class %v", first.Class)

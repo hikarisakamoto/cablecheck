@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.2.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.3.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -19,8 +19,10 @@ operators; they do not define a second implementation.
 
 Changing a default value or its inclusive/exclusive comparison requires an
 explicit `RulesVersion` decision, boundary-test review, and review of the
-committed example reports. Version `1.2.0` introduces speed-scaled TCP
-throughput bands and grades severe negotiated-speed reductions as poor.
+committed example reports. Version `1.2.0` introduced speed-scaled TCP
+throughput bands and graded severe negotiated-speed reductions as poor.
+Version `1.3.0` evaluates the already-collected transmit-carrier, PHY,
+receive-FIFO, and receive-missed counters.
 
 ### Reference conditions and status labels
 
@@ -56,6 +58,7 @@ but do not establish CableCheck's health boundary.
 | CRC + ping corroboration | CRC movement `> 10` fails when any standard-ping direction is also `> 1%` loss. | Independent counter and packet-loss signals increase confidence that corruption is observable in traffic. | Conservative policy |
 | Carrier events | Failed at `>= 3` events on the worse reliable side; 1–2 is poor. | The worse side avoids double-counting one physical bounce observed by both peers; repeated bounces are decisive. | Conservative policy |
 | Frame-size errors | Poor when reliable aggregate movement is `> 10`; 1–10 warns. | Jabber, oversize, undersize, and length movement is abnormal, with a small-count warning band. | Conservative policy |
+| Transmit-carrier/PHY errors | Poor when reliable aggregate `tx_carrier` and `phy_errors` movement is `> 10`; failed when it is `> 1000`; 1–10 warns. | These counters are near-direct physical-layer evidence. They use an independent policy with the same conservative count bands as CRC-class errors, without CRC-specific ping-loss corroboration. | Conservative policy |
 | Negotiated-speed reduction | Poor when negotiated speed is `<= 50%` of expected speed; a smaller reduction warns. | A large capability loss, such as 100 Mbit/s on a 1 Gbit/s-capable pair, is strong physical evidence even when traffic fills the reduced link. | Conservative policy |
 | Standard-ping loss | Poor when loss is `> 0.1%`; any positive loss up to that boundary warns. | A direct cable should be lossless, while the first nonzero band avoids overstating a very small sample count. | Conservative policy |
 | RTT spike count | Warning when a direction has `> 5` parser-identified spikes. | Requires repeated outliers rather than one event. The parser identifies a spike above `max(5 × median, median + 10 ms)`; this threshold counts those events. | Conservative policy |
@@ -100,6 +103,9 @@ but do not establish CableCheck's health boundary.
 | `PHY-09` | physical | Reliable frame-size-error delta (jabber/oversize/undersize/length class) is 1–10. | warning |
 | `PHY-09` | physical | Frame-size-error delta is greater than 10. | poor |
 | `PHY-10` | physical | CRC-class delta is nonzero and a qualifying UDP direction loses greater than 2% at target rate. | failed |
+| `PHY-11` | physical | Reliable aggregate `tx_carrier` and `phy_errors` delta is 1–10. | warning |
+| `PHY-11` | physical | The aggregate delta is 11–1000. | poor |
+| `PHY-11` | physical | The aggregate delta is greater than 1000. | failed |
 
 `PHY-08` emits the worst status found across the tested pairs. A clean cable
 test emits no finding. Carrier events caused by the cable test itself are
@@ -169,6 +175,7 @@ Host findings are markers, not health-severity ladder entries.
 | `HOST-01` | host | Maximum iperf3 CPU utilization is greater than 90%. | marker | Marks performance as potentially host-limited. |
 | `HOST-02` | host | The tested interface is virtual. | marker | Forces an otherwise non-dominant result to `INCONCLUSIVE`; the run says nothing about a physical cable. |
 | `HOST-03` | host | A USB-attached adapter is used and `PERF-01` emits any finding, including info. | marker | Marks the shortfall as potentially adapter/host-limited. |
+| `HOST-04` | host | A reliable `rx_fifo` or `rx_missed` delta is nonzero on either peer. | marker | Marks performance as potentially limited by the host draining the NIC receive ring. The two counters remain separate evidence because drivers may count overlapping drops. |
 
 Virtual interfaces are rejected during normal preflight. `HOST-02` only matters
 when `--allow-virtual-interface` explicitly permits one. Even then, a physical
@@ -190,14 +197,14 @@ poor, or failed evidence. A real physical `POOR`/`FAILED` still wins over
 
 ## Classification fold
 
-Rules are evaluated in ID order: `PHY-01..10`, `TR-01..09`, `PERF-01..04`,
-`HOST-01..03`, then `LIM-01..05`. The findings are folded as follows:
+Rules are evaluated in ID order: `PHY-01..11`, `TR-01..09`, `PERF-01..04`,
+`HOST-01..04`, then `LIM-01..05`. The findings are folded as follows:
 
 1. Any physical `failed` finding yields `FAILED`.
 2. Otherwise, any physical `poor` finding yields `POOR`.
 3. Otherwise, a `poor`-or-worse transport or performance finding normally
    yields `POOR`. It yields `INCONCLUSIVE` instead only when:
-   - `HOST-01` or `HOST-03` is present;
+   - `HOST-01`, `HOST-03`, or `HOST-04` is present;
    - physical severity is below warning; and
    - every poor-or-worse finding is marked host-sensitive.
 4. Otherwise, any transport/performance warning or physical warning yields
@@ -239,10 +246,12 @@ classification's band. `INCONCLUSIVE` has a null score.
 | TCP directional asymmetry greater than 30% | 5 |
 | UDP jitter greater than 5 ms in either direction | 5 once |
 
-The TCP-ratio deduction is omitted when `HOST-01` or `HOST-03` marks the run as
-host-limited. UDP-loss deductions require CPU at most 90%, an available result,
-and a qualifying target reached. A `PERF-01` info result has no direct score
-deduction, but its `GOOD` classification still clamps the score to that band.
+The TCP-ratio deduction is omitted when `HOST-01`, `HOST-03`, or `HOST-04`
+marks the run as host-limited. UDP-loss deductions require CPU at most 90%, an
+available result, and a qualifying target reached. A `PERF-01` info result has
+no direct score deduction, but its `GOOD` classification still clamps the score
+to that band. `PHY-11` has no separate arithmetic deduction; its severity sets
+the classification and the score is clamped into that class's band.
 
 | Classification | Score band |
 |---|---:|

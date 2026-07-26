@@ -127,6 +127,46 @@ func TestRuleSeverityBoundaries(t *testing.T) {
 			want: int(model.SevFailed),
 		},
 		{
+			name:   "carrier PHY poor boundary stays warning",
+			ruleID: "PHY-11",
+			facts: func() *Facts {
+				f := cleanFacts()
+				f.PC1.CarrierPHYErrors = thresholds.CarrierPHYPoorAbove
+				return f
+			}(),
+			want: int(model.SevWarning),
+		},
+		{
+			name:   "above carrier PHY poor boundary is poor",
+			ruleID: "PHY-11",
+			facts: func() *Facts {
+				f := cleanFacts()
+				f.PC1.CarrierPHYErrors = thresholds.CarrierPHYPoorAbove + 1
+				return f
+			}(),
+			want: int(model.SevPoor),
+		},
+		{
+			name:   "carrier PHY failed boundary stays poor",
+			ruleID: "PHY-11",
+			facts: func() *Facts {
+				f := cleanFacts()
+				f.PC1.CarrierPHYErrors = thresholds.CarrierPHYFailedAbove
+				return f
+			}(),
+			want: int(model.SevPoor),
+		},
+		{
+			name:   "above carrier PHY failed boundary fails",
+			ruleID: "PHY-11",
+			facts: func() *Facts {
+				f := cleanFacts()
+				f.PC1.CarrierPHYErrors = thresholds.CarrierPHYFailedAbove + 1
+				return f
+			}(),
+			want: int(model.SevFailed),
+		},
+		{
 			name:   "spike boundary passes",
 			ruleID: "TR-05",
 			facts: func() *Facts {
@@ -323,6 +363,7 @@ func TestRuleSeverityMonotonic(t *testing.T) {
 	crcCeiling := thresholds.CRCFailedAbove + 2
 	carrierCeiling := thresholds.CarrierFailedAt + 2
 	frameCeiling := thresholds.FrameSizePoorAbove + 2
+	carrierPHYCeiling := thresholds.CarrierPHYFailedAbove + 2
 	throughputSetter := func(speed model.Bitrate) func(*Facts, int, uint16) {
 		return func(f *Facts, direction int, value uint16) {
 			f.NegotiatedSpeed = speed
@@ -384,6 +425,17 @@ func TestRuleSeverityMonotonic(t *testing.T) {
 			prepare: func(f *Facts) { f.PC1.CRCClassErrors = 1 },
 			set: func(f *Facts, direction int, value uint16) {
 				f.Dir[direction].UDPLossPct = float64(value) / 1_000
+			},
+		},
+		{
+			name: "carrier PHY errors", ruleID: "PHY-11", higherIsWorse: true, withPeer: true,
+			set: func(f *Facts, side int, value uint16) {
+				n := countAcrossBands(value, carrierPHYCeiling)
+				if side == 0 {
+					f.PC1.CarrierPHYErrors = n
+				} else {
+					f.PC2.CarrierPHYErrors = n
+				}
 			},
 		},
 		{
