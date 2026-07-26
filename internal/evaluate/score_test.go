@@ -1,7 +1,11 @@
 package evaluate
 
 import (
+	"math"
+	"math/rand"
 	"testing"
+	"testing/quick"
+	"time"
 
 	"cablecheck/internal/model"
 )
@@ -120,4 +124,234 @@ func TestScoreClampedToClassBand(t *testing.T) {
 			}
 		}
 	})
+}
+
+type classScoreBand struct {
+	class model.HealthClass
+	band  ScoreBand
+}
+
+// classScoreBands deliberately names each configured field rather than using
+// scoreBand. The property tests must be able to catch a wrong scoreBand switch
+// arm instead of reproducing it in their expected result.
+func classScoreBands(thresholds Thresholds) []classScoreBand {
+	return []classScoreBand{
+		{class: model.HealthFailed, band: thresholds.FailedScoreBand},
+		{class: model.HealthPoor, band: thresholds.PoorScoreBand},
+		{class: model.HealthWarning, band: thresholds.WarningScoreBand},
+		{class: model.HealthGood, band: thresholds.GoodScoreBand},
+		{class: model.HealthExcellent, band: thresholds.ExcellentScoreBand},
+	}
+}
+
+func TestScoreForAlwaysInRequestedBand(t *testing.T) {
+	thresholds := Default()
+	bands := classScoreBands(thresholds)
+	property := func(seed uint64) bool {
+		facts := randomizedFacts(seed)
+		findings := evaluate(facts, thresholds).Findings
+		for _, entry := range bands {
+			score := scoreFor(facts, findings, entry.class, thresholds)
+			if score == nil || *score < entry.band.Min || *score > entry.band.Max {
+				return false
+			}
+		}
+		return scoreFor(facts, findings, model.HealthInconclusive, thresholds) == nil
+	}
+	config := &quick.Config{
+		MaxCount: 5_000,
+		Rand:     rand.New(rand.NewSource(11_101)),
+	}
+	if err := quick.Check(property, config); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEvaluateScoreAgreesWithClass(t *testing.T) {
+	thresholds := Default()
+	bands := classScoreBands(thresholds)
+	property := func(seed uint64) bool {
+		result := evaluate(randomizedFacts(seed), thresholds)
+		if result.Class == model.HealthInconclusive {
+			return result.Score == nil
+		}
+		if result.Score == nil {
+			return false
+		}
+
+		matches := 0
+		matchedClass := model.HealthClass("")
+		for _, entry := range bands {
+			if *result.Score >= entry.band.Min && *result.Score <= entry.band.Max {
+				matches++
+				matchedClass = entry.class
+			}
+		}
+		return matches == 1 && matchedClass == result.Class
+	}
+	config := &quick.Config{
+		MaxCount: 5_000,
+		Rand:     rand.New(rand.NewSource(11_102)),
+	}
+	if err := quick.Check(property, config); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// randomizedFacts expands a quick-check seed into a bounded, coherent Facts
+// value. Raw recursive generation would create impossible states such as
+// unavailable tests with measurements, unreliable counters carrying deltas,
+// negative counts, and non-finite percentages.
+func randomizedFacts(seed uint64) *Facts {
+	rng := rand.New(rand.NewSource(int64(seed)))
+	thresholds := Default()
+	f := cleanFacts()
+
+	// One draw in five is a clean or near-clean gigabit link. The defect
+	// injection below compounds many independent failure probabilities and in
+	// practice never lands on GOOD or EXCELLENT, so without this branch
+	// TestEvaluateScoreAgreesWithClass would never check the score/class
+	// agreement invariant for the two healthiest classes.
+	if rng.Intn(5) == 0 {
+		switch rng.Intn(3) {
+		case 0:
+			// pristine run: cleanFacts already scores EXCELLENT.
+		case 1:
+			// info-only throughput deviation (ratio 0.8) demotes to GOOD.
+			ratio := model.Bitrate(float64(f.NegotiatedSpeed) * 0.8)
+			f.Dir[0].TCPBitrate = ratio
+			f.Dir[1].TCPBitrate = ratio
+		case 2:
+			// a single warning-level blemish yields WARNING.
+			f.Dir[0].UDPJitterMs = math.Nextafter(thresholds.UDPJitterWarningAbove, math.Inf(1))
+		}
+		return f
+	}
+
+	speeds := []struct {
+		negotiated model.Bitrate
+		expected   model.Bitrate
+	}{
+		{0, 0},
+		{100_000_000, 100_000_000},
+		{100_000_000, 1_000_000_000},
+		{500_000_000, 1_000_000_000},
+		{1_000_000_000, 1_000_000_000},
+		{2_500_000_000, 2_500_000_000},
+	}
+	speed := speeds[rng.Intn(len(speeds))]
+	f.NegotiatedSpeed = speed.negotiated
+	f.ExpectedSpeed = speed.expected
+	f.LinkUpAtEnd = rng.Intn(12) != 0
+	f.HalfDuplex = rng.Intn(12) == 0
+	if rng.Intn(8) == 0 {
+		f.Renegotiations = 1 + rng.Intn(4)
+	}
+
+	for _, side := range []*SideFacts{&f.PC1, &f.PC2} {
+		side.CountersAvailable = rng.Intn(5) != 0
+		side.DeltaOK = side.CountersAvailable && rng.Intn(6) != 0
+		side.CRCClassErrors = 0
+		side.CarrierEvents = 0
+		side.JabberSizeErrors = 0
+		if side.DeltaOK {
+			if rng.Intn(4) == 0 {
+				side.CRCClassErrors = []uint64{1, thresholds.CRCPoorAbove, thresholds.CRCPoorAbove + 1, thresholds.CRCFailedAbove + 1}[rng.Intn(4)]
+			}
+			if rng.Intn(6) == 0 {
+				side.CarrierEvents = uint64(1 + rng.Intn(int(thresholds.CarrierFailedAt)+2))
+			}
+			if rng.Intn(5) == 0 {
+				side.JabberSizeErrors = uint64(1 + rng.Intn(int(thresholds.FrameSizePoorAbove)+3))
+			}
+		}
+	}
+
+	pingLosses := []float64{0, 0.05, thresholds.PingLossPoorAbove, math.Nextafter(thresholds.PingLossPoorAbove, math.Inf(1)), 2}
+	for i := range f.Dir {
+		d := &f.Dir[i]
+		d.PingLossPct = pingLosses[rng.Intn(len(pingLosses))]
+		if rng.Intn(5) == 0 {
+			d.PingDuplicates = rng.Intn(4)
+			d.PingSpikes = rng.Intn(thresholds.PingSpikesWarningAbove + 4)
+			d.PingMaxGap = timeFromMillis(rng.Intn(1_501))
+		}
+		d.FullSizeAvailable = rng.Intn(5) != 0
+		if d.FullSizeAvailable && rng.Intn(5) == 0 {
+			d.FullSizeLossPct = []float64{0.05, 1, 5}[rng.Intn(3)]
+			d.FragErrors = rng.Intn(3)
+		}
+
+		d.TCPAvailable = rng.Intn(5) != 0
+		d.TCPBitrate = 0
+		d.TCPRetransRate = 0
+		d.TCPCoV = 0
+		d.TCPCollapses = 0
+		if d.TCPAvailable {
+			base := f.NegotiatedSpeed
+			if base == 0 {
+				base = 1_000_000_000
+			}
+			ratios := []float64{0.2, 0.4, 0.7, 0.9, 0.98}
+			d.TCPBitrate = model.Bitrate(float64(base) * ratios[rng.Intn(len(ratios))])
+			d.TCPRetransRate = []float64{0, thresholds.TCPRetransWarningAt, thresholds.TCPRetransPoorAbove, 0.03}[rng.Intn(4)]
+			d.TCPCoV = []float64{0, thresholds.TCPCoVWarningAt, thresholds.TCPCoVPoorAbove, 0.5}[rng.Intn(4)]
+			d.TCPCollapses = rng.Intn(thresholds.TCPCollapsePoorAt + 3)
+		}
+
+		d.UDPAvailable = rng.Intn(5) != 0
+		d.UDPTargetReached = d.UDPAvailable && rng.Intn(5) != 0
+		d.UDPLossPct = 0
+		d.UDPJitterMs = 0
+		d.UDPOutOfOrderPct = 0
+		if d.UDPTargetReached {
+			d.UDPLossPct = []float64{0, thresholds.UDPLossWarningAt, thresholds.UDPLossPoorAbove, 5}[rng.Intn(4)]
+			d.UDPJitterMs = []float64{0, thresholds.UDPJitterWarningAbove, 8}[rng.Intn(3)]
+			d.UDPOutOfOrderPct = []float64{0, thresholds.UDPReorderWarningAbove, 1}[rng.Intn(3)]
+		}
+	}
+
+	f.MaxCPUPct = []float64{0, thresholds.CPUHostLimitedAbove, math.Nextafter(thresholds.CPUHostLimitedAbove, math.Inf(1)), 100}[rng.Intn(4)]
+	f.USBAdapter = rng.Intn(5) == 0
+	f.VirtualInterface = rng.Intn(20) == 0
+	f.Partial = rng.Intn(12) == 0
+	f.UDPRateAssumed = rng.Intn(8) == 0
+	if rng.Intn(10) == 0 {
+		f.Unavailable = []string{"udp"}
+		for i := range f.Dir {
+			f.Dir[i].UDPAvailable = false
+			f.Dir[i].UDPTargetReached = false
+			f.Dir[i].UDPLossPct = 0
+			f.Dir[i].UDPJitterMs = 0
+			f.Dir[i].UDPOutOfOrderPct = 0
+		}
+	}
+	f.ThroughputUnreachable = rng.Intn(20) == 0
+	if f.ThroughputUnreachable {
+		f.MaxCPUPct = 0
+		f.Unavailable = []string{"tcp", "udp"}
+		for i := range f.Dir {
+			f.Dir[i].TCPAvailable = false
+			f.Dir[i].TCPBitrate = 0
+			f.Dir[i].TCPRetransRate = 0
+			f.Dir[i].TCPCoV = 0
+			f.Dir[i].TCPCollapses = 0
+			f.Dir[i].UDPAvailable = false
+			f.Dir[i].UDPTargetReached = false
+			f.Dir[i].UDPLossPct = 0
+			f.Dir[i].UDPJitterMs = 0
+			f.Dir[i].UDPOutOfOrderPct = 0
+		}
+	}
+
+	f.CableTestRan = rng.Intn(8) == 0
+	if f.CableTestRan {
+		statuses := []model.PairStatus{model.PairOK, model.PairUnspecified, model.PairImpedance, model.PairOpen}
+		f.CableTestPairs = []model.CablePairResult{{Pair: "A", Status: statuses[rng.Intn(len(statuses))]}}
+	}
+	return f
+}
+
+func timeFromMillis(milliseconds int) time.Duration {
+	return time.Duration(milliseconds) * time.Millisecond
 }
