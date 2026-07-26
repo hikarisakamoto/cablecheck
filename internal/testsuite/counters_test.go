@@ -254,4 +254,19 @@ func TestCounterNormalization(t *testing.T) {
 			t.Errorf("rx_length present from a zero ip counter; rtnetlink zeros are ambiguous and must stay absent")
 		}
 	})
+
+	t.Run("PHYErrorAliases", func(t *testing.T) {
+		for name, stats := range map[string]map[string]uint64{
+			"canonical":    {"phy_errors": 7},
+			"driver alias": {"rx_phy_errors": 9},
+		} {
+			t.Run(name, func(t *testing.T) {
+				std := NormalizeCounters(stats, zeroIP, nil)
+				want := stats["phy_errors"] + stats["rx_phy_errors"]
+				if got, ok := std["phy_errors"]; !ok || got != want {
+					t.Errorf("phy_errors = %d (present=%v), want %d", got, ok, want)
+				}
+			})
+		}
+	})
 }

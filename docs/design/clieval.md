@@ -277,7 +277,9 @@ type SideFacts struct {
     CRCClassErrors   uint64 // Δ(rx_crc + frame + alignment + symbol), wrap-safe; only counted when DeltaOK
     CarrierEvents    uint64 // Δcarrier_changes / link resets during session
     JabberSizeErrors uint64 // Δ(jabber + oversize + undersize + length)
-    FifoOverrun      uint64
+    FifoOverrun      uint64 // Δrx_fifo
+    MissedErrors     uint64 // Δrx_missed
+    CarrierPHYErrors uint64 // Δ(tx_carrier + phy_errors)
     DeltaOK          bool   // false on counter reset/wrap or capture failure
     CountersAvailable bool
 }
@@ -354,7 +356,7 @@ type Result struct {
     Score           *int // nil for INCONCLUSIVE
     Findings        []Finding
     Recommendations []string
-    RulesVersion    string // "1.2.0"
+    RulesVersion    string // "1.3.0"
 }
 func Evaluate(f *Facts) Result
 ```
@@ -375,6 +377,7 @@ Physical (dominant):
 | PHY-08 cable-test | any pair open/short (→FAILED, with fault distance); impedance mismatch (→POOR); unspecified fault (→WARNING) | per pair |
 | PHY-09 frame-size-errors | JabberSize Δ: 1–10 → WARNING; >10 → POOR | WARNING/POOR |
 | PHY-10 loss+errors correlation | any direction UDP loss > 2% (target reached) **and** CRC-class Δ > 0 | FAILED |
+| PHY-11 carrier/PHY errors | reliable total `tx_carrier` + `phy_errors` Δ: 1–10 → WARNING; 11–1000 → POOR; >1000 → FAILED | WARNING/POOR/FAILED |
 
 Transport:
 
@@ -406,6 +409,7 @@ Host (markers, SevMarker/SevInfo — never directly degrade class):
 | HOST-01 cpu | MaxCPUPct > 90 during any throughput test | sets hostLimited |
 | HOST-02 virtual | VirtualInterface | forces final class INCONCLUSIVE |
 | HOST-03 usb | USBAdapter **and** PERF-01 fired | sets hostLimited (weaker corroboration) |
+| HOST-04 receive-ring pressure | reliable `rx_fifo` or `rx_missed` Δ > 0 | sets hostLimited; counters remain separate evidence because they may overlap |
 
 Limitation (markers):
 
@@ -421,7 +425,7 @@ Limitation (markers):
 ```go
 func classify(findings []Finding, f *Facts) model.HealthClass {
     worstPhys  := worst(findings, CatPhysical)
-    hostLimited := hasMarker(findings, "HOST-01") || hasMarker(findings, "HOST-03")
+    hostLimited := hasHostLimit(findings) // HOST-01, HOST-03, or HOST-04
     if worstPhys == SevFailed { return model.ClassFailed }
     if worstPhys == SevPoor   { return model.ClassPoor }
     worstTP := worst(findings, CatTransport, CatPerformance)
@@ -476,13 +480,13 @@ Bands (clamp after deductions): FAILED ≤25, POOR 26–50, WARNING 51–79, GOO
 
 `var recommendations = map[string]string{...}` keyed by RuleID. The generator walks findings in order, appends the mapped strings, and de-dupes while preserving order. It always appends the isolation-test line when class ∈ {POOR, FAILED, INCONCLUSIVE}. Entries (abridged):
 
-- `PHY-02/09/10`: "Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun."
+- `PHY-02/09/10/11`: "Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun."
 - `PHY-06/07`: "Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool <if>`)."
 - `PHY-03/04`: "Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops."
 - `PHY-05`: "Half duplex usually means autonegotiation failure: enable autoneg on both sides; replace the cable."
 - `PHY-08`: "Cable test reports open/short at ~{distance}m — replace or re-terminate the cable."
 - `TR-06/07`: "Retest with `--parallel-streams 1`; correlate with counter deltas and CPU before blaming the cable."
-- `HOST-01/03`: "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun."
+- `HOST-01/03/04`: "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun."
 - `HOST-02`: "Rerun on the physical interface — a virtual interface cannot exercise the cable."
 - `LIM-01`: "Install the missing tools (iperf3/ethtool) and rerun for a conclusive result."
 - isolation: "Isolation test: same machines with a different cable, then the same cable between different machines."

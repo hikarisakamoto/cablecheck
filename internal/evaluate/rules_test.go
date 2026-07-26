@@ -31,6 +31,12 @@ func sideWithCRC(n uint64) SideFacts {
 	return SideFacts{CRCClassErrors: n, DeltaOK: true, CountersAvailable: true}
 }
 
+// sideWithCarrierPHY builds reliable SideFacts with the given aggregate
+// transmit-carrier/PHY error delta.
+func sideWithCarrierPHY(n uint64) SideFacts {
+	return SideFacts{CarrierPHYErrors: n, DeltaOK: true, CountersAvailable: true}
+}
+
 func TestRulePHY02CRCBands(t *testing.T) {
 	rule := ruleByID(t, "PHY-02")
 	thresholds := Default()
@@ -76,6 +82,100 @@ func TestRulePHY02CRCBands(t *testing.T) {
 			}
 			if fd.RuleID != "PHY-02" || fd.Category != model.CategoryPhysical {
 				t.Errorf("PHY-02 identity = (%q, %q), want (PHY-02, physical)", fd.RuleID, fd.Category)
+			}
+		})
+	}
+}
+
+func TestRulePHY11CarrierPHYBands(t *testing.T) {
+	rule := ruleByID(t, "PHY-11")
+	thresholds := Default()
+	cases := []struct {
+		name     string
+		pc1, pc2 SideFacts
+		want     model.Severity
+		none     bool
+	}{
+		{name: "zero errors pass", pc1: sideWithCarrierPHY(0), pc2: sideWithCarrierPHY(0), none: true},
+		{name: "one error warns", pc1: sideWithCarrierPHY(1), want: model.SevWarning},
+		{name: "poor boundary warns", pc1: sideWithCarrierPHY(thresholds.CarrierPHYPoorAbove), want: model.SevWarning},
+		{name: "above poor boundary is poor", pc1: sideWithCarrierPHY(thresholds.CarrierPHYPoorAbove + 1), want: model.SevPoor},
+		{name: "sides sum before banding", pc1: sideWithCarrierPHY(6), pc2: sideWithCarrierPHY(6), want: model.SevPoor},
+		{name: "failed boundary stays poor", pc1: sideWithCarrierPHY(thresholds.CarrierPHYFailedAbove), want: model.SevPoor},
+		{name: "above failed boundary fails", pc1: sideWithCarrierPHY(thresholds.CarrierPHYFailedAbove + 1), want: model.SevFailed},
+		{
+			name: "unreliable deltas are not counted",
+			pc1:  SideFacts{CarrierPHYErrors: 5000, DeltaOK: false, CountersAvailable: true},
+			none: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fd := evaluateRule(rule, &Facts{PC1: tc.pc1, PC2: tc.pc2, LinkUpAtEnd: true})
+			if tc.none {
+				if fd != nil {
+					t.Errorf("PHY-11 = %+v, want no finding", fd)
+				}
+				return
+			}
+			if fd == nil {
+				t.Fatalf("PHY-11 = nil, want severity %v", tc.want)
+			}
+			if fd.Severity != tc.want {
+				t.Errorf("PHY-11 severity = %v, want %v", fd.Severity, tc.want)
+			}
+			if fd.RuleID != "PHY-11" || fd.Category != model.CategoryPhysical {
+				t.Errorf("PHY-11 identity = (%q, %q), want (PHY-11, physical)", fd.RuleID, fd.Category)
+			}
+			if len(fd.Evidence) == 0 {
+				t.Error("PHY-11 evidence is empty")
+			}
+		})
+	}
+}
+
+func TestRuleHOST04ReceiveRingMarker(t *testing.T) {
+	rule := ruleByID(t, "HOST-04")
+	cases := []struct {
+		name     string
+		pc1, pc2 SideFacts
+		wantText []string
+		none     bool
+	}{
+		{name: "zero movement passes", pc1: SideFacts{DeltaOK: true}, none: true},
+		{name: "fifo movement", pc1: SideFacts{FifoOverrun: 2, DeltaOK: true}, wantText: []string{"pc1", "rx_fifo +2"}},
+		{name: "missed movement", pc2: SideFacts{MissedErrors: 3, DeltaOK: true}, wantText: []string{"pc2", "rx_missed +3"}},
+		{
+			name:     "both counters retain separate evidence",
+			pc1:      SideFacts{FifoOverrun: 4, MissedErrors: 5, DeltaOK: true},
+			wantText: []string{"rx_fifo +4", "rx_missed +5"},
+		},
+		{
+			name: "unreliable movement is ignored",
+			pc1:  SideFacts{FifoOverrun: 9, MissedErrors: 9, DeltaOK: false},
+			none: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fd := evaluateRule(rule, &Facts{PC1: tc.pc1, PC2: tc.pc2})
+			if tc.none {
+				if fd != nil {
+					t.Errorf("HOST-04 = %+v, want no finding", fd)
+				}
+				return
+			}
+			if fd == nil {
+				t.Fatal("HOST-04 = nil, want marker")
+			}
+			if fd.RuleID != "HOST-04" || fd.Category != model.CategoryHost || fd.Severity != model.SevMarker {
+				t.Errorf("HOST-04 identity = (%q, %q, %v), want (HOST-04, host, marker)", fd.RuleID, fd.Category, fd.Severity)
+			}
+			joined := strings.Join(fd.Evidence, " ")
+			for _, want := range tc.wantText {
+				if !strings.Contains(joined, want) {
+					t.Errorf("HOST-04 evidence = %q, want substring %q", joined, want)
+				}
 			}
 		})
 	}

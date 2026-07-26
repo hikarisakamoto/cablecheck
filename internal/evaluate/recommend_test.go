@@ -20,7 +20,7 @@ func TestRecommendRuleMappings(t *testing.T) {
 		},
 		{
 			name:    "replace cable",
-			ruleIDs: []string{"PHY-02", "PHY-09", "PHY-10"},
+			ruleIDs: []string{"PHY-02", "PHY-09", "PHY-10", "PHY-11"},
 			want:    recCable,
 		},
 		{
@@ -45,7 +45,7 @@ func TestRecommendRuleMappings(t *testing.T) {
 		},
 		{
 			name:    "host limited",
-			ruleIDs: []string{"HOST-01", "HOST-03"},
+			ruleIDs: []string{"HOST-01", "HOST-03", "HOST-04"},
 			want:    "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.",
 		},
 		{

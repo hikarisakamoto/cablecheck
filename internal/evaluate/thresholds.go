@@ -34,6 +34,8 @@ type Thresholds struct {
 	CRCCorroboratingPingLossAbove float64
 	CarrierFailedAt               uint64
 	FrameSizePoorAbove            uint64
+	CarrierPHYPoorAbove           uint64
+	CarrierPHYFailedAbove         uint64
 	NegotiatedSpeedPoorAt         float64
 
 	PingLossPoorAbove      float64
@@ -75,6 +77,8 @@ func Default() Thresholds {
 		CRCCorroboratingPingLossAbove: 1,
 		CarrierFailedAt:               3,
 		FrameSizePoorAbove:            10,
+		CarrierPHYPoorAbove:           10,
+		CarrierPHYFailedAbove:         1000,
 		NegotiatedSpeedPoorAt:         0.5,
 
 		PingLossPoorAbove:      0.1,

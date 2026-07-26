@@ -9,13 +9,15 @@ import (
 	"cablecheck/internal/model"
 )
 
-func TestDefaultThresholdsForRulesVersion120(t *testing.T) {
+func TestDefaultThresholdsForRulesVersion130(t *testing.T) {
 	want := Thresholds{
 		CRCPoorAbove:                  10,
 		CRCFailedAbove:                1000,
 		CRCCorroboratingPingLossAbove: 1,
 		CarrierFailedAt:               3,
 		FrameSizePoorAbove:            10,
+		CarrierPHYPoorAbove:           10,
+		CarrierPHYFailedAbove:         1000,
 		NegotiatedSpeedPoorAt:         0.5,
 		PingLossPoorAbove:             0.1,
 		PingSpikesWarningAbove:        5,
@@ -43,7 +45,7 @@ func TestDefaultThresholdsForRulesVersion120(t *testing.T) {
 		GoodScoreBand:                 ScoreBand{Min: 80, Max: 94},
 		ExcellentScoreBand:            ScoreBand{Min: 95, Max: 100},
 	}
-	if RulesVersion != "1.2.0" {
+	if RulesVersion != "1.3.0" {
 		t.Fatalf("RulesVersion = %q; review the pinned default thresholds before updating this test", RulesVersion)
 	}
 	if got := Default(); !reflect.DeepEqual(got, want) {
@@ -61,6 +63,9 @@ func TestDefaultThresholdsValid(t *testing.T) {
 	thresholds := Default()
 	if thresholds.CRCPoorAbove >= thresholds.CRCFailedAbove {
 		t.Error("CRC severity thresholds are not ordered")
+	}
+	if thresholds.CarrierPHYPoorAbove >= thresholds.CarrierPHYFailedAbove {
+		t.Error("carrier/PHY severity thresholds are not ordered")
 	}
 	if thresholds.TCPRetransWarningAt >= thresholds.TCPRetransPoorAbove {
 		t.Error("TCP retransmit thresholds are not ordered")
@@ -135,6 +140,8 @@ func TestRulesHonorSuppliedThresholds(t *testing.T) {
 		}(), model.SevPoor, false},
 		{"carrier failed", "PHY-03", func(v *Thresholds) { v.CarrierFailedAt = 10 }, &Facts{PC1: SideFacts{CarrierEvents: 4, DeltaOK: true}}, model.SevPoor, false},
 		{"frame size poor", "PHY-09", func(v *Thresholds) { v.FrameSizePoorAbove = 20 }, &Facts{PC1: SideFacts{JabberSizeErrors: 15, DeltaOK: true}}, model.SevWarning, false},
+		{"carrier PHY poor", "PHY-11", func(v *Thresholds) { v.CarrierPHYPoorAbove = 20 }, &Facts{PC1: sideWithCarrierPHY(15)}, model.SevWarning, false},
+		{"carrier PHY failed", "PHY-11", func(v *Thresholds) { v.CarrierPHYFailedAbove = 2000 }, &Facts{PC1: sideWithCarrierPHY(1500)}, model.SevPoor, false},
 		{"reduced speed poor", "PHY-06", func(v *Thresholds) { v.NegotiatedSpeedPoorAt = 0.05 }, &Facts{NegotiatedSpeed: 100_000_000, ExpectedSpeed: 1_000_000_000}, model.SevWarning, false},
 		{"ping loss poor", "TR-01", func(v *Thresholds) { v.PingLossPoorAbove = 2 }, &Facts{Dir: [2]DirFacts{{PingLossPct: 1}}}, model.SevWarning, false},
 		{"ping spikes", "TR-05", func(v *Thresholds) { v.PingSpikesWarningAbove = 10 }, &Facts{Dir: [2]DirFacts{{PingSpikes: 6}}}, 0, true},

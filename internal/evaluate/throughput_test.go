@@ -242,7 +242,7 @@ func TestThroughputScoreDeductionIsHostGated(t *testing.T) {
 	if ungated == nil || *ungated != 75 {
 		t.Fatalf("ungated score = %v, want 75", ungated)
 	}
-	for _, ruleID := range []string{"HOST-01", "HOST-03"} {
+	for _, ruleID := range []string{"HOST-01", "HOST-03", "HOST-04"} {
 		findings := []model.Finding{{RuleID: ruleID}}
 		got := scoreFor(facts, findings, model.HealthExcellent, thresholds)
 		if got == nil || *got != 100 {

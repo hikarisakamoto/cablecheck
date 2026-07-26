@@ -13,7 +13,7 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 	if class == model.HealthInconclusive {
 		return nil
 	}
-	hostLimited := hasFinding(findings, "HOST-01") || hasFinding(findings, "HOST-03")
+	hostLimited := hasHostLimit(findings)
 	s := 100.0
 
 	// Physical counter movement.

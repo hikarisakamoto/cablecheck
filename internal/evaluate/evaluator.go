@@ -7,7 +7,7 @@ import (
 // RulesVersion identifies the rule set implemented by this package; it is
 // recorded in every evaluation so reports stay interpretable when thresholds
 // change.
-const RulesVersion = "1.2.0"
+const RulesVersion = "1.3.0"
 
 // Result is the complete output of the evaluation engine.
 type Result struct {
@@ -61,7 +61,7 @@ func evaluate(f *Facts, thresholds Thresholds) Result {
 // INCONCLUSIVE/GOOD), never hide failure evidence.
 func classify(findings []model.Finding, f *Facts) model.HealthClass {
 	worstPhys := worstIn(findings, model.CategoryPhysical)
-	hostLimited := hasFinding(findings, "HOST-01") || hasFinding(findings, "HOST-03")
+	hostLimited := hasHostLimit(findings)
 	if worstPhys == model.SevFailed {
 		return model.HealthFailed
 	}
@@ -124,6 +124,15 @@ func hasFinding(findings []model.Finding, ruleID string) bool {
 		}
 	}
 	return false
+}
+
+// hasHostLimit reports whether collected evidence identifies a host-side
+// performance bottleneck. Keep this list centralized because classification
+// and scoring must gate the same symptoms under the same markers.
+func hasHostLimit(findings []model.Finding) bool {
+	return hasFinding(findings, "HOST-01") ||
+		hasFinding(findings, "HOST-03") ||
+		hasFinding(findings, "HOST-04")
 }
 
 // allPoorAreHostSensitive reports whether every POOR-or-worse ladder finding

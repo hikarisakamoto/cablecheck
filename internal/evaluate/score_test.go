@@ -254,6 +254,9 @@ func randomizedFacts(seed uint64) *Facts {
 		side.CRCClassErrors = 0
 		side.CarrierEvents = 0
 		side.JabberSizeErrors = 0
+		side.FifoOverrun = 0
+		side.MissedErrors = 0
+		side.CarrierPHYErrors = 0
 		if side.DeltaOK {
 			if rng.Intn(4) == 0 {
 				side.CRCClassErrors = []uint64{1, thresholds.CRCPoorAbove, thresholds.CRCPoorAbove + 1, thresholds.CRCFailedAbove + 1}[rng.Intn(4)]
@@ -263,6 +266,15 @@ func randomizedFacts(seed uint64) *Facts {
 			}
 			if rng.Intn(5) == 0 {
 				side.JabberSizeErrors = uint64(1 + rng.Intn(int(thresholds.FrameSizePoorAbove)+3))
+			}
+			if rng.Intn(5) == 0 {
+				side.CarrierPHYErrors = []uint64{1, thresholds.CarrierPHYPoorAbove, thresholds.CarrierPHYPoorAbove + 1, thresholds.CarrierPHYFailedAbove + 1}[rng.Intn(4)]
+			}
+			if rng.Intn(5) == 0 {
+				side.FifoOverrun = uint64(1 + rng.Intn(20))
+			}
+			if rng.Intn(5) == 0 {
+				side.MissedErrors = uint64(1 + rng.Intn(20))
 			}
 		}
 	}
