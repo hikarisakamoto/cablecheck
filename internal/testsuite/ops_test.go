@@ -212,7 +212,10 @@ func TestDecodeOpResult(t *testing.T) {
 		{OpPingRun, &PingRunResult{Ping: model.PingResult{Received: 100}}},
 		{OpIperfServerStart, &ServerStartResult{Port: 5201}},
 		{OpIperfServerStop, &ServerStopResult{Stopped: true}},
-		{OpIperfClientRun, &TCPRunResult{TCP: model.TCPResult{Retransmissions: &retr}}},
+		{OpIperfClientRun, &TCPRunResult{TCP: model.TCPResult{
+			Retransmissions: &retr,
+			Collapses:       []model.TCPCollapseEvent{{StartSec: 5, Len: 2, MinBps: 42e6}},
+		}}},
 		{OpPingFullSize, &PingRunResult{Ping: model.PingResult{Transmitted: 100, SendErrors: 100}}},
 		{OpIperfUDPRun, &UDPRunResult{UDP: model.UDPResult{TargetBps: 800000000, LossPercent: 0.24}}},
 		{OpIperfCaps, &model.Iperf3Caps{Version: "3.16", JSON: true, Bidir: true}},
@@ -238,6 +241,18 @@ func TestDecodeOpResult(t *testing.T) {
 	}
 	if _, err := DecodeOpResult("warp_drive", nil); err == nil {
 		t.Errorf("DecodeOpResult accepted an unknown op")
+	}
+}
+
+func TestDecodeLegacyTCPResultLeavesCollapseAnalysisUnavailable(t *testing.T) {
+	raw := json.RawMessage(`{"tcp":{"direction":"pc2_to_pc1","intervalResults":[{"startSec":0,"endSec":1,"bytes":1,"bitsPerSecond":100}]}}`)
+	got, err := DecodeOpResult(OpIperfClientRun, raw)
+	if err != nil {
+		t.Fatalf("DecodeOpResult: %v", err)
+	}
+	result := got.(*TCPRunResult)
+	if result.TCP.Collapses != nil {
+		t.Errorf("legacy Collapses = %+v, want nil unavailable analysis", result.TCP.Collapses)
 	}
 }
 

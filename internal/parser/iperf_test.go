@@ -73,7 +73,7 @@ func TestIperf3TCPVersions(t *testing.T) {
 			if !near(res.IntervalCoV, 0.0045108572094281554, 1e-9) {
 				t.Errorf("IntervalCoV = %v, want ~0.00451086", res.IntervalCoV)
 			}
-			if len(res.Collapses) != 0 {
+			if res.Collapses == nil || len(res.Collapses) != 0 {
 				t.Errorf("Collapses = %+v, want none", res.Collapses)
 			}
 			if res.CPU == nil || res.CPU.HostTotal != 8.42 || res.CPU.RemoteTotal != 11.27 {
@@ -100,7 +100,7 @@ func TestIperf3TCPVersions(t *testing.T) {
 			t.Fatalf("Sent.Retransmits = %+v, want 202", res.Sent)
 		}
 		if len(res.Collapses) != 1 {
-			t.Fatalf("Collapses = %+v, want exactly one (interval < 10%% of median)", res.Collapses)
+			t.Fatalf("Collapses = %+v, want exactly one (interval < 50%% of median)", res.Collapses)
 		}
 		c := res.Collapses[0]
 		if c.StartSec != 5 || c.Len != 1 || c.MinBps != 4.2e6 {

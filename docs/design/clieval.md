@@ -292,7 +292,7 @@ type DirFacts struct { // one per traffic direction (pc1→pc2, pc2→pc1)
     TCPBitrate     model.Bitrate
     TCPRetransRate float64 // retransmits / est. segments (bytes/MSS, MSS fallback 1448)
     TCPCoV         float64 // stdev/mean of per-interval bitrates, first interval excluded
-    TCPCollapses   int     // intervals < 50% of median interval bitrate
+    TCPCollapses   int     // carried collapse-event lengths; legacy nil evidence uses the canonical analyzer
     // UDP
     UDPAvailable   bool
     UDPLossPct     float64
@@ -537,7 +537,7 @@ Justification: bare nanosecond integers (encoding/json's default for time.Durati
 type HealthClass string // "EXCELLENT","GOOD","WARNING","POOR","FAILED","INCONCLUSIVE"
 
 type Report struct {
-    SchemaVersion string        `json:"schemaVersion"` // "1.1.0"
+    SchemaVersion string        `json:"schemaVersion"` // "1.2.0"
     ToolVersion   string        `json:"toolVersion"`
     TestID        string        `json:"testId"`
     GeneratedAt   time.Time     `json:"generatedAt"`
@@ -615,7 +615,7 @@ built:    2026-07-15T10:22:03Z
 go:       go1.26.3
 platform: linux/amd64
 protocol: 1
-schema:   1.1.0
+schema:   1.2.0
 ```
 
 `go`/`platform` come from `runtime.Version()` and `runtime.GOOS/GOARCH`; protocol and schema constants come from their packages. Makefile:

@@ -70,7 +70,7 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 	case cov >= thresholds.TCPCoVWarningAt:
 		s -= 5
 	}
-	s -= math.Min(20, 5*float64(f.Dir[0].TCPCollapses+f.Dir[1].TCPCollapses))
+	s -= math.Min(20, 5*float64(tcpCollapseTotal(f)))
 	if !hostLimited {
 		worst := model.Severity(-1)
 		for i := range f.Dir {

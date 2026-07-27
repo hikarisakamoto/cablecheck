@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"strings"
+
+	"cablecheck/internal/model"
+	"cablecheck/internal/tcpmetrics"
 )
 
 // ErrIperfClient reports that the iperf3 client wrote a JSON document with a
@@ -197,18 +199,6 @@ type IntervalStat struct {
 	Retransmits *uint64
 }
 
-// CollapseEvent is a run of consecutive intervals whose throughput fell below
-// 10% of the median interval throughput — the signature of a link stall or
-// retransmission storm.
-type CollapseEvent struct {
-	// StartSec is the start offset of the first collapsed interval.
-	StartSec float64
-	// Len is the number of consecutive collapsed intervals.
-	Len int
-	// MinBps is the slowest interval throughput inside the run.
-	MinBps float64
-}
-
 // CPUUtil is iperf3's cpu_utilization_percent block.
 type CPUUtil struct {
 	// HostTotal is total CPU % on the side that ran the client.
@@ -259,9 +249,9 @@ type Iperf3Result struct {
 	// IntervalCoV is the coefficient of variation (stdev/mean) of interval
 	// throughput, excluding the first interval.
 	IntervalCoV float64
-	// Collapses lists runs of intervals below 10% of the median interval
+	// Collapses lists runs of intervals below the canonical share of median
 	// throughput (first interval excluded from both median and detection).
-	Collapses []CollapseEvent
+	Collapses []model.TCPCollapseEvent
 	// CPU is iperf3's CPU utilization report; nil when absent.
 	CPU *CPUUtil
 	// CongSender is the sender-side TCP congestion algorithm, when reported.
@@ -516,13 +506,19 @@ func dirStats(s *iperfSum) *DirStats {
 // analyzeIntervals computes min/max/avg/CoV and collapse events over the
 // interval rows, excluding the first (slow-start) interval whenever at least
 // two rows exist.
-func analyzeIntervals(rows []IntervalStat) (minBps, maxBps, avgBps, cov float64, collapses []CollapseEvent) {
+func analyzeIntervals(rows []IntervalStat) (minBps, maxBps, avgBps, cov float64, collapses []model.TCPCollapseEvent) {
+	samples := make([]tcpmetrics.Sample, len(rows))
+	for i, row := range rows {
+		samples[i] = tcpmetrics.Sample{StartSec: row.StartSec, BitsPerSecond: row.Bps}
+	}
+	collapses = tcpmetrics.CollapseEvents(samples)
+
 	set := rows
 	if len(rows) >= 2 {
 		set = rows[1:]
 	}
 	if len(set) == 0 {
-		return 0, 0, 0, 0, nil
+		return 0, 0, 0, 0, collapses
 	}
 
 	minBps, maxBps = set[0].Bps, set[0].Bps
@@ -542,40 +538,7 @@ func analyzeIntervals(rows []IntervalStat) (minBps, maxBps, avgBps, cov float64,
 		cov = math.Sqrt(varSum/float64(len(set))) / avgBps
 	}
 
-	med := medianBps(set)
-	if med <= 0 {
-		return minBps, maxBps, avgBps, cov, nil
-	}
-	threshold := 0.10 * med
-	var cur *CollapseEvent
-	for i, r := range set {
-		if r.Bps >= threshold {
-			cur = nil
-			continue
-		}
-		if cur == nil || set[i-1].Bps >= threshold {
-			collapses = append(collapses, CollapseEvent{StartSec: r.StartSec, Len: 0, MinBps: r.Bps})
-			cur = &collapses[len(collapses)-1]
-		}
-		cur.Len++
-		cur.MinBps = math.Min(cur.MinBps, r.Bps)
-	}
 	return minBps, maxBps, avgBps, cov, collapses
-}
-
-// medianBps returns the median interval throughput (mean of the middle pair
-// for even counts).
-func medianBps(rows []IntervalStat) float64 {
-	vals := make([]float64, len(rows))
-	for i, r := range rows {
-		vals[i] = r.Bps
-	}
-	slices.Sort(vals)
-	n := len(vals)
-	if n%2 == 1 {
-		return vals[n/2]
-	}
-	return (vals[n/2-1] + vals[n/2]) / 2
 }
 
 // addRetransmits accumulates into a possibly-nil retransmit counter,

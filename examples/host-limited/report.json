@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.2.0",
   "toolVersion": "1.0.0",
   "protocolVersion": "1",
   "testId": "example-host-limited",
@@ -152,6 +152,7 @@
         "senderBitsPerSecond": 251000000,
         "receiverBitsPerSecond": 250000000,
         "retransmissions": 0,
+        "collapses": [],
         "throughputVariation": 0.012,
         "minimumIntervalBps": 247000000,
         "maximumIntervalBps": 252000000,
@@ -174,6 +175,7 @@
         "senderBitsPerSecond": 249000000,
         "receiverBitsPerSecond": 248000000,
         "retransmissions": 0,
+        "collapses": [],
         "throughputVariation": 0.012,
         "minimumIntervalBps": 245000000,
         "maximumIntervalBps": 250000000,

@@ -42,6 +42,17 @@ type TCPInterval struct {
 	Retransmits *uint64 `json:"retransmits,omitempty"`
 }
 
+// TCPCollapseEvent is one run of consecutive TCP intervals whose throughput
+// fell below the canonical share of the run's median interval throughput.
+type TCPCollapseEvent struct {
+	// StartSec is the start offset of the first collapsed interval.
+	StartSec float64 `json:"startSec"`
+	// Len is the number of consecutive collapsed intervals in the run.
+	Len int `json:"len"`
+	// MinBps is the slowest interval throughput in the run.
+	MinBps float64 `json:"minBps"`
+}
+
 // TCPResult is one one-way TCP throughput test.
 type TCPResult struct {
 	// Direction is DirectionPC1ToPC2 or DirectionPC2ToPC1.
@@ -62,6 +73,10 @@ type TCPResult struct {
 	Retransmissions *uint64 `json:"retransmissions,omitempty"`
 	// IntervalResults are the per-second interval rows.
 	IntervalResults []TCPInterval `json:"intervalResults,omitempty"`
+	// Collapses records grouped collapse evidence. A non-nil empty slice means
+	// analysis completed and found none; nil means analysis was unavailable,
+	// as with a legacy peer or a run that failed before parsing.
+	Collapses []TCPCollapseEvent `json:"collapses"`
 	// ThroughputVariation is the coefficient of variation (stdev/mean) of
 	// the per-interval bitrates, first interval excluded.
 	ThroughputVariation float64 `json:"throughputVariation"`
