@@ -297,9 +297,6 @@ func TestLowerMedian(t *testing.T) {
 			}
 		})
 	}
-	if got := median([]float64{9, 1}); got != 5 {
-		t.Errorf("median([9 1]) = %v, want conventional even-sample median 5", got)
-	}
 }
 
 func TestFactsFromReportUsesLowerMedianForRepeatedTCPResults(t *testing.T) {
@@ -307,18 +304,14 @@ func TestFactsFromReportUsesLowerMedianForRepeatedTCPResults(t *testing.T) {
 	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
 	trial := func(bitrate float64, cov float64, retrans uint64, collapse bool) model.TCPResult {
 		intervals := []model.TCPInterval{{BitsPerSecond: 100_000_000, Bytes: 1_448_000}}
+		collapses := []model.TCPCollapseEvent{}
 		if collapse {
-			intervals = []model.TCPInterval{
-				{BitsPerSecond: 100_000_000, Bytes: 362_000},
-				{BitsPerSecond: 100_000_000, Bytes: 362_000},
-				{BitsPerSecond: 10_000_000, Bytes: 362_000},
-				{BitsPerSecond: 100_000_000, Bytes: 362_000},
-			}
+			collapses = []model.TCPCollapseEvent{{StartSec: 2, Len: 1, MinBps: 10_000_000}}
 		}
 		return model.TCPResult{
 			Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: bitrate,
 			ThroughputVariation: cov, Retransmissions: uint64Ptr(retrans),
-			IntervalResults: intervals,
+			IntervalResults: intervals, Collapses: collapses,
 		}
 	}
 	r := &model.Report{
@@ -363,6 +356,80 @@ func TestFactsFromReportUsesLowerMedianForRepeatedTCPResults(t *testing.T) {
 	}
 	if got := f.Dir[1].TCPTrialCount; got != 1 {
 		t.Errorf("pc2->pc1 trial count = %d, want 1", got)
+	}
+}
+
+func TestCollapseIntervalCountUsesAuthoritativeEventsAndLegacyFallback(t *testing.T) {
+	qualifyingIntervals := []model.TCPInterval{
+		{StartSec: 0, BitsPerSecond: 100},
+		{StartSec: 1, BitsPerSecond: 100},
+		{StartSec: 2, BitsPerSecond: 10},
+		{StartSec: 3, BitsPerSecond: 100},
+	}
+	tests := []struct {
+		name string
+		tr   model.TCPResult
+		want int
+	}{
+		{
+			name: "event lengths not event count",
+			tr: model.TCPResult{Collapses: []model.TCPCollapseEvent{
+				{Len: 2}, {Len: 3}, {Len: 0}, {Len: -1},
+			}},
+			want: 5,
+		},
+		{
+			name: "authoritative empty ignores diagnostic intervals",
+			tr:   model.TCPResult{IntervalResults: qualifyingIntervals, Collapses: []model.TCPCollapseEvent{}},
+			want: 0,
+		},
+		{
+			name: "legacy unavailable evidence uses canonical fallback",
+			tr:   model.TCPResult{IntervalResults: qualifyingIntervals, Collapses: nil},
+			want: 1,
+		},
+		{
+			name: "carried evidence does not depend on retained intervals",
+			tr:   model.TCPResult{Collapses: []model.TCPCollapseEvent{{Len: 2}}},
+			want: 2,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := collapseIntervalCount(tc.tr); got != tc.want {
+				t.Errorf("collapseIntervalCount() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTCPCollapseTotalSaturatesAcrossDirections(t *testing.T) {
+	const maxInt = int(^uint(0) >> 1)
+	facts := &Facts{Dir: [2]DirFacts{{TCPCollapses: maxInt}, {TCPCollapses: 1}}}
+	if got := tcpCollapseTotal(facts); got != maxInt {
+		t.Errorf("tcpCollapseTotal = %d, want saturated %d", got, maxInt)
+	}
+	facts.Dir[0].TCPCollapses = -1
+	if got := tcpCollapseTotal(facts); got != 1 {
+		t.Errorf("tcpCollapseTotal with malformed negative = %d, want 1", got)
+	}
+}
+
+func TestFactsFromReportKeepsWorstRepeatedCollapseIntervalCount(t *testing.T) {
+	r := &model.Report{Tests: model.TestsSection{TCP: []model.TCPResult{
+		{
+			Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 900_000_000,
+			Collapses: []model.TCPCollapseEvent{{Len: 2}, {Len: 1}},
+		},
+		{
+			Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 900_000_000,
+			Collapses: []model.TCPCollapseEvent{{Len: 2}},
+		},
+	}}}
+
+	facts := FactsFromReport(r)
+	if got := facts.Dir[0].TCPCollapses; got != 3 {
+		t.Errorf("TCPCollapses = %d, want maximum per-trial interval count 3", got)
 	}
 }
 
@@ -612,6 +679,7 @@ func TestFactsFromReportIgnoresIncompleteTCPDirection(t *testing.T) {
 				ThroughputVariation: 0.75,
 				Retransmissions:     uint64Ptr(99),
 				IntervalResults:     []model.TCPInterval{{BitsPerSecond: 0, Retransmits: uint64Ptr(99)}},
+				Collapses:           []model.TCPCollapseEvent{{Len: 5}},
 				CPUUtilization:      model.CPUUsage{HostTotal: 99, RemoteTotal: 98},
 			},
 			{

@@ -148,6 +148,7 @@ func fullReport() *Report {
 			{StartSec: 0, EndSec: 1, Bytes: 117_625_000, BitsPerSecond: 941_000_000, Retransmits: &intervalRetrans},
 			{StartSec: 1, EndSec: 2, Bytes: 117_400_000, BitsPerSecond: 939_200_000},
 		},
+		Collapses:           []TCPCollapseEvent{{StartSec: 12, Len: 2, MinBps: 42_000_000}},
 		ThroughputVariation: 0.013,
 		MinimumIntervalBps:  912_000_000,
 		MaximumIntervalBps:  948_000_000,
@@ -285,8 +286,11 @@ func TestReportJSONRoundTrip(t *testing.T) {
 	}
 
 	// schemaVersion must be present verbatim on the JSON surface.
-	if !bytes.Contains(data, []byte(`"schemaVersion":"1.1.0"`)) {
+	if !bytes.Contains(data, []byte(`"schemaVersion":"1.2.0"`)) {
 		t.Errorf("JSON missing schemaVersion: %.200s", data)
+	}
+	if !bytes.Contains(data, []byte(`"collapses":[{"startSec":12,"len":2,"minBps":42000000}]`)) {
+		t.Errorf("JSON missing TCP collapse evidence: %.1000s", data)
 	}
 	// Timestamps must marshal as RFC 3339.
 	if !bytes.Contains(data, []byte(`"startedAt":"2026-07-15T09:00:00Z"`)) {
@@ -342,6 +346,24 @@ func TestReportJSONRoundTrip(t *testing.T) {
 	}
 	if _, ok := cfg["token"]; ok {
 		t.Errorf("configuration contains a token key")
+	}
+}
+
+func TestTCPResultCollapseAnalysisPresence(t *testing.T) {
+	clean, err := json.Marshal(TCPResult{Collapses: []TCPCollapseEvent{}})
+	if err != nil {
+		t.Fatalf("Marshal clean TCPResult: %v", err)
+	}
+	if !bytes.Contains(clean, []byte(`"collapses":[]`)) {
+		t.Errorf("completed clean analysis = %s, want collapses:[]", clean)
+	}
+
+	var legacy TCPResult
+	if err := json.Unmarshal([]byte(`{"direction":"pc1_to_pc2"}`), &legacy); err != nil {
+		t.Fatalf("Unmarshal legacy TCPResult: %v", err)
+	}
+	if legacy.Collapses != nil {
+		t.Errorf("legacy Collapses = %+v, want nil unavailable analysis", legacy.Collapses)
 	}
 }
 

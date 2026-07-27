@@ -33,7 +33,6 @@ func TestDefaultThresholdsForRulesVersion140(t *testing.T) {
 		TCPThroughputFallback:         ThroughputBands{PassAt: 0.9, InfoAt: 0.7, WarningAt: 0.4},
 		TCPCoVWarningAt:               0.15,
 		TCPCoVPoorAbove:               0.30,
-		TCPCollapseBelowMedian:        0.5,
 		TCPCollapsePoorAt:             3,
 		TCPAsymmetryWarnAbove:         0.30,
 		CPUHostLimitedAbove:           90,
@@ -90,9 +89,8 @@ func TestDefaultThresholdsValid(t *testing.T) {
 		}
 	}
 	for name, value := range map[string]float64{
-		"TCP collapse ratio": thresholds.TCPCollapseBelowMedian,
-		"UDP target ratio":   thresholds.UDPTargetReachedAt,
-		"UDP saturation":     thresholds.UDPNearSaturationAbove,
+		"UDP target ratio": thresholds.UDPTargetReachedAt,
+		"UDP saturation":   thresholds.UDPNearSaturationAbove,
 	} {
 		if value <= 0 || value > 1 {
 			t.Errorf("%s = %v, want (0,1]", name, value)
@@ -190,7 +188,6 @@ func TestThresholdBearingFindingTextUsesPolicy(t *testing.T) {
 	thresholds.UDPLossPoorAbove = 7
 	thresholds.UDPJitterWarningAbove = 11
 	thresholds.CPUHostLimitedAbove = 50
-	thresholds.TCPCollapseBelowMedian = 0.2
 
 	physical := &Facts{PC1: sideWithCRC(1)}
 	physical.Dir[0] = DirFacts{UDPAvailable: true, UDPTargetReached: true, UDPLossPct: 8}
@@ -202,14 +199,13 @@ func TestThresholdBearingFindingTextUsesPolicy(t *testing.T) {
 	assertFindingContains(t, ruleByID(t, "HOST-01").Evaluate(&Facts{MaxCPUPct: 60}, thresholds), "> 50%")
 
 	collapse := &Facts{Dir: [2]DirFacts{{TCPCollapses: 1}}}
-	assertFindingContains(t, ruleByID(t, "PERF-03").Evaluate(collapse, thresholds), "below 20%")
+	assertFindingContains(t, ruleByID(t, "PERF-03").Evaluate(collapse, thresholds), "below 50%")
 }
 
 func TestFactsFromReportHonorsSuppliedThresholds(t *testing.T) {
 	thresholds := Default()
 	thresholds.UDPTargetReachedAt = 0.99
 	thresholds.UDPNearSaturationAbove = 0.80
-	thresholds.TCPCollapseBelowMedian = 0.20
 
 	report := &model.Report{
 		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
@@ -217,15 +213,6 @@ func TestFactsFromReportHonorsSuppliedThresholds(t *testing.T) {
 			UDP: []model.UDPResult{{
 				Direction: model.DirectionPC1ToPC2, TargetBps: 850_000_000,
 				ActualSenderBps: 807_500_000, LossPercent: 5,
-			}},
-			TCP: []model.TCPResult{{
-				Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 100_000_000,
-				IntervalResults: []model.TCPInterval{
-					{BitsPerSecond: 100},
-					{BitsPerSecond: 100},
-					{BitsPerSecond: 30},
-					{BitsPerSecond: 100},
-				},
 			}},
 		},
 	}
@@ -235,9 +222,6 @@ func TestFactsFromReportHonorsSuppliedThresholds(t *testing.T) {
 	}
 	if !facts.UDPNearSaturation {
 		t.Error("UDPNearSaturation = false, want target above custom 80% boundary")
-	}
-	if facts.Dir[0].TCPCollapses != 0 {
-		t.Errorf("TCPCollapses = %d, want 0 below custom 20%%-of-median boundary", facts.Dir[0].TCPCollapses)
 	}
 }
 

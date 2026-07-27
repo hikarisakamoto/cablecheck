@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.2.0",
   "toolVersion": "1.0.0",
   "protocolVersion": "1",
   "testId": "example-reduced-speed",
@@ -152,6 +152,7 @@
         "senderBitsPerSecond": 94200000,
         "receiverBitsPerSecond": 94100000,
         "retransmissions": 0,
+        "collapses": [],
         "throughputVariation": 0.012,
         "minimumIntervalBps": 91100000,
         "maximumIntervalBps": 96100000,
@@ -174,6 +175,7 @@
         "senderBitsPerSecond": 94000000,
         "receiverBitsPerSecond": 93900000,
         "retransmissions": 0,
+        "collapses": [],
         "throughputVariation": 0.012,
         "minimumIntervalBps": 90900000,
         "maximumIntervalBps": 95900000,

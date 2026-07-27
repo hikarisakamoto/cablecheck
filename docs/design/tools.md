@@ -210,7 +210,7 @@ type Iperf3Result struct {
     UDP               *UDPStats      // TargetBps, ActualBps, JitterMs, Lost, Total, LostPercent, OutOfOrder *int64
     Intervals         []IntervalStat // per-second sum rows: Bps, Retransmits *uint64
     IntervalMinBps, IntervalMaxBps, IntervalAvgBps, IntervalCoV float64
-    Collapses         []CollapseEvent // interval Bps < 10% of median → {StartSec, Len, MinBps}
+    Collapses         []model.TCPCollapseEvent // grouped intervals < 50% of median → {StartSec, Len, MinBps}
     CPU               *CPUUtil
     CongSender, CongReceiver string
     Error             string

@@ -129,6 +129,50 @@ func TestTCPServerLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunTCPClientPreservesCollapseEvents(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_collapse_retr.json")})
+	m, _ := newTestManager(t, fr)
+
+	res, err := m.RunTCPClient(context.Background(),
+		netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"),
+		5201, 30*time.Second, 4, false)
+	if err != nil {
+		t.Fatalf("RunTCPClient: %v", err)
+	}
+	if res.Incomplete {
+		t.Fatal("clean run marked incomplete")
+	}
+	want := model.TCPCollapseEvent{StartSec: 5, Len: 1, MinBps: 4.2e6}
+	if len(res.TCP.Collapses) != 1 || res.TCP.Collapses[0] != want {
+		t.Errorf("Collapses = %+v, want %+v", res.TCP.Collapses, want)
+	}
+}
+
+func TestRunTCPClientMalformedOutputLeavesCollapseAnalysisUnavailable(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{
+		Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		Result: runner.CommandResult{Stdout: []byte("not json")},
+	})
+	m, _ := newTestManager(t, fr)
+
+	res, err := m.RunTCPClient(context.Background(),
+		netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"),
+		5201, 30*time.Second, 4, false)
+	var decodeErr *parser.DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("err = %T %v, want *parser.DecodeError", err, err)
+	}
+	if res == nil || !res.Incomplete {
+		t.Fatalf("result = %+v, want incomplete diagnostics", res)
+	}
+	if res.TCP.Collapses != nil {
+		t.Errorf("Collapses = %+v, want nil unavailable analysis", res.TCP.Collapses)
+	}
+}
+
 // TestTCPClientMissingSummaryIsIncomplete verifies that a clean process exit
 // cannot turn schema drift into a completed zero-throughput measurement. The
 // semantic parser error stays fatal while decoded diagnostics remain available

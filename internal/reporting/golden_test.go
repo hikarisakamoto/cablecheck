@@ -146,6 +146,7 @@ func goldenReport() *model.Report {
 			SenderBitsPerSecond:   sender,
 			ReceiverBitsPerSecond: receiver,
 			Retransmissions:       u64(0),
+			Collapses:             []model.TCPCollapseEvent{},
 			ThroughputVariation:   0.012,
 			MinimumIntervalBps:    receiver - 3e6,
 			MaximumIntervalBps:    receiver + 2e6,

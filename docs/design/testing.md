@@ -246,7 +246,7 @@ All from `testdata/ip/*.json` fixtures through FakeRunner — never the real `ip
 - `TestPingPerPacket` — clean run; loss/dup/unreachable variants; `(DUP!)` lines; icmp_seq gaps → longest-response-gap; RTT list → min/avg/max/mdev + p50/p95/p99 computed from per-packet data (not summary); summary-line variants (`+1 duplicates`, no mdev at 100% loss).
 - `TestPingIntervalRejected` — stderr fixture "minimal interval allowed" → typed `ErrIntervalRejected` (drives graceful fallback retry).
 - `TestFullSizePingFragErrors` — "message too long"/"Frag needed" fixture → frag-error count, distinct from loss.
-- `TestIperf3TCPVersions` — fixtures for 3.7 and 3.9+ layouts: sum_sent/sum_received, retransmits (sender only), per-interval series, min/max/avg interval bitrate, coefficient of variation, CPU util; collapse detection (interval < 10% of median flagged).
+- `TestIperf3TCPVersions` — fixtures for 3.7 and 3.9+ layouts: sum_sent/sum_received, retransmits (sender only), per-interval series, min/max/avg interval bitrate, coefficient of variation, CPU util; collapse detection (post-first interval < 50% of median flagged and consecutive intervals grouped).
 - `TestIperf3Bidir` — 3.14 bidir fixture: per-direction extraction.
 - `TestIperf3UDP` — jitter_ms, lost/total, lost_percent, out_of_order.
 - `TestIperf3ErrorObject` — `{"error":"unable to connect..."}` fixture → typed error, not parse failure.

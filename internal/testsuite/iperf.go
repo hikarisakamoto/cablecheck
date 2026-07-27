@@ -335,6 +335,9 @@ func tcpFromIperf(p parser.Iperf3Result, dur time.Duration, streams int) model.T
 			Retransmits:   iv.Retransmits,
 		})
 	}
+	if p.Collapses != nil {
+		out.Collapses = append([]model.TCPCollapseEvent{}, p.Collapses...)
+	}
 	out.CPUUtilization = cpuUsageFrom(p.CPU)
 	return out
 }

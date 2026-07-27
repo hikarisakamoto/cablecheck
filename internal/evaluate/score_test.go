@@ -126,6 +126,22 @@ func TestScoreClampedToClassBand(t *testing.T) {
 	})
 }
 
+func TestScoreUsesCarriedCollapseIntervalLengths(t *testing.T) {
+	report := &model.Report{Tests: model.TestsSection{TCP: []model.TCPResult{{
+		Direction:             model.DirectionPC1ToPC2,
+		ReceiverBitsPerSecond: 900_000_000,
+		Collapses:             []model.TCPCollapseEvent{{Len: 2}},
+	}}}}
+	facts := FactsFromReport(report)
+	thresholds := Default()
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+
+	score := scoreFor(facts, nil, model.HealthExcellent, thresholds)
+	if score == nil || *score != 90 {
+		t.Errorf("score = %v, want 90 from two carried collapsed intervals", score)
+	}
+}
+
 type classScoreBand struct {
 	class model.HealthClass
 	band  ScoreBand

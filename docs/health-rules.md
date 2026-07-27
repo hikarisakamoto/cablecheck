@@ -11,11 +11,13 @@ include exactly 1%.
 ## Calibration and provenance
 
 The [`Default` threshold policy](../internal/evaluate/thresholds.go) is the
-executable source of truth for fact qualification, rule severity boundaries,
-host gating, and score bands. The values are deliberately internal and fixed:
-CableCheck does not offer a sensitivity preset that could turn the same
-evidence into a more favorable result. The tables below restate that policy for
-operators; they do not define a second implementation.
+executable source of truth for rule severity boundaries, host gating, and score
+bands. Parser-owned measurement definitions are likewise fixed; notably,
+[`tcpmetrics`](../internal/tcpmetrics/collapse.go) is the single implementation
+of TCP collapse extraction. CableCheck does not offer a sensitivity preset
+that could turn the same evidence into a more favorable result. The tables
+below restate those policies for operators; they do not define another
+implementation.
 
 Changing a default value or its inclusive/exclusive comparison requires an
 explicit `RulesVersion` decision, boundary-test review, and review of the
@@ -39,7 +41,8 @@ below. Completed repeat TCP trials are reduced independently per direction and
 metric using the lower median (for an even count, the lower middle value).
 Trials without usable retransmission data are omitted from only that metric;
 an explicit zero remains a measurement. Any incomplete repeat makes its whole
-direction unavailable. TCP collapse count remains the maximum from any pass.
+direction unavailable. TCP collapse event lengths are summed within a pass,
+and the resulting interval count remains the maximum from any pass.
 Count thresholds are absolute across quick, standard, and soak modes; they are
 not normalized by duration.
 
@@ -84,8 +87,8 @@ but do not establish CableCheck's health boundary.
 | TCP throughput on links `> 1 Gbit/s` | Uses the 1 Gbit/s 90/70/40 bands as an explicitly uncalibrated fallback. | No real high-speed capture exists yet; these values are conservative compatibility behavior, not authoritative 2.5G/5G/10G calibration. | Conservative caveat policy |
 | TCP coefficient of variation warning | Warning at `>= 15%`. | Flags repeated interval instability while allowing ordinary run-to-run variation. | Conservative policy |
 | TCP coefficient of variation poor | Poor when `> 30%`; exactly 30% remains warning. | Marks strongly unstable interval throughput. | Conservative policy |
-| TCP collapse interval | Count an interval when it is `< 50%` of the post-first-interval median. | Excludes slow start, then identifies a substantial within-run drop relative to that run. | Conservative policy |
-| TCP collapse count | Poor at `>= 3` counted intervals; 1–2 warns. | Repeated collapses carry more weight than an isolated interval. | Conservative policy |
+| TCP collapse interval | Count an interval when it is `< 50%` of the post-first-interval median. Consecutive intervals are stored as one event whose `len` contributes each interval. | Excludes slow start, then identifies a substantial within-run drop relative to that run. | Conservative policy |
+| TCP collapse count | Poor at `>= 3` counted intervals; 1–2 warns. Repeated trials retain the largest per-trial interval count in each direction. | Repeated or sustained collapses carry more weight than an isolated interval without additionally summing evidence across repeated trials. | Conservative policy |
 | TCP directional asymmetry | Warning when `abs(a-b) / max(a,b)` is `> 30%`. | A large directional difference is notable but host-sensitive. | Conservative policy |
 | Isolated TCP throughput outlier | When exactly one of at least two completed trials in a direction misses the throughput policy, cap a poor `PERF-01` result at warning. Requires reliable counters on both peers and no `PHY-01`–`PHY-11` finding. | Prevents one host-sensitive pass from deciding a poor verdict without weakening physical or repeated evidence. | Conservative policy |
 | Host CPU | Mark host limitation and suppress qualifying UDP evidence when maximum iperf3 CPU is `> 90%`; exactly 90% remains eligible. | A highly utilized endpoint can confound performance evidence; iperf3 CPU percentage is not treated as a graded starvation measure. | Conservative policy |
@@ -166,8 +169,8 @@ CPU, or host can produce these symptoms without a bad cable.
 | `PERF-01` | performance | On links above 100 Mbit/s, TCP receiver bitrate is below 40%. | poor |
 | `PERF-02` | performance | TCP interval coefficient of variation is at least 15% and at most 30%. | warning |
 | `PERF-02` | performance | TCP interval coefficient of variation is greater than 30%. | poor |
-| `PERF-03` | performance | Across both directions, 1–2 TCP intervals after the first fall below 50% of the median of the post-first intervals. | warning |
-| `PERF-03` | performance | At least 3 such intervals fall below 50% of the median. | poor |
+| `PERF-03` | performance | Across both directions, carried event lengths total 1–2 TCP intervals after the first below 50% of the median of the post-first intervals. | warning |
+| `PERF-03` | performance | Carried event lengths total at least 3 such intervals. | poor |
 | `PERF-04` | performance | Both TCP directions exist and `abs(a-b) / max(a,b)` is greater than 30%. | warning |
 
 `PERF-01` doesn't run when negotiated speed is unknown. Links above 1 Gbit/s
@@ -178,6 +181,12 @@ direction and only to `PERF-01`: informational and warning results are unchanged
 while poor becomes warning. An uncapped poor result in the other direction still
 wins. Collapse, variation, retransmission, transport, and physical findings are
 never softened by this cap.
+
+Current results carry grouped collapse events directly from parsing. A
+non-nil empty event array is authoritative clean evidence. Protocol v1 allows
+different CableCheck build versions, so a missing/null event array from an
+older peer is analyzed from retained intervals by the same canonical
+`tcpmetrics` implementation; there is no second threshold or detector.
 
 ## Host markers
 

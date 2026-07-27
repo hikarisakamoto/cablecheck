@@ -1,7 +1,7 @@
 # CableCheck report schema
 
 CableCheck writes its machine-readable result to `report.json`. The current
-schema version is `1.1.0`.
+schema version is `1.2.0`.
 
 For a concrete document, see
 [`examples/healthy/report.json`](../examples/healthy/report.json). The other
@@ -40,7 +40,7 @@ forms for a duration. CableCheck emits the object form above.
 
 | JSON field | Type | Meaning |
 |---|---|---|
-| `schemaVersion` | string | Report schema version; currently `1.1.0`. |
+| `schemaVersion` | string | Report schema version; currently `1.2.0`. |
 | `toolVersion` | string | CableCheck version that produced the report. |
 | `protocolVersion` | string | Control-protocol version used by the peers. |
 | `testId` | string | Identifier assigned to this two-peer session. |
@@ -73,7 +73,7 @@ forms for a duration. CableCheck emits the object form above.
 
 The report never contains the authentication token. The evaluator has an
 internal rules-version constant, but `Report` has no `rulesVersion` JSON field
-in schema 1.1.0.
+in schema 1.2.0.
 
 ## Configuration
 
@@ -164,12 +164,21 @@ their `direction` field.
 
 `TCPResult` contains `direction`, optional `incomplete`, `duration`,
 `parallelStreams`, `senderBitsPerSecond`, `receiverBitsPerSecond`, optional
-`retransmissions`, `intervalResults`, `throughputVariation`,
+`retransmissions`, `intervalResults`, `collapses`, `throughputVariation`,
 `minimumIntervalBps`, `maximumIntervalBps`, `cpuUtilization`, and `warnings`.
 
 Each `TCPInterval` contains `startSec`, `endSec`, `bytes`, `bitsPerSecond`, and
 optional `retransmits`. `CPUUsage` contains `hostTotal`, `hostUser`,
 `hostSystem`, `remoteTotal`, `remoteUser`, and `remoteSystem`.
+
+`collapses` is always an array for a completed current-version analysis. Each
+event has `startSec`, `len`, and `minBps`, describing one run of consecutive
+post-first intervals below 50% of that run's post-first-interval median. Event
+lengths, rather than event count, drive `PERF-03` and scoring. An empty array
+means analysis completed cleanly. A missing or null field means collapse
+analysis was unavailable, as with an older protocol-v1 peer or a run that
+failed before parsing; current evaluators use the same canonical analyzer over
+retained intervals only for that compatibility case.
 
 ### TCPTrialSpread
 

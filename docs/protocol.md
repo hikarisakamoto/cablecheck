@@ -241,6 +241,14 @@ cable-window end result is `{"selfInflictedCarrierEvents":N}`, handled by the
 peer layer. A second non-cancel request while an operation is active gets
 `rejected` immediately.
 
+TCP results carry a `collapses` array of grouped interval-collapse events. The
+field is additive and does not bump protocol version 1: older coordinators
+ignore it. A current worker sends an empty array when analysis completed with
+no collapse. A current coordinator treats a missing or null field as evidence
+unavailable from an older worker and applies the same canonical analyzer to
+the retained interval rows. This preserves mixed-build compatibility without
+maintaining a second collapse definition.
+
 ```json
 {
   "protocolVersion": "1",

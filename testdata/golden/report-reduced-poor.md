@@ -18,7 +18,7 @@
 ## 3. Session Info
 
 - **Test ID:** ct-20260715-213005-a1b2c3d4
-- **Schema version:** 1.1.0
+- **Schema version:** 1.2.0
 - **Tool version:** 1.0.0
 - **Protocol version:** 1
 - **Started:** 2026-07-15T21:30:05Z

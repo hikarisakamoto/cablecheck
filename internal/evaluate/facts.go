@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/tcpmetrics"
 )
 
 // defaultMSS is the TCP maximum segment size used to estimate segment counts
@@ -68,7 +69,7 @@ type DirFacts struct {
 	// TCPCoV is stdev/mean of per-interval bitrates, first interval
 	// excluded, as a fraction.
 	TCPCoV float64
-	// TCPCollapses counts intervals below the configured share of median
+	// TCPCollapses counts carried intervals below the canonical share of median
 	// interval bitrate (first interval excluded).
 	TCPCollapses int
 	// UDPAvailable reports whether a UDP result exists for this direction.
@@ -262,7 +263,7 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 		s := &tcp[i]
 		s.bitrates = append(s.bitrates, bps)
 		s.covs = append(s.covs, tr.ThroughputVariation)
-		s.collapses = max(s.collapses, collapses(tr.IntervalResults, thresholds))
+		s.collapses = max(s.collapses, collapseIntervalCount(tr))
 		if rate, ok := retransRate(tr); ok {
 			s.retrans = append(s.retrans, rate)
 		}
@@ -431,42 +432,47 @@ func retransRate(tr model.TCPResult) (float64, bool) {
 	return float64(*tr.Retransmissions) / segments, true
 }
 
-// collapses counts intervals whose bitrate fell below the configured share of
-// the median interval bitrate. The first interval is excluded from both the
-// median and the count (TCP slow-start would otherwise flag every run at t=0).
-func collapses(ivs []model.TCPInterval, thresholds Thresholds) int {
-	if len(ivs) < 2 {
-		return 0
-	}
-	rates := make([]float64, 0, len(ivs)-1)
-	for _, iv := range ivs[1:] {
-		rates = append(rates, iv.BitsPerSecond)
-	}
-	med := median(rates)
-	if med <= 0 {
-		return 0
-	}
-	n := 0
-	for _, rate := range rates {
-		if rate < med*thresholds.TCPCollapseBelowMedian {
-			n++
+// collapseIntervalCount consumes carried parser evidence. A nil slice marks
+// analysis unavailable (for example, a protocol-v1 result from an older peer),
+// so only that compatibility path invokes the same canonical analyzer over the
+// retained intervals. A non-nil empty slice is authoritative clean evidence.
+func collapseIntervalCount(tr model.TCPResult) int {
+	events := tr.Collapses
+	if events == nil {
+		samples := make([]tcpmetrics.Sample, len(tr.IntervalResults))
+		for i, interval := range tr.IntervalResults {
+			samples[i] = tcpmetrics.Sample{
+				StartSec:      interval.StartSec,
+				BitsPerSecond: interval.BitsPerSecond,
+			}
 		}
+		events = tcpmetrics.CollapseEvents(samples)
 	}
-	return n
+
+	const maxInt = int(^uint(0) >> 1)
+	total := 0
+	for _, event := range events {
+		if event.Len <= 0 {
+			continue
+		}
+		if event.Len > maxInt-total {
+			return maxInt
+		}
+		total += event.Len
+	}
+	return total
 }
 
-// median returns the median of the values (mean of the middle pair for even
-// counts) without mutating the input.
-func median(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
+// tcpCollapseTotal adds the per-direction counts without allowing malformed
+// externally constructed facts to wrap a positive total negative.
+func tcpCollapseTotal(f *Facts) int {
+	const maxInt = int(^uint(0) >> 1)
+	a := max(0, f.Dir[0].TCPCollapses)
+	b := max(0, f.Dir[1].TCPCollapses)
+	if a > maxInt-b {
+		return maxInt
 	}
-	sorted := sortedValues(values)
-	mid := len(sorted) / 2
-	if len(sorted)%2 == 1 {
-		return sorted[mid]
-	}
-	return (sorted[mid-1] + sorted[mid]) / 2
+	return a + b
 }
 
 // lowerMedian returns the middle value for odd counts and the lower middle

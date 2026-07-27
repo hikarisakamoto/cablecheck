@@ -48,14 +48,13 @@ type Thresholds struct {
 	UDPJitterWarningAbove  float64
 	UDPReorderWarningAbove float64
 
-	TCPThroughput100M      ThroughputBands
-	TCPThroughput1G        ThroughputBands
-	TCPThroughputFallback  ThroughputBands
-	TCPCoVWarningAt        float64
-	TCPCoVPoorAbove        float64
-	TCPCollapseBelowMedian float64
-	TCPCollapsePoorAt      int
-	TCPAsymmetryWarnAbove  float64
+	TCPThroughput100M     ThroughputBands
+	TCPThroughput1G       ThroughputBands
+	TCPThroughputFallback ThroughputBands
+	TCPCoVWarningAt       float64
+	TCPCoVPoorAbove       float64
+	TCPCollapsePoorAt     int
+	TCPAsymmetryWarnAbove float64
 
 	CPUHostLimitedAbove    float64
 	UDPTargetReachedAt     float64
@@ -100,12 +99,11 @@ func Default() Thresholds {
 		// today but is a SEPARATE literal so recalibrating 1G never silently
 		// retunes high-speed links. Replace with real 2.5G/5G/10G captures before
 		// treating these as authoritative (see #25).
-		TCPThroughputFallback:  ThroughputBands{PassAt: 0.9, InfoAt: 0.7, WarningAt: 0.4},
-		TCPCoVWarningAt:        0.15,
-		TCPCoVPoorAbove:        0.30,
-		TCPCollapseBelowMedian: 0.5,
-		TCPCollapsePoorAt:      3,
-		TCPAsymmetryWarnAbove:  0.30,
+		TCPThroughputFallback: ThroughputBands{PassAt: 0.9, InfoAt: 0.7, WarningAt: 0.4},
+		TCPCoVWarningAt:       0.15,
+		TCPCoVPoorAbove:       0.30,
+		TCPCollapsePoorAt:     3,
+		TCPAsymmetryWarnAbove: 0.30,
 
 		CPUHostLimitedAbove:    90,
 		UDPTargetReachedAt:     0.90,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/tcpmetrics"
 )
 
 // Rule is one evaluation rule: a stable ID, the evidence category it
@@ -647,7 +648,7 @@ func rulePERF02(f *Facts, thresholds Thresholds) *model.Finding {
 }
 
 func rulePERF03(f *Facts, thresholds Thresholds) *model.Finding {
-	total := f.Dir[0].TCPCollapses + f.Dir[1].TCPCollapses
+	total := tcpCollapseTotal(f)
 	if total == 0 {
 		return nil
 	}
@@ -655,7 +656,7 @@ func rulePERF03(f *Facts, thresholds Thresholds) *model.Finding {
 	if total >= thresholds.TCPCollapsePoorAt {
 		sev = model.SevPoor
 	}
-	boundaryPct := thresholds.TCPCollapseBelowMedian * 100
+	boundaryPct := tcpmetrics.CollapseBelowMedianRatio * 100
 	return &model.Finding{
 		RuleID:        "PERF-03",
 		Category:      model.CategoryPerformance,

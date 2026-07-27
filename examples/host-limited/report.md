@@ -18,7 +18,7 @@
 ## 3. Session Info
 
 - **Test ID:** example-host-limited
-- **Schema version:** 1.1.0
+- **Schema version:** 1.2.0
 - **Tool version:** 1.0.0
 - **Protocol version:** 1
 - **Started:** 2026-01-02T15:04:05Z
