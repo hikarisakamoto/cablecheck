@@ -142,6 +142,108 @@ func TestScoreUsesCarriedCollapseIntervalLengths(t *testing.T) {
 	}
 }
 
+func TestHostLimitSuppressesHostSensitivePerformanceDeductions(t *testing.T) {
+	thresholds := Default()
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+
+	tests := []struct {
+		name        string
+		facts       *Facts
+		wantUngated int
+	}{
+		{
+			name: "coefficient of variation",
+			facts: &Facts{Dir: [2]DirFacts{{
+				TCPAvailable: true,
+				TCPCoV:       0.31,
+			}}},
+			wantUngated: 85,
+		},
+		{
+			name: "collapse intervals",
+			facts: &Facts{Dir: [2]DirFacts{{
+				TCPAvailable: true,
+				TCPCollapses: 2,
+			}}},
+			wantUngated: 90,
+		},
+		{
+			name:        "directional asymmetry",
+			facts:       asymmetryFacts(100, 60),
+			wantUngated: 95,
+		},
+		{
+			name: "combined symptoms",
+			facts: &Facts{Dir: [2]DirFacts{
+				{TCPAvailable: true, TCPBitrate: 100, TCPCoV: 0.31, TCPCollapses: 4},
+				{TCPAvailable: true, TCPBitrate: 60},
+			}},
+			wantUngated: 60,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ungated := scoreFor(tc.facts, nil, model.HealthExcellent, thresholds)
+			if ungated == nil || *ungated != tc.wantUngated {
+				t.Fatalf("ungated score = %v, want %d", ungated, tc.wantUngated)
+			}
+
+			for _, ruleID := range []string{"HOST-01", "HOST-03", "HOST-04"} {
+				findings := []model.Finding{{RuleID: ruleID}}
+				got := scoreFor(tc.facts, findings, model.HealthExcellent, thresholds)
+				if got == nil || *got != 100 {
+					t.Errorf("score with %s = %v, want 100", ruleID, got)
+				}
+			}
+		})
+	}
+}
+
+func TestCPUHostLimitScoreGateUsesSuppliedExclusiveThreshold(t *testing.T) {
+	thresholds := Default()
+	thresholds.CPUHostLimitedAbove = 50
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+	facts := &Facts{MaxCPUPct: 50, Dir: [2]DirFacts{{
+		TCPAvailable: true,
+		TCPCoV:       0.31,
+	}}}
+
+	atBoundary := ruleHOST01(facts, thresholds)
+	if atBoundary != nil {
+		t.Fatalf("HOST-01 at supplied boundary = %+v, want nil", atBoundary)
+	}
+	if score := scoreFor(facts, nil, model.HealthExcellent, thresholds); score == nil || *score != 85 {
+		t.Errorf("score at supplied boundary = %v, want 85", score)
+	}
+
+	facts.MaxCPUPct = math.Nextafter(thresholds.CPUHostLimitedAbove, math.Inf(1))
+	aboveBoundary := ruleHOST01(facts, thresholds)
+	if aboveBoundary == nil {
+		t.Fatal("HOST-01 above supplied boundary = nil, want marker")
+	}
+	if score := scoreFor(facts, []model.Finding{*aboveBoundary}, model.HealthExcellent, thresholds); score == nil || *score != 100 {
+		t.Errorf("score above supplied boundary = %v, want 100", score)
+	}
+}
+
+func TestHostLimitDoesNotSuppressNonHostSensitiveDeductions(t *testing.T) {
+	thresholds := Default()
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+	facts := &Facts{Dir: [2]DirFacts{{
+		TCPAvailable:   true,
+		TCPRetransRate: 0.005,
+		TCPCoV:         0.31,
+		UDPJitterMs:    6,
+	}}}
+	findings := []model.Finding{{RuleID: "HOST-01"}}
+
+	score := scoreFor(facts, findings, model.HealthExcellent, thresholds)
+	if score == nil || *score != 90 {
+		t.Errorf("host-limited score = %v, want 90 from retransmission and jitter deductions only", score)
+	}
+}
+
 type classScoreBand struct {
 	class model.HealthClass
 	band  ScoreBand

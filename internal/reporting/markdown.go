@@ -523,7 +523,7 @@ func sectionRecommendations(b *md, r *model.Report) {
 func sectionLimitations(b *md, r *model.Report) {
 	b.h2("20. Limitations & Unavailable Tests")
 	if len(r.SkippedTests) == 0 && len(r.Warnings) == 0 {
-		b.note("None — every planned test ran and no warnings were raised.")
+		b.note("None — every planned test ran and no operational warnings were raised.")
 		return
 	}
 	if len(r.SkippedTests) > 0 {

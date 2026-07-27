@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.4.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.5.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -27,7 +27,9 @@ Version `1.3.0` evaluates the already-collected transmit-carrier, PHY,
 receive-FIFO, and receive-missed counters. Version `1.4.0` aggregates repeated
 TCP bitrate, interval-variation, and retransmission facts with a lower median
 instead of letting every worst pass determine the verdict, while retaining
-collapse evidence from the worst pass.
+collapse evidence from the worst pass. Version `1.5.0` consistently omits
+host-sensitive TCP performance deductions when host evidence identifies a
+likely bottleneck; the findings remain visible.
 
 ### Reference conditions and status labels
 
@@ -260,22 +262,24 @@ classification's band. `INCONCLUSIVE` has a null score.
 | Qualifying UDP loss 0.5%–2%, per direction | 5 |
 | Qualifying UDP loss greater than 2%, per direction | 15 |
 | Full-size loss with clean standard ping (`TR-02`) | 20 once |
-| Worst TCP coefficient of variation 15%–30% | 5 |
-| Worst TCP coefficient of variation greater than 30% | 15 |
-| TCP collapse intervals | 5 each, capped at 20 |
-| Worst TCP ratio in the warning tier (70%–below 90% at `<= 100 Mbit/s`; 40%–below 70% otherwise) | 10 |
-| Worst TCP ratio in the poor tier (below 70% at `<= 100 Mbit/s`; below 40% otherwise) | 25 |
-| TCP directional asymmetry greater than 30% | 5 |
+| Worst TCP coefficient of variation 15%–30%, when not host-limited | 5 |
+| Worst TCP coefficient of variation greater than 30%, when not host-limited | 15 |
+| TCP collapse intervals, when not host-limited | 5 each, capped at 20 |
+| Worst TCP ratio in the warning tier, when not host-limited (70%–below 90% at `<= 100 Mbit/s`; 40%–below 70% otherwise) | 10 |
+| Worst TCP ratio in the poor tier, when not host-limited (below 70% at `<= 100 Mbit/s`; below 40% otherwise) | 25 |
+| TCP directional asymmetry greater than 30%, when not host-limited | 5 |
 | UDP jitter greater than 5 ms in either direction | 5 once |
 
-The TCP-ratio deduction is omitted when `HOST-01`, `HOST-03`, or `HOST-04`
-marks the run as host-limited. UDP-loss deductions require CPU at most 90%, an
-available result, and a qualifying target reached. A `PERF-01` info result has
-no direct score deduction, but its `GOOD` classification still clamps the score
-to that band. A poor ratio reduced by the isolated-outlier cap uses the 10-point
-warning deduction, keeping the score and finding severity aligned. `PHY-11` has
-no separate arithmetic deduction; its severity sets
-the classification and the score is clamped into that class's band.
+TCP-ratio, coefficient-of-variation, collapse, and asymmetry deductions are
+omitted when `HOST-01`, `HOST-03`, or `HOST-04` marks the run as host-limited.
+Their findings remain in the report; only score arithmetic is gated. UDP-loss
+deductions require CPU at most 90%, an available result, and a qualifying target
+reached. A `PERF-01` info result has no direct score deduction, but its `GOOD`
+classification still clamps the score to that band. A poor ratio reduced by the
+isolated-outlier cap uses the 10-point warning deduction, keeping the score and
+finding severity aligned. `PHY-11` has no separate arithmetic deduction; its
+severity sets the classification and the score is clamped into that class's
+band.
 
 | Classification | Score band |
 |---|---:|

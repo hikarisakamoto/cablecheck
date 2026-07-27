@@ -162,7 +162,7 @@
 
 ## 20. Limitations & Unavailable Tests
 
-> None — every planned test ran and no warnings were raised.
+> None — every planned test ran and no operational warnings were raised.
 
 ## 21. Configuration Used
 

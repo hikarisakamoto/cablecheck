@@ -57,21 +57,24 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 		s -= 20 // full-size loss with clean standard ping
 	}
 
-	// Performance deductions (worst direction for CoV and throughput ratio).
-	cov := 0.0
-	for i := range f.Dir {
-		if f.Dir[i].TCPAvailable && f.Dir[i].TCPCoV > cov {
-			cov = f.Dir[i].TCPCoV
-		}
-	}
-	switch {
-	case cov > thresholds.TCPCoVPoorAbove:
-		s -= 15
-	case cov >= thresholds.TCPCoVWarningAt:
-		s -= 5
-	}
-	s -= math.Min(20, 5*float64(tcpCollapseTotal(f)))
+	// Host-sensitive performance deductions. The findings remain visible when
+	// the run is host-limited, but symptoms the host can cause do not also lower
+	// the cable-health score.
 	if !hostLimited {
+		cov := 0.0
+		for i := range f.Dir {
+			if f.Dir[i].TCPAvailable && f.Dir[i].TCPCoV > cov {
+				cov = f.Dir[i].TCPCoV
+			}
+		}
+		switch {
+		case cov > thresholds.TCPCoVPoorAbove:
+			s -= 15
+		case cov >= thresholds.TCPCoVWarningAt:
+			s -= 5
+		}
+		s -= math.Min(20, 5*float64(tcpCollapseTotal(f)))
+
 		worst := model.Severity(-1)
 		for i := range f.Dir {
 			if f.Dir[i].TCPAvailable {
@@ -87,9 +90,9 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 		case model.SevWarning:
 			s -= 10
 		}
-	}
-	if asymmetryRatio(f) > thresholds.TCPAsymmetryWarnAbove {
-		s -= 5
+		if asymmetryRatio(f) > thresholds.TCPAsymmetryWarnAbove {
+			s -= 5
+		}
 	}
 	if f.Dir[0].UDPJitterMs > thresholds.UDPJitterWarningAbove || f.Dir[1].UDPJitterMs > thresholds.UDPJitterWarningAbove {
 		s -= 5

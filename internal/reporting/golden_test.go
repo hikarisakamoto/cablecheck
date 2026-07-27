@@ -475,6 +475,48 @@ func TestMarkdownGoldenVerdicts(t *testing.T) {
 			},
 		},
 		{
+			name:      "hostlimited-warning-score",
+			golden:    "report-hostlimited-warning-score.md",
+			wantClass: model.HealthWarning,
+			wantScore: 79,
+			wantRules: []string{"TR-08", "PERF-01", "PERF-02", "PERF-03", "PERF-04", "HOST-01"},
+			mutate: func(r *model.Report) {
+				for i := range r.Tests.TCP {
+					tcp := &r.Tests.TCP[i]
+					tcp.ThroughputVariation = 0.20
+					tcp.Collapses = []model.TCPCollapseEvent{{StartSec: 4, Len: 1, MinBps: 200_000_000}}
+					tcp.CPUUtilization = hotCPU
+					if tcp.Direction == model.DirectionPC1ToPC2 {
+						tcp.SenderBitsPerSecond = 941_000_000
+						tcp.ReceiverBitsPerSecond = 940_000_000
+						tcp.MinimumIntervalBps = 200_000_000
+						tcp.MaximumIntervalBps = 950_000_000
+					} else {
+						tcp.SenderBitsPerSecond = 651_000_000
+						tcp.ReceiverBitsPerSecond = 650_000_000
+						tcp.MinimumIntervalBps = 200_000_000
+						tcp.MaximumIntervalBps = 660_000_000
+					}
+				}
+				r.Tests.UDP[0].JitterMs = 6
+			},
+			checkFacts: func(t *testing.T, facts *evaluate.Facts) {
+				t.Helper()
+				if facts.MaxCPUPct <= evaluate.Default().CPUHostLimitedAbove {
+					t.Errorf("max CPU = %.1f%%, want above %.1f%%", facts.MaxCPUPct, evaluate.Default().CPUHostLimitedAbove)
+				}
+				if facts.Dir[0].TCPCoV != 0.20 || facts.Dir[1].TCPCoV != 0.20 {
+					t.Errorf("TCP CoV = %.2f/%.2f, want 0.20/0.20", facts.Dir[0].TCPCoV, facts.Dir[1].TCPCoV)
+				}
+				if facts.Dir[0].TCPCollapses != 1 || facts.Dir[1].TCPCollapses != 1 {
+					t.Errorf("TCP collapses = %d/%d, want 1/1", facts.Dir[0].TCPCollapses, facts.Dir[1].TCPCollapses)
+				}
+				if facts.Dir[0].UDPJitterMs <= evaluate.Default().UDPJitterWarningAbove {
+					t.Errorf("UDP jitter = %.1f ms, want above %.1f ms", facts.Dir[0].UDPJitterMs, evaluate.Default().UDPJitterWarningAbove)
+				}
+			},
+		},
+		{
 			name:        "hostlimited-inconclusive",
 			golden:      "report-hostlimited-inconclusive.md",
 			wantClass:   model.HealthInconclusive,

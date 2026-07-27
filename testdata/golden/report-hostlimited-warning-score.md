@@ -2,18 +2,26 @@
 
 ## 1. Overall Result
 
-**POOR** — The cable exhibits significant problems and should be replaced.
+**WARNING** — The cable works but shows signs that deserve attention.
 
 ## 2. Score & Rule Evidence
 
-- **Score:** 50/100
-- **Reason:** The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
+- **Score:** 79/100
+- **Reason:** UDP jitter above 5 ms on a direct link.
 - **Reason:** TCP throughput does not meet the passing policy for this negotiated link speed.
+- **Reason:** TCP throughput is unstable across intervals.
+- **Reason:** TCP throughput collapsed below 50% of the median in 2 interval(s).
+- **Reason:** TCP throughput is asymmetric between the two directions.
+- **Reason:** CPU was saturated during throughput testing — performance results may be host-limited.
 
 | Rule | Category | Severity | Finding |
 | --- | --- | --- | --- |
-| PHY-06 | physical | poor | The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration. |
-| PERF-01 | performance | info | TCP throughput does not meet the passing policy for this negotiated link speed. |
+| TR-08 | transport | warning | UDP jitter above 5 ms on a direct link. |
+| PERF-01 | performance | warning | TCP throughput does not meet the passing policy for this negotiated link speed. |
+| PERF-02 | performance | warning | TCP throughput is unstable across intervals. |
+| PERF-03 | performance | warning | TCP throughput collapsed below 50% of the median in 2 interval(s). |
+| PERF-04 | performance | warning | TCP throughput is asymmetric between the two directions. |
+| HOST-01 | host | marker | CPU was saturated during throughput testing — performance results may be host-limited. |
 
 ## 3. Session Info
 
@@ -31,17 +39,17 @@
 
 | Side | Hostname | Kernel | OS | NIC | Driver | Speed | Duplex | MTU | MAC | USB |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| pc1 | alpha | 6.9.1-generic | linux/amd64 | enp3s0 | e1000e | 100 Mb/s | full | 1500 | aa:bb:cc:00:11:22 | no |
-| pc2 | bravo | 6.9.1-generic | linux/amd64 | enp4s0 | e1000e | 100 Mb/s | full | 1500 | aa:bb:cc:00:33:44 | no |
+| pc1 | alpha | 6.9.1-generic | linux/amd64 | enp3s0 | e1000e | 1000 Mb/s | full | 1500 | aa:bb:cc:00:11:22 | no |
+| pc2 | bravo | 6.9.1-generic | linux/amd64 | enp4s0 | e1000e | 1000 Mb/s | full | 1500 | aa:bb:cc:00:33:44 | no |
 
 ## 5. Interface & Link Negotiation
 
 | Side | Phase | Speed | Duplex | Autoneg | Link | MDI-X | Partner modes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| pc1 | before | 100 Mb/s | full | on | yes | on (auto) | 100baseT/Full, 1000baseT/Full |
-| pc1 | after | 100 Mb/s | full | on | yes | on (auto) | 100baseT/Full, 1000baseT/Full |
-| pc2 | before | 100 Mb/s | full | on | yes | on (auto) | 100baseT/Full, 1000baseT/Full |
-| pc2 | after | 100 Mb/s | full | on | yes | on (auto) | 100baseT/Full, 1000baseT/Full |
+| pc1 | before | 1000 Mb/s | full | on | yes | on (auto) | 1000baseT/Full |
+| pc1 | after | 1000 Mb/s | full | on | yes | on (auto) | 1000baseT/Full |
+| pc2 | before | 1000 Mb/s | full | on | yes | on (auto) | 1000baseT/Full |
+| pc2 | after | 1000 Mb/s | full | on | yes | on (auto) | 1000baseT/Full |
 
 ## 6. Link Events Timeline
 
@@ -91,46 +99,46 @@
 
 | Completed trials | Minimum | Lower median | Maximum | Inter-trial CoV |
 | --- | --- | --- | --- | --- |
-| 2 | 93.8 Mbit/s | 93.8 Mbit/s | 94.1 Mbit/s | 0.15% |
+| 2 | 940.0 Mbit/s | 940.0 Mbit/s | 940.0 Mbit/s | 0.00% |
 
 | Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 10s | 1 | 94.1 Mbit/s | 94.1 Mbit/s | 0 | 1.20% | 93.8 Mbit/s | 94.3 Mbit/s |
-| 2 | 10s | 1 | 93.8 Mbit/s | 93.8 Mbit/s | 0 | 1.20% | 93.5 Mbit/s | 94.0 Mbit/s |
+| 1 | 10s | 1 | 941.0 Mbit/s | 940.0 Mbit/s | 0 | 20.00% | 200.0 Mbit/s | 950.0 Mbit/s |
+| 2 | 10s | 1 | 941.0 Mbit/s | 940.0 Mbit/s | 0 | 20.00% | 200.0 Mbit/s | 950.0 Mbit/s |
 
 ## 12. TCP Throughput PC2→PC1
 
 | Completed trials | Minimum | Lower median | Maximum | Inter-trial CoV |
 | --- | --- | --- | --- | --- |
-| 2 | 93.7 Mbit/s | 93.7 Mbit/s | 93.9 Mbit/s | 0.13% |
+| 2 | 650.0 Mbit/s | 650.0 Mbit/s | 650.0 Mbit/s | 0.00% |
 
 | Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 10s | 1 | 93.9 Mbit/s | 93.9 Mbit/s | 0 | 1.20% | 93.6 Mbit/s | 94.1 Mbit/s |
-| 2 | 10s | 1 | 93.7 Mbit/s | 93.7 Mbit/s | 0 | 1.20% | 93.4 Mbit/s | 93.9 Mbit/s |
+| 1 | 10s | 1 | 651.0 Mbit/s | 650.0 Mbit/s | 0 | 20.00% | 200.0 Mbit/s | 660.0 Mbit/s |
+| 2 | 10s | 1 | 651.0 Mbit/s | 650.0 Mbit/s | 0 | 20.00% | 200.0 Mbit/s | 660.0 Mbit/s |
 
 ## 13. Bidirectional Stress
 
 | Direction | Sender | Receiver | Retransmits |
 | --- | --- | --- | --- |
-| pc1 → pc2 | 88.4 Mbit/s | 88.3 Mbit/s | 0 |
-| pc2 → pc1 | 88.1 Mbit/s | 88.1 Mbit/s | 0 |
+| pc1 → pc2 | 884.0 Mbit/s | 883.5 Mbit/s | 0 |
+| pc2 → pc1 | 881.2 Mbit/s | 880.9 Mbit/s | 0 |
 
 ## 14. UDP Loss & Jitter
 
 | Direction | Target | Sender | Receiver | Lost/Total | Loss | Jitter | Out-of-order |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| pc1 → pc2 | 80.0 Mbit/s | 80.0 Mbit/s | 80.0 Mbit/s | 0/6793 | 0.00% | 0.11 ms | 0 |
-| pc2 → pc1 | 80.0 Mbit/s | 80.0 Mbit/s | 80.0 Mbit/s | 0/6793 | 0.00% | 0.11 ms | 0 |
+| pc1 → pc2 | 800.0 Mbit/s | 799.8 Mbit/s | 799.8 Mbit/s | 0/67934 | 0.00% | 6.00 ms | 0 |
+| pc2 → pc1 | 800.0 Mbit/s | 799.5 Mbit/s | 799.5 Mbit/s | 0/67934 | 0.00% | 0.11 ms | 0 |
 
 ## 15. CPU Utilization
 
 | Test | Sender CPU | Receiver CPU |
 | --- | --- | --- |
-| TCP pc1 → pc2 | 12.5% | 9.8% |
-| TCP pc1 → pc2 | 12.5% | 9.8% |
-| TCP pc2 → pc1 | 12.5% | 9.8% |
-| TCP pc2 → pc1 | 12.5% | 9.8% |
+| TCP pc1 → pc2 | 96.0% | 88.0% |
+| TCP pc1 → pc2 | 96.0% | 88.0% |
+| TCP pc2 → pc1 | 96.0% | 88.0% |
+| TCP pc2 → pc1 | 96.0% | 88.0% |
 | Bidirectional | 12.5% | 9.8% |
 | UDP pc1 → pc2 | 12.5% | 9.8% |
 | UDP pc2 → pc1 | 12.5% | 9.8% |
@@ -145,16 +153,23 @@
 
 ## 18. Findings Detail
 
-- **PHY-06** [physical/poor] The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
-  - negotiated 100M < expected 1G
-- **PERF-01** [performance/info] TCP throughput does not meet the passing policy for this negotiated link speed.
-  - pc1->pc2: 93820K TCP = 94% of the 100M link
-  - pc2->pc1: 93660K TCP = 94% of the 100M link
+- **TR-08** [transport/warning] UDP jitter above 5 ms on a direct link.
+  - pc1->pc2: 6.00 ms jitter
+- **PERF-01** [performance/warning] TCP throughput does not meet the passing policy for this negotiated link speed.
+  - pc2->pc1: 650M TCP = 65% of the 1G link
+- **PERF-02** [performance/warning] TCP throughput is unstable across intervals.
+  - pc1->pc2: throughput coefficient of variation 20%
+  - pc2->pc1: throughput coefficient of variation 20%
+- **PERF-03** [performance/warning] TCP throughput collapsed below 50% of the median in 2 interval(s).
+  - 2 interval(s) under 50% of the median interval bitrate
+- **PERF-04** [performance/warning] TCP throughput is asymmetric between the two directions.
+  - pc1->pc2 940M vs pc2->pc1 650M (31% difference)
+- **HOST-01** [host/marker] CPU was saturated during throughput testing — performance results may be host-limited.
+  - max iperf3 CPU utilization 96.0% > 90%
 
 ## 19. Recommendations
 
-1. Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool <if>`).
-2. Isolation test: same machines with a different cable, then the same cable between different machines.
+1. Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.
 
 ## 20. Limitations & Unavailable Tests
 
@@ -171,7 +186,7 @@
 - **iperf3 port:** 52001
 - **TCP duration:** 10s
 - **UDP duration:** 10s
-- **UDP rate:** 80Mbit/s
+- **UDP rate:** 800Mbit/s
 - **Parallel streams:** 1
 - **Ping count:** 500
 - **Ping interval:** 20ms
