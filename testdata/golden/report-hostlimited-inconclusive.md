@@ -18,7 +18,7 @@
 ## 3. Session Info
 
 - **Test ID:** ct-20260715-213005-a1b2c3d4
-- **Schema version:** 1.0.0
+- **Schema version:** 1.1.0
 - **Tool version:** 1.0.0
 - **Protocol version:** 1
 - **Started:** 2026-07-15T21:30:05Z
@@ -89,15 +89,25 @@
 
 ## 11. TCP Throughput PC1→PC2
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Completed trials | Minimum | Lower median | Maximum | Inter-trial CoV |
+| --- | --- | --- | --- | --- |
+| 2 | 250.0 Mbit/s | 250.0 Mbit/s | 250.0 Mbit/s | 0.00% |
+
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 10s | 1 | 251.0 Mbit/s | 250.0 Mbit/s | 0 | 1.20% | 247.0 Mbit/s | 252.0 Mbit/s |
+| 2 | 10s | 1 | 251.0 Mbit/s | 250.0 Mbit/s | 0 | 1.20% | 247.0 Mbit/s | 252.0 Mbit/s |
 
 ## 12. TCP Throughput PC2→PC1
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Completed trials | Minimum | Lower median | Maximum | Inter-trial CoV |
+| --- | --- | --- | --- | --- |
+| 2 | 248.0 Mbit/s | 248.0 Mbit/s | 248.0 Mbit/s | 0.00% |
+
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 10s | 1 | 249.0 Mbit/s | 248.0 Mbit/s | 0 | 1.20% | 245.0 Mbit/s | 250.0 Mbit/s |
+| 2 | 10s | 1 | 249.0 Mbit/s | 248.0 Mbit/s | 0 | 1.20% | 245.0 Mbit/s | 250.0 Mbit/s |
 
 ## 13. Bidirectional Stress
 
@@ -118,6 +128,8 @@
 | Test | Sender CPU | Receiver CPU |
 | --- | --- | --- |
 | TCP pc1 → pc2 | 96.0% | 88.0% |
+| TCP pc1 → pc2 | 96.0% | 88.0% |
+| TCP pc2 → pc1 | 96.0% | 88.0% |
 | TCP pc2 → pc1 | 96.0% | 88.0% |
 | Bidirectional | 96.0% | 88.0% |
 | UDP pc1 → pc2 | 96.0% | 88.0% |
@@ -163,7 +175,7 @@
 - **Parallel streams:** 1
 - **Ping count:** 500
 - **Ping interval:** 20ms
-- **TCP repeats:** 1
+- **TCP repeats:** 2
 - **Monitor interval:** 500ms
 - **Cable test requested:** no
 - **Cable test TDR requested:** no

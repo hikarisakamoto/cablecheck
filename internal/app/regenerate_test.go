@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -29,17 +30,20 @@ func regenReport() *model.Report {
 		FinishedAt:      finished,
 		Duration:        model.Duration(45 * time.Second),
 		Configuration: model.ConfigEcho{
-			Role:    "pc1",
-			LocalIP: "192.168.100.1",
-			PeerIP:  "192.168.100.2",
-			Mode:    "quick",
+			Role:       "pc1",
+			LocalIP:    "192.168.100.1",
+			PeerIP:     "192.168.100.2",
+			Mode:       "standard",
+			TCPRepeats: 2,
 		},
 		PC1: model.PeerReport{Hostname: "alpha", NIC: model.NICReport{Name: "enp3s0", Driver: "e1000e", SpeedMbps: 1000, Duplex: "full"}},
 		PC2: model.PeerReport{Hostname: "bravo", NIC: model.NICReport{Name: "enp4s0", Driver: "e1000e", SpeedMbps: 1000, Duplex: "full"}},
 		Tests: model.TestsSection{
 			TCP: []model.TCPResult{
 				{Direction: model.DirectionPC1ToPC2, SenderBitsPerSecond: 941e6, ReceiverBitsPerSecond: 940e6, Duration: model.Duration(30 * time.Second)},
+				{Direction: model.DirectionPC1ToPC2, SenderBitsPerSecond: 931e6, ReceiverBitsPerSecond: 930e6, Duration: model.Duration(30 * time.Second)},
 				{Direction: model.DirectionPC2ToPC1, SenderBitsPerSecond: 939e6, ReceiverBitsPerSecond: 938e6, Duration: model.Duration(30 * time.Second)},
+				{Direction: model.DirectionPC2ToPC1, SenderBitsPerSecond: 929e6, ReceiverBitsPerSecond: 928e6, Duration: model.Duration(30 * time.Second)},
 			},
 		},
 		Classification:        model.HealthExcellent,
@@ -144,6 +148,34 @@ func TestRegenerateFromJSON(t *testing.T) {
 		var stdout bytes.Buffer
 		if err := Regenerate(path, dir, &stdout); err != nil {
 			t.Errorf("Regenerate rejected a same-major schema bump: %v", err)
+		}
+	})
+
+	t.Run("OlderReportDerivesSpreadFromRawTrials", func(t *testing.T) {
+		rep := regenReport()
+		rep.SchemaVersion = "1.0.0"
+		rep.Tests.TCPTrialSpread = nil
+		data, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			t.Fatalf("Marshal legacy report: %v", err)
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "report.json")
+		if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+			t.Fatalf("write legacy report: %v", err)
+		}
+		var stdout bytes.Buffer
+		if err := Regenerate(path, dir, &stdout); err != nil {
+			t.Fatalf("Regenerate legacy report: %v", err)
+		}
+		for _, name := range []string{"report.md", "report.html"} {
+			output, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatalf("read regenerated %s: %v", name, err)
+			}
+			if !bytes.Contains(output, []byte("Inter-trial CoV")) {
+				t.Errorf("regenerated %s omitted spread derived from legacy raw trials", name)
+			}
 		}
 	})
 

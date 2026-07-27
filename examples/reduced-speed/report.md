@@ -18,7 +18,7 @@
 ## 3. Session Info
 
 - **Test ID:** example-reduced-speed
-- **Schema version:** 1.0.0
+- **Schema version:** 1.1.0
 - **Tool version:** 1.0.0
 - **Protocol version:** 1
 - **Started:** 2026-01-02T15:04:05Z
@@ -86,13 +86,13 @@
 
 ## 11. TCP Throughput PC1→PC2
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 30s | 4 | 94.2 Mbit/s | 94.1 Mbit/s | 0 | 1.20% | 91.1 Mbit/s | 96.1 Mbit/s |
 
 ## 12. TCP Throughput PC2→PC1
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 30s | 4 | 94.0 Mbit/s | 93.9 Mbit/s | 0 | 1.20% | 90.9 Mbit/s | 95.9 Mbit/s |
 

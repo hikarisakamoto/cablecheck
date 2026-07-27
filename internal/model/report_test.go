@@ -186,7 +186,7 @@ func fullReport() *Report {
 	}
 
 	return &Report{
-		SchemaVersion:   "1.0.0",
+		SchemaVersion:   SchemaVersion,
 		ToolVersion:     "1.2.3",
 		ProtocolVersion: "1",
 		TestID:          "ct-20260715-090000-a1b2c3d4",
@@ -210,9 +210,18 @@ func fullReport() *Report {
 		PC1: pc1,
 		PC2: pc2,
 		Tests: TestsSection{
-			Ping:          []PingResult{ping},
-			FullSizePing:  []PingResult{ping},
-			TCP:           []TCPResult{tcp},
+			Ping:         []PingResult{ping},
+			FullSizePing: []PingResult{ping},
+			TCP:          []TCPResult{tcp},
+			TCPTrialSpread: &TCPTrialSpread{
+				PC1ToPC2: &TCPTrialStats{
+					CompletedTrials:        2,
+					MinimumBitsPerSecond:   894_000_000,
+					MedianBitsPerSecond:    894_000_000,
+					MaximumBitsPerSecond:   895_000_000,
+					CoefficientOfVariation: 0.000559,
+				},
+			},
 			UDP:           []UDPResult{udp},
 			Bidirectional: bidir,
 			CableTest:     cable,
@@ -276,7 +285,7 @@ func TestReportJSONRoundTrip(t *testing.T) {
 	}
 
 	// schemaVersion must be present verbatim on the JSON surface.
-	if !bytes.Contains(data, []byte(`"schemaVersion":"1.0.0"`)) {
+	if !bytes.Contains(data, []byte(`"schemaVersion":"1.1.0"`)) {
 		t.Errorf("JSON missing schemaVersion: %.200s", data)
 	}
 	// Timestamps must marshal as RFC 3339.
@@ -294,7 +303,7 @@ func TestReportJSONRoundTrip(t *testing.T) {
 	if bytes.Contains(data, []byte(`"token":`)) {
 		t.Errorf("report JSON contains a token field")
 	}
-	// PingResult keeps the schema 1.0.0 wire name even though the Go field
+	// PingResult keeps the schema 1.x wire name even though the Go field
 	// was clarified to LongestMissingRunLen.
 	if !bytes.Contains(data, []byte(`"longestSeqGap":1`)) {
 		t.Errorf("JSON missing stable longestSeqGap wire key: %.500s", data)

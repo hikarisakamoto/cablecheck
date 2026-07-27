@@ -332,7 +332,7 @@ func TestExitCodeMapping(t *testing.T) {
 }
 
 // TestVersionOutput pins the version command rendering: injected BuildInfo
-// plus go runtime version, platform, protocol "1" and schema "1.0.0".
+// plus go runtime version, platform, protocol "1" and schema "1.1.0".
 func TestVersionOutput(t *testing.T) {
 	code, out, _ := runCLI(t, "version")
 	if code != 0 {
@@ -345,7 +345,7 @@ func TestVersionOutput(t *testing.T) {
 		"go:       " + runtime.Version(),
 		"platform: " + runtime.GOOS + "/" + runtime.GOARCH,
 		"protocol: 1",
-		"schema:   1.0.0",
+		"schema:   1.1.0",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("version output misses %q:\n%s", want, out)

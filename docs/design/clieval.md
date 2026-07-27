@@ -537,7 +537,7 @@ Justification: bare nanosecond integers (encoding/json's default for time.Durati
 type HealthClass string // "EXCELLENT","GOOD","WARNING","POOR","FAILED","INCONCLUSIVE"
 
 type Report struct {
-    SchemaVersion string        `json:"schemaVersion"` // "1.0.0"
+    SchemaVersion string        `json:"schemaVersion"` // "1.1.0"
     ToolVersion   string        `json:"toolVersion"`
     TestID        string        `json:"testId"`
     GeneratedAt   time.Time     `json:"generatedAt"`
@@ -552,6 +552,7 @@ type Report struct {
     Ping          []PingResult  `json:"ping,omitempty"`
     FullSizePing  []PingResult  `json:"fullSizePing,omitempty"`
     TCP           []TCPResult   `json:"tcp,omitempty"`
+    TCPTrialSpread *TCPTrialSpread `json:"tcpTrialSpread,omitempty"`
     UDP           []UDPResult   `json:"udp,omitempty"`
     Bidirectional *BidirResult  `json:"bidirectional,omitempty"`
     CableTest     *CableTestResult `json:"cableTest,omitempty"`
@@ -564,7 +565,7 @@ type Report struct {
 
 ### 5.4 Rendering — builders for text, html/template for HTML
 
-Markdown and the compact text summary use builders and shared formatting helpers. The self-contained browser report uses `html/template` so peer-derived strings are contextually escaped; its map-backed and filtered rows are prepared as deterministic view-model slices before template execution.
+Markdown and the compact text summary use builders and shared formatting helpers. The self-contained browser report uses `html/template` so peer-derived strings are contextually escaped; its map-backed and filtered rows are prepared as deterministic view-model slices before template execution. JSON, Markdown, and HTML derive per-direction TCP trial spread (minimum, lower median, maximum, and population CoV) from completed raw trials; the saved aggregate is optional and never treated as authoritative.
 
 ```go
 func RenderJSON(r *model.Report) ([]byte, error)   // json.MarshalIndent, stable key order
@@ -614,7 +615,7 @@ built:    2026-07-15T10:22:03Z
 go:       go1.26.3
 platform: linux/amd64
 protocol: 1
-schema:   1.0.0
+schema:   1.1.0
 ```
 
 `go`/`platform` come from `runtime.Version()` and `runtime.GOOS/GOARCH`; protocol and schema constants come from their packages. Makefile:

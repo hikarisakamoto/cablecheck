@@ -325,6 +325,18 @@ func sectionTCP(b *md, r *model.Report, number int, direction, title string) {
 		b.note("Not run: " + skipReason(r, "tcp", "no TCP result was recorded for this direction."))
 		return
 	}
+	if stats := tcpTrialStats(results, direction); stats != nil {
+		b.table(
+			[]string{"Completed trials", "Minimum", "Lower median", "Maximum", "Inter-trial CoV"},
+			[][]string{{
+				fmt.Sprintf("%d", stats.CompletedTrials),
+				fmtBps(stats.MinimumBitsPerSecond),
+				fmtBps(stats.MedianBitsPerSecond),
+				fmtBps(stats.MaximumBitsPerSecond),
+				fmtPct(stats.CoefficientOfVariation * 100),
+			}},
+		)
+	}
 	rows := make([][]string, 0, len(results))
 	for i, tr := range results {
 		if tr.Incomplete {
@@ -354,7 +366,7 @@ func sectionTCP(b *md, r *model.Report, number int, direction, title string) {
 			fmtBps(tr.MaximumIntervalBps),
 		})
 	}
-	b.table([]string{"Run", "Duration", "Streams", "Sender", "Receiver", "Retransmits", "CoV", "Min interval", "Max interval"}, rows)
+	b.table([]string{"Run", "Duration", "Streams", "Sender", "Receiver", "Retransmits", "Interval CoV", "Min interval", "Max interval"}, rows)
 }
 
 func sectionBidir(b *md, r *model.Report) {
