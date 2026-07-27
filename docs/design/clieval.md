@@ -365,7 +365,7 @@ type Result struct {
     Score           *int // nil for INCONCLUSIVE
     Findings        []Finding
     Recommendations []string
-    RulesVersion    string // "1.4.0"
+    RulesVersion    string // "1.5.0"
 }
 func Evaluate(f *Facts) Result
 ```
@@ -476,12 +476,14 @@ Computed only when class ≠ INCONCLUSIVE; otherwise `Score == nil`, since a num
 | ping loss | −min(40, lossPct×20) per direction |
 | full-size loss w/ clean ping | −20 |
 | TCP retrans 0.1–1% / >1% | −5 / −15 per direction |
-| CoV 15–30% / >30% | −5 / −15 |
-| each collapse | −5 (cap −20) |
+| CoV 15–30% / >30% (not host-limited) | −5 / −15 |
+| each collapse (not host-limited) | −5 (cap −20) |
 | UDP loss 0.5–2% / >2% | −5 / −15 per direction |
 | effective throughput warning/poor tier after the isolated-outlier cap (not host-limited) | −10 / −25 |
-| asymmetry >30% | −5 |
+| asymmetry >30% (not host-limited) | −5 |
 | jitter >5ms | −5 |
+
+`HOST-01`, `HOST-03`, and `HOST-04` suppress all four host-sensitive TCP score deductions: throughput ratio, CoV, collapse, and asymmetry. The findings remain visible, and unrelated deductions such as retransmissions and UDP jitter still apply.
 
 Bands (clamp after deductions): FAILED ≤25, POOR 26–50, WARNING 51–79, GOOD 80–94, EXCELLENT 95–100. EXCELLENT also requires no physical, transport, or performance findings (even an informational deviation demotes it to GOOD), all critical tests ran, ping loss 0 both dirs, retrans <0.1%, CoV <15%, UDP loss <0.5%, and throughput in a passing speed tier. Links at or below 100 Mbit/s always produce at least an informational PERF-01 finding.
 
@@ -558,10 +560,17 @@ type Report struct {
     CableTest     *CableTestResult `json:"cableTest,omitempty"`
     Monitoring    []MonitoringEvent `json:"monitoring,omitempty"`
     Unavailable   []UnavailableTest `json:"unavailable,omitempty"` // {name, reason}
-    Evaluation    Evaluation    `json:"evaluation"` // class, score *int, findings, recommendations, rulesVersion
+    Classification HealthClass `json:"classification"`
+    Score          *int         `json:"score"` // nil for INCONCLUSIVE
+    Findings       []Finding    `json:"findings,omitempty"`
+    Recommendations []string    `json:"recommendations"`
     RawFiles      []RawFileRef  `json:"rawFiles"`
 }
 ```
+
+`RulesVersion` identifies the in-process evaluation policy but is not persisted
+in report schema 1.2.0. Saved reports retain their original classification and
+score and are not re-evaluated during offline rendering.
 
 ### 5.4 Rendering — builders for text, html/template for HTML
 

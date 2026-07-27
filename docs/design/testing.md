@@ -266,7 +266,7 @@ All from `testdata/ip/*.json` fixtures through FakeRunner — never the real `ip
 
 ### internal/evaluate
 - `TestCounterDelta` — table: normal increase; after<before (wrap/reset) ⇒ `(0, ok=false)` conservative; missing-in-after; missing-in-before; zero-delta.
-- `TestRuleXxx` (one per rule) — CRC delta>0 under load ⇒ physical/POOR-tier finding; zero phys errors + low throughput + CPU≥90% ⇒ host-limited ⇒ INCONCLUSIVE override; UDP loss near saturation alone ⇒ note, not POOR (must correlate); half duplex ⇒ WARNING; cable-test open ⇒ FAILED-tier; UNAVAILABLE never downgrades.
+- `TestRuleXxx` (one per rule) — CRC delta>0 under load ⇒ physical/POOR-tier finding; zero phys errors + low throughput + CPU>90% ⇒ host-limited ⇒ INCONCLUSIVE override; UDP loss near saturation alone ⇒ note, not POOR (must correlate); half duplex ⇒ WARNING; cable-test open ⇒ FAILED-tier; UNAVAILABLE never downgrades.
 - `TestClassifyGoldenScenarios` — 5 golden inputs mirroring the example reports (healthy-gigabit ⇒ EXCELLENT/GOOD, 100M-negotiation ⇒ POOR, crc-errors ⇒ POOR, host-limited ⇒ INCONCLUSIVE, disconnected ⇒ FAILED); asserts classification, exit-code mapping (0/2/2/3/2), and that every classification carries ≥1 Finding with evidence strings.
 - `TestScoreDeterministic` — same input twice ⇒ identical score + rule trace.
 
@@ -274,7 +274,7 @@ All from `testdata/ip/*.json` fixtures through FakeRunner — never the real `ip
 - `TestReportJSONRoundTrip` — marshal→unmarshal→reflect.DeepEqual; `schemaVersion` present; timestamps RFC3339.
 
 ### internal/reporting
-- `TestMarkdownGolden` — golden files `testdata/golden/report-{healthy,reduced-speed,crc,host-limited,failed}.md`; deterministic input (FakeClock timestamps, fixed testId); `-update` flag (`var update = flag.Bool("update", false, ...)`); byte-exact compare; asserts all 23 mandated section headers present via a separate structural test so a golden regen can't silently drop sections.
+- `TestMarkdownGolden` — golden files cover healthy, reduced-speed, CRC, NIC-counter, host-limited warning/inconclusive, and failed verdicts; deterministic input (FakeClock timestamps, fixed testId); `-update` flag (`var update = flag.Bool("update", false, ...)`); byte-exact compare; asserts all 23 mandated section headers present via a separate structural test so a golden regen can't silently drop sections.
 - `TestHTMLGoldenHealthy` plus structure/escaping/self-containment tests — byte-exact healthy HTML, all 23 open sections for populated and empty reports, deterministic charts, and no executable peer-derived markup or external assets.
 - `TestSummaryTxtGolden` — same pattern.
 - `TestRegenerateFromJSON` — write report.json → `reporting.Regenerate(jsonPath, outDir)` (the `cablecheck report` engine) ⇒ report.md + summary.txt + report.html byte-identical to direct generation. Pins the CLI subcommand's core.
