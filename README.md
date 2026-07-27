@@ -309,10 +309,21 @@ Use controlled substitutions:
 1. Save the original report and raw directories.
 2. Keep both PCs, NIC ports, IP settings, mode, and test parameters unchanged.
 3. Replace only the cable with a known-good Cat5e/Cat6 cable and rerun.
-4. Compare negotiated speed, CRC/framing and carrier deltas, ping/full-size loss, retransmissions, UDP loss, and the findings list.
+4. Compare the original baseline with the candidate run:
+
+   ```bash
+   cablecheck compare path/to/baseline/report.json path/to/candidate/report.json
+   ```
+
+   The command shows the saved verdict transition, negotiated speed, physical-error
+   counters, ping and full-size loss, TCP throughput and retransmissions, UDP loss,
+   and finding changes. It warns when the mode, negotiated speed, NICs, or test
+   parameters differ, but still renders the comparison.
 5. If the symptom persists, move the test to different NIC ports or different PCs before blaming the original cable.
 
-This A/B comparison is much stronger than an isolated throughput number.
+This A/B comparison is much stronger than an isolated throughput number. CableCheck
+does not re-evaluate saved reports: their classifications remain authoritative, and
+the per-metric tally is descriptive rather than a replacement verdict.
 
 ## Common false positives
 
