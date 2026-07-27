@@ -75,7 +75,7 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 		worst := model.Severity(-1)
 		for i := range f.Dir {
 			if f.Dir[i].TCPAvailable {
-				_, severity, deviation := classifyThroughput(f.Dir[i].TCPBitrate, f.NegotiatedSpeed, thresholds)
+				_, severity, deviation, _ := assessThroughput(f, i, thresholds)
 				if deviation && severity > worst {
 					worst = severity
 				}

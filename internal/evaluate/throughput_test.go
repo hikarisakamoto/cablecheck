@@ -1,6 +1,7 @@
 package evaluate
 
 import (
+	"strings"
 	"testing"
 
 	"cablecheck/internal/model"
@@ -285,5 +286,120 @@ func TestLowSpeedLineRateIsInfoWithNoDeduction(t *testing.T) {
 	}
 	if score := scoreFor(facts, nil, model.HealthExcellent, thresholds); score == nil || *score != 100 {
 		t.Errorf("score at 100M line rate = %v, want 100 (info => no deduction)", score)
+	}
+}
+
+func TestPERF01CapsSingleTrialOutlierOnCleanPhysicalLayer(t *testing.T) {
+	thresholds := Default()
+	facts := cleanFacts()
+	facts.Dir[0] = DirFacts{
+		TCPAvailable:            true,
+		TCPBitrate:              300_000_000,
+		TCPTrialCount:           2,
+		TCPThroughputDeviations: 1,
+	}
+	facts.Dir[1].TCPAvailable = false
+
+	finding := rulePERF01(facts, thresholds)
+	if finding == nil || finding.Severity != model.SevWarning {
+		t.Fatalf("PERF-01 = %+v, want warning after single-outlier cap", finding)
+	}
+	if evidence := strings.Join(finding.Evidence, " "); !strings.Contains(evidence, "1 of 2") {
+		t.Errorf("PERF-01 evidence = %q, want capped trial count", evidence)
+	}
+
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+	score := scoreFor(facts, nil, model.HealthExcellent, thresholds)
+	if score == nil || *score != 90 {
+		t.Errorf("score = %v, want warning deduction 10", score)
+	}
+}
+
+func TestPERF01OutlierCapRequiresCleanPhysicalEvidence(t *testing.T) {
+	base := func() *Facts {
+		facts := cleanFacts()
+		facts.Dir[0] = DirFacts{
+			TCPAvailable:            true,
+			TCPBitrate:              300_000_000,
+			TCPTrialCount:           2,
+			TCPThroughputDeviations: 1,
+		}
+		facts.Dir[1].TCPAvailable = false
+		return facts
+	}
+	tests := []struct {
+		name   string
+		mutate func(*Facts)
+	}{
+		{name: "one trial", mutate: func(f *Facts) { f.Dir[0].TCPTrialCount = 1 }},
+		{name: "no deviation", mutate: func(f *Facts) { f.Dir[0].TCPThroughputDeviations = 0 }},
+		{name: "repeated deviation", mutate: func(f *Facts) { f.Dir[0].TCPThroughputDeviations = 2 }},
+		{name: "pc1 counters unreliable", mutate: func(f *Facts) { f.PC1.DeltaOK = false }},
+		{name: "pc2 counters unreliable", mutate: func(f *Facts) { f.PC2.DeltaOK = false }},
+		{name: "link down", mutate: func(f *Facts) { f.LinkUpAtEnd = false }},
+		{name: "CRC movement", mutate: func(f *Facts) { f.PC1.CRCClassErrors = 1 }},
+		{name: "carrier event", mutate: func(f *Facts) { f.PC1.CarrierEvents = 1 }},
+		{name: "renegotiation", mutate: func(f *Facts) { f.Renegotiations = 1 }},
+		{name: "half duplex", mutate: func(f *Facts) { f.HalfDuplex = true }},
+		{name: "reduced negotiated speed", mutate: func(f *Facts) { f.ExpectedSpeed = 2_000_000_000 }},
+		{name: "cable diagnostic fault", mutate: func(f *Facts) {
+			f.CableTestRan = true
+			f.CableTestPairs = []model.CablePairResult{{Pair: "A", Status: model.PairOpen}}
+		}},
+		{name: "frame size errors", mutate: func(f *Facts) { f.PC1.JabberSizeErrors = 1 }},
+		{name: "carrier PHY errors", mutate: func(f *Facts) { f.PC1.CarrierPHYErrors = 1 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := base()
+			tc.mutate(facts)
+			finding := rulePERF01(facts, Default())
+			if finding == nil || finding.Severity != model.SevPoor {
+				t.Errorf("PERF-01 = %+v, want uncapped poor", finding)
+			}
+		})
+	}
+}
+
+func TestPERF01OutlierCapIsPerDirection(t *testing.T) {
+	facts := cleanFacts()
+	for i := range facts.Dir {
+		facts.Dir[i] = DirFacts{
+			TCPAvailable:            true,
+			TCPBitrate:              300_000_000,
+			TCPTrialCount:           2,
+			TCPThroughputDeviations: 1,
+		}
+	}
+	facts.Dir[1].TCPThroughputDeviations = 2
+
+	finding := rulePERF01(facts, Default())
+	if finding == nil || finding.Severity != model.SevPoor {
+		t.Errorf("PERF-01 = %+v, want uncapped poor from pc2->pc1", finding)
+	}
+}
+
+func TestPERF01CapDoesNotHideCollapseFinding(t *testing.T) {
+	facts := cleanFacts()
+	facts.Dir[0] = DirFacts{
+		TCPAvailable:            true,
+		TCPBitrate:              300_000_000,
+		TCPTrialCount:           2,
+		TCPThroughputDeviations: 1,
+		TCPCollapses:            Default().TCPCollapsePoorAt,
+	}
+	facts.Dir[1].TCPAvailable = false
+
+	result := Evaluate(facts)
+	perf01 := findingByID(result, "PERF-01")
+	if perf01 == nil || perf01.Severity != model.SevWarning {
+		t.Errorf("PERF-01 = %+v, want capped warning", perf01)
+	}
+	perf03 := findingByID(result, "PERF-03")
+	if perf03 == nil || perf03.Severity != model.SevPoor {
+		t.Errorf("PERF-03 = %+v, want retained poor collapse evidence", perf03)
+	}
+	if result.Class != model.HealthPoor {
+		t.Errorf("class = %v, want POOR from collapse evidence", result.Class)
 	}
 }

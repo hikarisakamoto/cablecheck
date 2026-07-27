@@ -3,6 +3,7 @@ package evaluate
 import (
 	"math"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -272,34 +273,66 @@ func TestFactsFromReportDirections(t *testing.T) {
 	}
 }
 
-func TestFactsFromReportUsesWorstRepeatedTCPResult(t *testing.T) {
+func TestLowerMedian(t *testing.T) {
+	values := []float64{9, 1, 7, 5}
+	tests := []struct {
+		name   string
+		values []float64
+		want   float64
+	}{
+		{name: "empty", want: 0},
+		{name: "singleton", values: []float64{7}, want: 7},
+		{name: "two selects lower", values: []float64{9, 1}, want: 1},
+		{name: "odd", values: []float64{9, 1, 5}, want: 5},
+		{name: "even selects lower middle", values: values, want: 5},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			before := slices.Clone(tc.values)
+			if got := lowerMedian(tc.values); got != tc.want {
+				t.Errorf("lowerMedian(%v) = %v, want %v", tc.values, got, tc.want)
+			}
+			if !slices.Equal(tc.values, before) {
+				t.Errorf("lowerMedian mutated input: got %v, want %v", tc.values, before)
+			}
+		})
+	}
+	if got := median([]float64{9, 1}); got != 5 {
+		t.Errorf("median([9 1]) = %v, want conventional even-sample median 5", got)
+	}
+}
+
+func TestFactsFromReportUsesLowerMedianForRepeatedTCPResults(t *testing.T) {
 	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
 	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	trial := func(bitrate float64, cov float64, retrans uint64, collapse bool) model.TCPResult {
+		intervals := []model.TCPInterval{{BitsPerSecond: 100_000_000, Bytes: 1_448_000}}
+		if collapse {
+			intervals = []model.TCPInterval{
+				{BitsPerSecond: 100_000_000, Bytes: 362_000},
+				{BitsPerSecond: 100_000_000, Bytes: 362_000},
+				{BitsPerSecond: 10_000_000, Bytes: 362_000},
+				{BitsPerSecond: 100_000_000, Bytes: 362_000},
+			}
+		}
+		return model.TCPResult{
+			Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: bitrate,
+			ThroughputVariation: cov, Retransmissions: uint64Ptr(retrans),
+			IntervalResults: intervals,
+		}
+	}
 	r := &model.Report{
 		PC1: model.PeerReport{NIC: model.NICReport{Name: "eth0", Driver: "e1000e", SpeedMbps: 1000}},
 		PC2: model.PeerReport{NIC: model.NICReport{Name: "eth1", Driver: "r8169", SpeedMbps: 1000}},
 		Tests: model.TestsSection{
-			Ping: []model.PingResult{
-				{Direction: model.DirectionPC1ToPC2},
-				{Direction: model.DirectionPC1ToPC2, LossPercent: 3, Duplicates: 2, Spikes: []model.PingSpike{{}}, LongestGapMs: 1500},
-			},
 			TCP: []model.TCPResult{
-				{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+				trial(900_000_000, 0.4, 40, false),
+				trial(100_000_000, 0.1, 10, false),
+				trial(700_000_000, 0.3, 30, true),
+				trial(500_000_000, 0.2, 20, false),
 				{
-					Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 300_000_000,
-					ThroughputVariation: 0.4, Retransmissions: uint64Ptr(100),
-					IntervalResults: []model.TCPInterval{
-						{BitsPerSecond: 100_000_000, Bytes: 12_500_000},
-						{BitsPerSecond: 100_000_000, Bytes: 12_500_000},
-						{BitsPerSecond: 10_000_000, Bytes: 1_250_000},
-						{BitsPerSecond: 100_000_000, Bytes: 12_500_000},
-					},
+					Direction: model.DirectionPC2ToPC1, SenderBitsPerSecond: 920_000_000,
 				},
-				{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
-			},
-			UDP: []model.UDPResult{
-				{Direction: model.DirectionPC1ToPC2, TargetBps: 800_000_000, ActualSenderBps: 800_000_000, LossPercent: 4, JitterMs: 7},
-				{Direction: model.DirectionPC1ToPC2, TargetBps: 400_000_000, ActualSenderBps: 400_000_000},
 			},
 		},
 		InitialCounters: model.PeerCounters{PC1: before, PC2: before},
@@ -307,33 +340,184 @@ func TestFactsFromReportUsesWorstRepeatedTCPResult(t *testing.T) {
 	}
 
 	f := FactsFromReport(r)
-	if got := f.Dir[0].TCPBitrate; got != 300_000_000 {
-		t.Fatalf("pc1->pc2 TCP bitrate = %s, want worst repeated result 300 Mbit/s", got)
+	if got := f.Dir[0].TCPBitrate; got != 500_000_000 {
+		t.Fatalf("pc1->pc2 TCP bitrate = %s, want lower median 500 Mbit/s", got)
 	}
-	if got := f.Dir[0].TCPCoV; got != 0.4 {
-		t.Errorf("pc1->pc2 TCP variation = %v, want worst repeated result 0.4", got)
+	if got := f.Dir[0].TCPCoV; got != 0.2 {
+		t.Errorf("pc1->pc2 TCP variation = %v, want lower median 0.2", got)
 	}
-	if got := f.Dir[0].TCPRetransRate; got <= 0 {
-		t.Errorf("pc1->pc2 retransmit rate = %v, want degraded repeat's non-zero rate", got)
+	if got := f.Dir[0].TCPRetransRate; math.Abs(got-0.02) > 1e-12 {
+		t.Errorf("pc1->pc2 retransmit rate = %v, want lower median 0.02", got)
 	}
 	if got := f.Dir[0].TCPCollapses; got != 1 {
-		t.Errorf("pc1->pc2 collapses = %d, want the collapse from the degraded repeat", got)
+		t.Errorf("pc1->pc2 collapses = %d, want maximum 1", got)
 	}
-	if got := f.Dir[0].PingLossPct; got != 3 {
-		t.Errorf("pc1->pc2 ping loss = %v, want worst repeated result 3", got)
+	if got := f.Dir[0].TCPTrialCount; got != 4 {
+		t.Errorf("pc1->pc2 trial count = %d, want 4", got)
 	}
-	if got := f.Dir[0].UDPLossPct; got != 4 {
-		t.Errorf("pc1->pc2 UDP loss = %v, want lossy primary-rate result 4", got)
+	if got := f.Dir[0].TCPThroughputDeviations; got != 3 {
+		t.Errorf("pc1->pc2 throughput deviations = %d, want 3", got)
 	}
-	if got := f.Dir[0].UDPJitterMs; got != 7 {
-		t.Errorf("pc1->pc2 UDP jitter = %v, want worst repeated result 7", got)
+	if got := f.Dir[1].TCPBitrate; got != 920_000_000 {
+		t.Errorf("pc2->pc1 TCP bitrate = %s, want sender fallback 920 Mbit/s", got)
 	}
-	res := Evaluate(f)
-	if res.Class != model.HealthPoor {
-		t.Errorf("class = %s, want POOR from the degraded repeat (findings %v)", res.Class, findingIDs(res))
+	if got := f.Dir[1].TCPTrialCount; got != 1 {
+		t.Errorf("pc2->pc1 trial count = %d, want 1", got)
 	}
-	if !slices.Contains(findingIDs(res), "PERF-01") {
-		t.Errorf("findings = %v, want PERF-01 from the degraded repeat", findingIDs(res))
+}
+
+func TestFactsFromReportExcludesMissingRetransmissionSamples(t *testing.T) {
+	withRate := func(retrans *uint64) model.TCPResult {
+		return model.TCPResult{
+			Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 900_000_000,
+			Retransmissions: retrans,
+			IntervalResults: []model.TCPInterval{{Bytes: 1_448_000}},
+		}
+	}
+	high := uint64(20)
+	zero := uint64(0)
+	tests := []struct {
+		name   string
+		trials []model.TCPResult
+		want   float64
+	}{
+		{name: "missing plus high keeps high", trials: []model.TCPResult{withRate(nil), withRate(&high)}, want: 0.02},
+		{name: "explicit zero participates", trials: []model.TCPResult{withRate(&zero), withRate(&high)}, want: 0},
+		{name: "all missing has no rate", trials: []model.TCPResult{withRate(nil), withRate(nil)}, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := FactsFromReport(&model.Report{Tests: model.TestsSection{TCP: tc.trials}})
+			if got := facts.Dir[0].TCPRetransRate; math.Abs(got-tc.want) > 1e-12 {
+				t.Errorf("TCPRetransRate = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFactsFromReportKeepsWorstQualifyingRepeatedUDPResult(t *testing.T) {
+	outOfOrder := int64(20)
+	report := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		Tests: model.TestsSection{UDP: []model.UDPResult{
+			{Direction: model.DirectionPC1ToPC2, TargetBps: 800_000_000, ActualSenderBps: 800_000_000, LossPercent: 1, JitterMs: 2, TotalPackets: 10_000},
+			{Direction: model.DirectionPC1ToPC2, TargetBps: 400_000_000, ActualSenderBps: 400_000_000, LossPercent: 4, JitterMs: 7, TotalPackets: 10_000, OutOfOrder: &outOfOrder},
+		}},
+	}
+
+	facts := FactsFromReport(report)
+	d := facts.Dir[0]
+	if !d.UDPTargetReached || d.UDPLossPct != 4 || d.UDPJitterMs != 7 || d.UDPOutOfOrderPct != 0.2 {
+		t.Errorf("repeated UDP facts = %+v, want qualifying maxima loss=4 jitter=7 reorder=0.2", d)
+	}
+}
+
+func TestEvaluateCapsOneOfTwoTCPThroughputOutliers(t *testing.T) {
+	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	report := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		PC2: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		Tests: model.TestsSection{TCP: []model.TCPResult{
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 300_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
+		}},
+		InitialCounters: model.PeerCounters{PC1: before, PC2: before},
+		FinalCounters:   model.PeerCounters{PC1: after, PC2: after},
+	}
+
+	facts := FactsFromReport(report)
+	if facts.Dir[0].TCPBitrate != 300_000_000 || facts.Dir[0].TCPTrialCount != 2 || facts.Dir[0].TCPThroughputDeviations != 1 {
+		t.Fatalf("pc1->pc2 facts = %+v, want lower 300 Mbit/s with one of two deviations", facts.Dir[0])
+	}
+	result := Evaluate(facts)
+	finding := findingByID(result, "PERF-01")
+	if finding == nil || finding.Severity != model.SevWarning {
+		t.Errorf("PERF-01 = %+v, want capped warning", finding)
+	}
+	if result.Class != model.HealthWarning {
+		t.Errorf("class = %v, want WARNING (findings %v)", result.Class, findingIDs(result))
+	}
+	if result.Score == nil || *result.Score != Default().WarningScoreBand.Max {
+		t.Errorf("score = %v, want warning-band maximum %d", result.Score, Default().WarningScoreBand.Max)
+	}
+}
+
+func TestEvaluateCapsIsolatedOutlierOnLowSpeedLink(t *testing.T) {
+	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	// The <=100M tier never passes silently (PassDisabled), so a line-rate
+	// trial is annotated INFO. The deviation counter must still treat it as a
+	// pass; otherwise the isolated-outlier cap could never fire on this tier.
+	report := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 100}},
+		PC2: model.PeerReport{NIC: model.NICReport{SpeedMbps: 100}},
+		Tests: model.TestsSection{TCP: []model.TCPResult{
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 95_000_000},
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 30_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 95_000_000},
+		}},
+		InitialCounters: model.PeerCounters{PC1: before, PC2: before},
+		FinalCounters:   model.PeerCounters{PC1: after, PC2: after},
+	}
+
+	facts := FactsFromReport(report)
+	if facts.Dir[0].TCPBitrate != 30_000_000 || facts.Dir[0].TCPTrialCount != 2 || facts.Dir[0].TCPThroughputDeviations != 1 {
+		t.Fatalf("pc1->pc2 facts = %+v, want lower 30 Mbit/s with the line-rate trial not counted as a deviation", facts.Dir[0])
+	}
+	finding := findingByID(Evaluate(facts), "PERF-01")
+	if finding == nil || finding.Severity != model.SevWarning {
+		t.Errorf("PERF-01 = %+v, want capped warning on a <=100M link", finding)
+	}
+}
+
+func TestAssessThroughputLeavesNonPoorAggregateUncapped(t *testing.T) {
+	facts := cleanFacts()
+	// 600 Mbit/s of a 1G link is a WARNING aggregate, already below POOR, so
+	// the cap must not engage even with an isolated deviating trial.
+	facts.Dir[0] = DirFacts{
+		TCPAvailable:            true,
+		TCPBitrate:              600_000_000,
+		TCPTrialCount:           2,
+		TCPThroughputDeviations: 1,
+	}
+	facts.Dir[1].TCPAvailable = false
+
+	_, severity, deviation, capped := assessThroughput(facts, 0, Default())
+	if !deviation || severity != model.SevWarning || capped {
+		t.Errorf("assessThroughput = (sev %v, deviation %v, capped %v), want warning/true/false", severity, deviation, capped)
+	}
+	finding := rulePERF01(facts, Default())
+	if finding == nil || finding.Severity != model.SevWarning {
+		t.Fatalf("PERF-01 = %+v, want warning", finding)
+	}
+	if evidence := strings.Join(finding.Evidence, " "); strings.Contains(evidence, "trials missed policy") {
+		t.Errorf("PERF-01 evidence = %q, want no cap annotation for a non-poor aggregate", evidence)
+	}
+}
+
+func TestFactsFromReportSoakExpectsRepeatsTimesCompletedCycles(t *testing.T) {
+	report := &model.Report{
+		Configuration:       model.ConfigEcho{Mode: "soak", TCPRepeats: 2},
+		SoakCyclesCompleted: 2,
+		Tests: model.TestsSection{TCP: []model.TCPResult{
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 940_000_000},
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 939_000_000},
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 938_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 940_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 939_000_000},
+		}},
+	}
+
+	facts := FactsFromReport(report)
+	if !facts.Dir[0].TCPAvailable || facts.Dir[0].TCPTrialCount != 4 {
+		t.Errorf("pc1->pc2 facts = %+v, want all 4 expected soak trials available", facts.Dir[0])
+	}
+	if facts.Dir[1].TCPAvailable || facts.Dir[1].TCPTrialCount != 0 {
+		t.Errorf("pc2->pc1 facts = %+v, want unavailable after only 3 of 4 expected soak trials", facts.Dir[1])
 	}
 }
 
@@ -390,6 +574,28 @@ func TestFactsFromReportAnyIncompleteTCPRepeatMakesDirectionUnavailable(t *testi
 	f := FactsFromReport(r)
 	if f.Dir[0].TCPAvailable {
 		t.Errorf("TCPAvailable = true, want false when any repeat is incomplete: %+v", f.Dir[0])
+	}
+	if f.Dir[0].TCPTrialCount != 0 || f.Dir[0].TCPThroughputDeviations != 0 {
+		t.Errorf("incomplete TCP trial facts leaked into direction: %+v", f.Dir[0])
+	}
+}
+
+func TestFactsFromReportMissingConfiguredTCPRepeatMakesDirectionUnavailable(t *testing.T) {
+	report := &model.Report{
+		Configuration: model.ConfigEcho{Mode: "standard", TCPRepeats: 2},
+		Tests: model.TestsSection{TCP: []model.TCPResult{
+			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
+			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 940_000_000},
+		}},
+	}
+
+	facts := FactsFromReport(report)
+	if facts.Dir[0].TCPAvailable || facts.Dir[0].TCPTrialCount != 0 {
+		t.Errorf("pc1->pc2 facts = %+v, want unavailable after one of two configured repeats was absent", facts.Dir[0])
+	}
+	if !facts.Dir[1].TCPAvailable || facts.Dir[1].TCPTrialCount != 2 {
+		t.Errorf("pc2->pc1 facts = %+v, want both configured repeats available", facts.Dir[1])
 	}
 }
 
