@@ -15,7 +15,7 @@ import (
 
 // SchemaVersion is the current report schema version, written into every
 // report's schemaVersion field. Consumers must check the major component.
-const SchemaVersion = "1.0.0"
+const SchemaVersion = "1.1.0"
 
 // Report is the complete record of one CableCheck run and the single source
 // for all rendered outputs (report.json, report.md, summary.txt, report.html).
@@ -26,7 +26,7 @@ const SchemaVersion = "1.0.0"
 // it) and timestamps marshal as RFC 3339. The session token has no field
 // anywhere in the report, so it cannot leak by construction.
 type Report struct {
-	// SchemaVersion is the report schema version, e.g. "1.0.0".
+	// SchemaVersion is the report schema version, e.g. "1.1.0".
 	SchemaVersion string `json:"schemaVersion"`
 	// ToolVersion is the CableCheck version that produced the report.
 	ToolVersion string `json:"toolVersion"`
@@ -226,6 +226,10 @@ type TestsSection struct {
 	FullSizePing []PingResult `json:"fullSizePing,omitempty"`
 	// TCP holds the one-way TCP throughput tests.
 	TCP []TCPResult `json:"tcp,omitempty"`
+	// TCPTrialSpread summarizes completed TCP trials by direction. It is a
+	// reporting-only aggregate derived from TCP and is omitted unless at least
+	// one direction has two completed trials.
+	TCPTrialSpread *TCPTrialSpread `json:"tcpTrialSpread,omitempty"`
 	// UDP holds the one-way UDP loss/jitter tests.
 	UDP []UDPResult `json:"udp,omitempty"`
 	// Bidirectional holds the bidirectional stress test.

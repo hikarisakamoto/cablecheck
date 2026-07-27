@@ -18,7 +18,7 @@
 ## 3. Session Info
 
 - **Test ID:** ct-20260715-213005-a1b2c3d4
-- **Schema version:** 1.0.0
+- **Schema version:** 1.1.0
 - **Tool version:** 1.0.0
 - **Protocol version:** 1
 - **Started:** 2026-07-15T21:30:05Z
@@ -89,15 +89,25 @@
 
 ## 11. TCP Throughput PC1→PC2
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Completed trials | Minimum | Lower median | Maximum | Inter-trial CoV |
+| --- | --- | --- | --- | --- |
+| 2 | 93.8 Mbit/s | 93.8 Mbit/s | 94.1 Mbit/s | 0.15% |
+
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 10s | 1 | 94.1 Mbit/s | 94.1 Mbit/s | 0 | 1.20% | 93.8 Mbit/s | 94.3 Mbit/s |
+| 2 | 10s | 1 | 93.8 Mbit/s | 93.8 Mbit/s | 0 | 1.20% | 93.5 Mbit/s | 94.0 Mbit/s |
 
 ## 12. TCP Throughput PC2→PC1
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Completed trials | Minimum | Lower median | Maximum | Inter-trial CoV |
+| --- | --- | --- | --- | --- |
+| 2 | 93.7 Mbit/s | 93.7 Mbit/s | 93.9 Mbit/s | 0.13% |
+
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 10s | 1 | 93.9 Mbit/s | 93.9 Mbit/s | 0 | 1.20% | 93.6 Mbit/s | 94.1 Mbit/s |
+| 2 | 10s | 1 | 93.7 Mbit/s | 93.7 Mbit/s | 0 | 1.20% | 93.4 Mbit/s | 93.9 Mbit/s |
 
 ## 13. Bidirectional Stress
 
@@ -118,6 +128,8 @@
 | Test | Sender CPU | Receiver CPU |
 | --- | --- | --- |
 | TCP pc1 → pc2 | 12.5% | 9.8% |
+| TCP pc1 → pc2 | 12.5% | 9.8% |
+| TCP pc2 → pc1 | 12.5% | 9.8% |
 | TCP pc2 → pc1 | 12.5% | 9.8% |
 | Bidirectional | 12.5% | 9.8% |
 | UDP pc1 → pc2 | 12.5% | 9.8% |
@@ -136,8 +148,8 @@
 - **PHY-06** [physical/poor] The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
   - negotiated 100M < expected 1G
 - **PERF-01** [performance/info] TCP throughput does not meet the passing policy for this negotiated link speed.
-  - pc1->pc2: 94.1M TCP = 94% of the 100M link
-  - pc2->pc1: 93910K TCP = 94% of the 100M link
+  - pc1->pc2: 93820K TCP = 94% of the 100M link
+  - pc2->pc1: 93660K TCP = 94% of the 100M link
 
 ## 19. Recommendations
 
@@ -163,7 +175,7 @@
 - **Parallel streams:** 1
 - **Ping count:** 500
 - **Ping interval:** 20ms
-- **TCP repeats:** 1
+- **TCP repeats:** 2
 - **Monitor interval:** 500ms
 - **Cable test requested:** no
 - **Cable test TDR requested:** no

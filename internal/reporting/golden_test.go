@@ -167,7 +167,7 @@ func goldenReport() *model.Report {
 	}
 
 	return &model.Report{
-		SchemaVersion:   "1.0.0",
+		SchemaVersion:   model.SchemaVersion,
 		ToolVersion:     "1.0.0",
 		ProtocolVersion: "1",
 		TestID:          "ct-20260715-213005-a1b2c3d4",
@@ -188,7 +188,7 @@ func goldenReport() *model.Report {
 			ParallelStreams: 1,
 			PingCount:       500,
 			PingInterval:    model.Duration(20 * time.Millisecond),
-			TCPRepeats:      1,
+			TCPRepeats:      2,
 			MonitorInterval: model.Duration(500 * time.Millisecond),
 			Output:          ".",
 			TokenGenerated:  true,
@@ -206,7 +206,9 @@ func goldenReport() *model.Report {
 			},
 			TCP: []model.TCPResult{
 				tcp(model.DirectionPC1ToPC2, 941_200_000, 941_000_000),
+				tcp(model.DirectionPC1ToPC2, 938_500_000, 938_200_000),
 				tcp(model.DirectionPC2ToPC1, 939_400_000, 939_100_000),
+				tcp(model.DirectionPC2ToPC1, 936_900_000, 936_600_000),
 			},
 			UDP: []model.UDPResult{
 				udp(model.DirectionPC1ToPC2, 799_800_000),
@@ -478,15 +480,18 @@ func TestMarkdownGoldenVerdicts(t *testing.T) {
 			wantRules:   []string{"PERF-01", "HOST-01"},
 			wantNoScore: true,
 			mutate: func(r *model.Report) {
-				r.Tests.TCP[0].SenderBitsPerSecond = 251_000_000
-				r.Tests.TCP[0].ReceiverBitsPerSecond = 250_000_000
-				r.Tests.TCP[0].MinimumIntervalBps = 247_000_000
-				r.Tests.TCP[0].MaximumIntervalBps = 252_000_000
-				r.Tests.TCP[1].SenderBitsPerSecond = 249_000_000
-				r.Tests.TCP[1].ReceiverBitsPerSecond = 248_000_000
-				r.Tests.TCP[1].MinimumIntervalBps = 245_000_000
-				r.Tests.TCP[1].MaximumIntervalBps = 250_000_000
 				for i := range r.Tests.TCP {
+					if r.Tests.TCP[i].Direction == model.DirectionPC1ToPC2 {
+						r.Tests.TCP[i].SenderBitsPerSecond = 251_000_000
+						r.Tests.TCP[i].ReceiverBitsPerSecond = 250_000_000
+						r.Tests.TCP[i].MinimumIntervalBps = 247_000_000
+						r.Tests.TCP[i].MaximumIntervalBps = 252_000_000
+					} else {
+						r.Tests.TCP[i].SenderBitsPerSecond = 249_000_000
+						r.Tests.TCP[i].ReceiverBitsPerSecond = 248_000_000
+						r.Tests.TCP[i].MinimumIntervalBps = 245_000_000
+						r.Tests.TCP[i].MaximumIntervalBps = 250_000_000
+					}
 					r.Tests.TCP[i].CPUUtilization = hotCPU
 				}
 				// A CPU-bound host asked for the full 800 Mbit/s UDP rate can only

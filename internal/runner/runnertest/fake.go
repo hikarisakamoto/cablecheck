@@ -246,13 +246,17 @@ func (f *FakeRunner) Run(ctx context.Context, spec runner.CommandSpec) (*runner.
 	if err != nil {
 		return nil, err
 	}
-	signalStarted(s)
 	// A pre-canceled ctx fails Run outright, like the real Exec.Run whose
 	// cmd.Start fails before the child ever launches: nil result, error
-	// wrapping ctx.Err(). Mirrors the identical check in Start.
+	// wrapping ctx.Err(), and no Started signal (the process never starts).
+	// This gate precedes signalStarted so that once Started fires the call is
+	// committed to the Delay select below: a test that waits on Started and
+	// then cancels always observes the cancel-during-Delay partial result,
+	// never this pre-cancel path (which would race and return a nil result).
 	if err := ctx.Err(); err != nil {
 		return nil, canceledError(spec.Name, err)
 	}
+	signalStarted(s)
 	if s.Delay != nil {
 		select {
 		case <-s.Delay:

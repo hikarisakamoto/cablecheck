@@ -10,7 +10,14 @@ import (
 // encoding/json sorts map keys, so the output is deterministic for a given
 // report value.
 func RenderJSON(r *model.Report) ([]byte, error) {
-	b, err := json.MarshalIndent(r, "", "  ")
+	toRender := r
+	if r != nil {
+		copyReport := *r
+		copyReport.Tests = r.Tests
+		copyReport.Tests.TCPTrialSpread = tcpTrialSpread(r.Tests.TCP)
+		toRender = &copyReport
+	}
+	b, err := json.MarshalIndent(toRender, "", "  ")
 	if err != nil {
 		return nil, err
 	}

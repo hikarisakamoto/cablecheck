@@ -75,6 +75,31 @@ type TCPResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
+// TCPTrialSpread groups reporting-only inter-trial throughput statistics by
+// direction. A direction is omitted unless at least two TCP trials completed.
+type TCPTrialSpread struct {
+	// PC1ToPC2 summarizes completed PC1-to-PC2 trials.
+	PC1ToPC2 *TCPTrialStats `json:"pc1ToPc2,omitempty"`
+	// PC2ToPC1 summarizes completed PC2-to-PC1 trials.
+	PC2ToPC1 *TCPTrialStats `json:"pc2ToPc1,omitempty"`
+}
+
+// TCPTrialStats summarizes the whole-trial bitrates recorded for one
+// direction. CoefficientOfVariation is population standard deviation divided
+// by the mean; MedianBitsPerSecond uses the lower middle value for even counts.
+type TCPTrialStats struct {
+	// CompletedTrials is the number of complete TCP results in the aggregate.
+	CompletedTrials int `json:"completedTrials"`
+	// MinimumBitsPerSecond is the lowest whole-trial bitrate.
+	MinimumBitsPerSecond float64 `json:"minimumBitsPerSecond"`
+	// MedianBitsPerSecond is the lower median whole-trial bitrate.
+	MedianBitsPerSecond float64 `json:"medianBitsPerSecond"`
+	// MaximumBitsPerSecond is the highest whole-trial bitrate.
+	MaximumBitsPerSecond float64 `json:"maximumBitsPerSecond"`
+	// CoefficientOfVariation is the inter-trial population CoV.
+	CoefficientOfVariation float64 `json:"coefficientOfVariation"`
+}
+
 // PingSpike is one reply whose RTT stands far above the median.
 type PingSpike struct {
 	// Seq is the icmp_seq of the spiking reply.

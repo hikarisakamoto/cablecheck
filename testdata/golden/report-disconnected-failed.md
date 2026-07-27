@@ -24,7 +24,7 @@
 ## 3. Session Info
 
 - **Test ID:** ct-20260715-213005-a1b2c3d4
-- **Schema version:** 1.0.0
+- **Schema version:** 1.1.0
 - **Tool version:** 1.0.0
 - **Protocol version:** 1
 - **Started:** 2026-07-15T21:30:05Z
@@ -170,7 +170,7 @@
 - **Parallel streams:** 1
 - **Ping count:** 500
 - **Ping interval:** 20ms
-- **TCP repeats:** 1
+- **TCP repeats:** 2
 - **Monitor interval:** 500ms
 - **Cable test requested:** no
 - **Cable test TDR requested:** no

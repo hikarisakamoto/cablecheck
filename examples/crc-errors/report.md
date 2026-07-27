@@ -16,7 +16,7 @@
 ## 3. Session Info
 
 - **Test ID:** example-crc-errors
-- **Schema version:** 1.0.0
+- **Schema version:** 1.1.0
 - **Tool version:** 1.0.0
 - **Protocol version:** 1
 - **Started:** 2026-01-02T15:04:05Z
@@ -84,13 +84,13 @@
 
 ## 11. TCP Throughput PC1→PC2
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 30s | 4 | 930.4 Mbit/s | 930.1 Mbit/s | 0 | 1.20% | 927.1 Mbit/s | 932.1 Mbit/s |
 
 ## 12. TCP Throughput PC2→PC1
 
-| Run | Duration | Streams | Sender | Receiver | Retransmits | CoV | Min interval | Max interval |
+| Run | Duration | Streams | Sender | Receiver | Retransmits | Interval CoV | Min interval | Max interval |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 30s | 4 | 928.9 Mbit/s | 928.5 Mbit/s | 0 | 1.20% | 925.5 Mbit/s | 930.5 Mbit/s |
 

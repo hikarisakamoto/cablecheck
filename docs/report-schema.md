@@ -1,7 +1,7 @@
 # CableCheck report schema
 
 CableCheck writes its machine-readable result to `report.json`. The current
-schema version is `1.0.0`.
+schema version is `1.1.0`.
 
 For a concrete document, see
 [`examples/healthy/report.json`](../examples/healthy/report.json). The other
@@ -40,7 +40,7 @@ forms for a duration. CableCheck emits the object form above.
 
 | JSON field | Type | Meaning |
 |---|---|---|
-| `schemaVersion` | string | Report schema version; currently `1.0.0`. |
+| `schemaVersion` | string | Report schema version; currently `1.1.0`. |
 | `toolVersion` | string | CableCheck version that produced the report. |
 | `protocolVersion` | string | Control-protocol version used by the peers. |
 | `testId` | string | Identifier assigned to this two-peer session. |
@@ -73,7 +73,7 @@ forms for a duration. CableCheck emits the object form above.
 
 The report never contains the authentication token. The evaluator has an
 internal rules-version constant, but `Report` has no `rulesVersion` JSON field
-in schema 1.0.0.
+in schema 1.1.0.
 
 ## Configuration
 
@@ -139,6 +139,7 @@ their `direction` field.
 | `ping` | array of PingResult | Standard-payload ping results. |
 | `fullSizePing` | array of PingResult | Full-size-payload ping results. |
 | `tcp` | array of TCPResult | Unidirectional TCP phases. |
+| `tcpTrialSpread` | TCPTrialSpread, optional | Derived inter-trial throughput spread for directions with at least two completed TCP phases. |
 | `udp` | array of UDPResult | Unidirectional UDP phases. |
 | `bidirectional` | BidirResult, optional | Simultaneous or two-phase bidirectional TCP result. |
 | `cableTest` | CableTestResult, optional | ethtool cable-test/TDR result. |
@@ -169,6 +170,30 @@ their `direction` field.
 Each `TCPInterval` contains `startSec`, `endSec`, `bytes`, `bitsPerSecond`, and
 optional `retransmits`. `CPUUsage` contains `hostTotal`, `hostUser`,
 `hostSystem`, `remoteTotal`, `remoteUser`, and `remoteSystem`.
+
+### TCPTrialSpread
+
+`tcpTrialSpread` is a reporting-only aggregate derived from the raw `tcp`
+array. It is omitted unless at least one direction has two completed trials.
+Its optional `pc1ToPc2` and `pc2ToPc1` fields each contain:
+
+```json
+{
+  "completedTrials": 3,
+  "minimumBitsPerSecond": 310000000,
+  "medianBitsPerSecond": 940000000,
+  "maximumBitsPerSecond": 940000000,
+  "coefficientOfVariation": 0.4068285590388356
+}
+```
+
+Incomplete TCP entries do not participate. The bitrate is receiver-observed
+throughput, falling back to sender throughput when the receiver value is not
+positive. The median is the lower middle sample for an even count, matching
+the evaluator's conservative repeat-trial policy. `coefficientOfVariation` is
+the population standard deviation divided by the mean; it is zero when the
+mean is zero. The raw trials remain authoritative, and CableCheck recomputes
+the aggregate when rendering rather than trusting a saved derived value.
 
 ### UDPResult
 

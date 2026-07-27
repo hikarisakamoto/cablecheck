@@ -83,8 +83,9 @@ type htmlTCPRow struct {
 }
 
 type htmlTCPSection struct {
-	Rows []htmlTCPRow
-	Bars []chartBar
+	Rows   []htmlTCPRow
+	Bars   []chartBar
+	Spread *model.TCPTrialStats
 }
 
 type htmlBidirRow struct {
@@ -238,7 +239,10 @@ func makeHTMLTCPSection(results []model.TCPResult, direction string, max float64
 		}
 		selected = append(selected, result)
 	}
-	section := htmlTCPSection{Bars: throughputBars(selected, max)}
+	section := htmlTCPSection{
+		Bars:   throughputBars(selected, max),
+		Spread: tcpTrialStats(selected, direction),
+	}
 	for i, result := range selected {
 		retrans := optionalUint(result.Retransmissions)
 		if result.Incomplete {
