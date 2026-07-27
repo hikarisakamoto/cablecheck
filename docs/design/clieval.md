@@ -287,6 +287,8 @@ type SideFacts struct {
 type DirFacts struct { // one per traffic direction (pc1→pc2, pc2→pc1)
     // TCP
     TCPAvailable   bool
+    TCPTrialCount  int     // completed trials contributing to this direction
+    TCPThroughputDeviations int // trials that miss the speed-selected policy
     TCPBitrate     model.Bitrate
     TCPRetransRate float64 // retransmits / est. segments (bytes/MSS, MSS fallback 1448)
     TCPCoV         float64 // stdev/mean of per-interval bitrates, first interval excluded
@@ -329,6 +331,13 @@ type Facts struct {
 func FactsFromReport(r *model.Report) *Facts
 ```
 
+Completed repeated TCP trials are aggregated independently per direction and
+metric. Bitrate, CoV, and valid retransmission rates use the lower median (the
+lower middle value for an even sample count); missing retransmission data is
+excluded rather than treated as zero. Collapse count remains the maximum from
+any trial. An incomplete result or a missing configured repeat makes that TCP
+direction unavailable. UDP retains its qualifying worst-case aggregation.
+
 ### 4.2 Rule and Finding types
 
 ```go
@@ -356,7 +365,7 @@ type Result struct {
     Score           *int // nil for INCONCLUSIVE
     Findings        []Finding
     Recommendations []string
-    RulesVersion    string // "1.3.0"
+    RulesVersion    string // "1.4.0"
 }
 func Evaluate(f *Facts) Result
 ```
@@ -397,7 +406,7 @@ Performance (all `HostSensitive: true`):
 
 | ID | Condition | Severity |
 |---|---|---|
-| PERF-01 throughput | ratio = TCPBitrate/NegotiatedSpeed. At ≤100M: ≥0.9 → Info, 0.7–0.9 → WARNING, <0.7 → POOR; this tier never passes silently. Above 100M through 1G: ≥0.9 passes, 0.7–0.9 → Info, 0.4–0.7 → WARNING, <0.4 → POOR. >1G temporarily uses the uncalibrated 1G fallback. Skipped when speed unknown. | INFO/WARNING/POOR |
+| PERF-01 throughput | ratio = lower-median TCPBitrate/NegotiatedSpeed. At ≤100M: ≥0.9 → Info, 0.7–0.9 → WARNING, <0.7 → POOR; this tier never passes silently. Above 100M through 1G: ≥0.9 passes, 0.7–0.9 → Info, 0.4–0.7 → WARNING, <0.4 → POOR. >1G temporarily uses the uncalibrated 1G fallback. Skipped when speed unknown. A POOR direction is capped at WARNING when exactly one of at least two trials deviates, both counter captures are reliable, and every physical rule passes. | INFO/WARNING/POOR |
 | PERF-02 cov | TCPCoV 15–30% → WARNING; >30% → POOR | WARNING/POOR |
 | PERF-03 collapses | 1–2 → WARNING; ≥3 → POOR | WARNING/POOR |
 | PERF-04 asymmetry | \|dir0−dir1\|/max > 30% | WARNING |
@@ -470,7 +479,7 @@ Computed only when class ≠ INCONCLUSIVE; otherwise `Score == nil`, since a num
 | CoV 15–30% / >30% | −5 / −15 |
 | each collapse | −5 (cap −20) |
 | UDP loss 0.5–2% / >2% | −5 / −15 per direction |
-| throughput warning/poor tier (not host-limited) | −10 / −25 |
+| effective throughput warning/poor tier after the isolated-outlier cap (not host-limited) | −10 / −25 |
 | asymmetry >30% | −5 |
 | jitter >5ms | −5 |
 

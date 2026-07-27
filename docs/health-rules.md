@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.3.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.4.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -22,7 +22,10 @@ explicit `RulesVersion` decision, boundary-test review, and review of the
 committed example reports. Version `1.2.0` introduced speed-scaled TCP
 throughput bands and graded severe negotiated-speed reductions as poor.
 Version `1.3.0` evaluates the already-collected transmit-carrier, PHY,
-receive-FIFO, and receive-missed counters.
+receive-FIFO, and receive-missed counters. Version `1.4.0` aggregates repeated
+TCP bitrate, interval-variation, and retransmission facts with a lower median
+instead of letting every worst pass determine the verdict, while retaining
+collapse evidence from the worst pass.
 
 ### Reference conditions and status labels
 
@@ -32,8 +35,13 @@ throughput is receiver bitrate divided by negotiated link speed. UDP loss,
 jitter, and reordering are admitted only from runs that reached the target and
 whose requested rate was not near known link capacity. TCP retransmit rate is
 an estimate based on transmitted bytes and the 1448-byte fallback MSS described
-below. Count thresholds are absolute across quick, standard, and soak modes;
-they are not normalized by duration.
+below. Completed repeat TCP trials are reduced independently per direction and
+metric using the lower median (for an even count, the lower middle value).
+Trials without usable retransmission data are omitted from only that metric;
+an explicit zero remains a measurement. Any incomplete repeat makes its whole
+direction unavailable. TCP collapse count remains the maximum from any pass.
+Count thresholds are absolute across quick, standard, and soak modes; they are
+not normalized by duration.
 
 The provenance status is intentionally conservative:
 
@@ -79,6 +87,7 @@ but do not establish CableCheck's health boundary.
 | TCP collapse interval | Count an interval when it is `< 50%` of the post-first-interval median. | Excludes slow start, then identifies a substantial within-run drop relative to that run. | Conservative policy |
 | TCP collapse count | Poor at `>= 3` counted intervals; 1–2 warns. | Repeated collapses carry more weight than an isolated interval. | Conservative policy |
 | TCP directional asymmetry | Warning when `abs(a-b) / max(a,b)` is `> 30%`. | A large directional difference is notable but host-sensitive. | Conservative policy |
+| Isolated TCP throughput outlier | When exactly one of at least two completed trials in a direction misses the throughput policy, cap a poor `PERF-01` result at warning. Requires reliable counters on both peers and no `PHY-01`–`PHY-11` finding. | Prevents one host-sensitive pass from deciding a poor verdict without weakening physical or repeated evidence. | Conservative policy |
 | Host CPU | Mark host limitation and suppress qualifying UDP evidence when maximum iperf3 CPU is `> 90%`; exactly 90% remains eligible. | A highly utilized endpoint can confound performance evidence; iperf3 CPU percentage is not treated as a graded starvation measure. | Conservative policy |
 | Score bands | Failed 0–25, poor 26–50, warning 51–79, good 80–94, excellent 95–100; inconclusive has no score. | Clamping prevents the secondary numeric score from contradicting the rule-derived class. | Presentation policy |
 
@@ -164,7 +173,11 @@ CPU, or host can produce these symptoms without a bad cable.
 `PERF-01` doesn't run when negotiated speed is unknown. Links above 1 Gbit/s
 currently use the explicitly uncalibrated 1 Gbit/s fallback bands pending real
 high-speed captures. When more than one direction qualifies, a rule emits the
-worst applicable severity.
+worst applicable severity. The isolated-outlier cap applies independently by
+direction and only to `PERF-01`: informational and warning results are unchanged,
+while poor becomes warning. An uncapped poor result in the other direction still
+wins. Collapse, variation, retransmission, transport, and physical findings are
+never softened by this cap.
 
 ## Host markers
 
@@ -250,7 +263,9 @@ The TCP-ratio deduction is omitted when `HOST-01`, `HOST-03`, or `HOST-04`
 marks the run as host-limited. UDP-loss deductions require CPU at most 90%, an
 available result, and a qualifying target reached. A `PERF-01` info result has
 no direct score deduction, but its `GOOD` classification still clamps the score
-to that band. `PHY-11` has no separate arithmetic deduction; its severity sets
+to that band. A poor ratio reduced by the isolated-outlier cap uses the 10-point
+warning deduction, keeping the score and finding severity aligned. `PHY-11` has
+no separate arithmetic deduction; its severity sets
 the classification and the score is clamped into that class's band.
 
 | Classification | Score band |

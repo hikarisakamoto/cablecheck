@@ -590,11 +590,15 @@ func rulePERF01(f *Facts, thresholds Thresholds) *model.Finding {
 		if !d.TCPAvailable {
 			continue
 		}
-		ratio, sev, deviation := classifyThroughput(d.TCPBitrate, f.NegotiatedSpeed, thresholds)
+		ratio, sev, deviation, capped := assessThroughput(f, i, thresholds)
 		if !deviation {
 			continue
 		}
-		ev = append(ev, fmt.Sprintf("%s: %s TCP = %.0f%% of the %s link", dirNames[i], d.TCPBitrate, ratio*100, f.NegotiatedSpeed))
+		line := fmt.Sprintf("%s: %s TCP = %.0f%% of the %s link", dirNames[i], d.TCPBitrate, ratio*100, f.NegotiatedSpeed)
+		if capped {
+			line += fmt.Sprintf("; 1 of %d trials missed policy, capped at warning with clean physical evidence", d.TCPTrialCount)
+		}
+		ev = append(ev, line)
 		if sev > worst {
 			worst = sev
 		}

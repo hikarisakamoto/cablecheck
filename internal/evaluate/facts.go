@@ -54,6 +54,12 @@ type DirFacts struct {
 	// TCPAvailable reports whether a TCP throughput result exists for this
 	// direction.
 	TCPAvailable bool
+	// TCPTrialCount is the number of completed TCP throughput trials used to
+	// aggregate this direction.
+	TCPTrialCount int
+	// TCPThroughputDeviations counts completed trials that did not pass the
+	// speed-selected throughput policy. It supports the isolated-outlier cap.
+	TCPThroughputDeviations int
 	// TCPBitrate is the measured TCP throughput (receiver side).
 	TCPBitrate model.Bitrate
 	// TCPRetransRate is retransmits / estimated segments (bytes/MSS, MSS
@@ -229,42 +235,72 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 		d.FragErrors = max(d.FragErrors, p.SendErrors+p.IcmpErrors)
 	}
 
+	f.NegotiatedSpeed = negotiatedSpeed(r)
+	type tcpSamples struct {
+		bitrates  []float64
+		covs      []float64
+		retrans   []float64
+		collapses int
+	}
+	var tcp [2]tcpSamples
+	var tcpObserved [2]int
 	var tcpIncomplete [2]bool
 	for _, tr := range r.Tests.TCP {
 		i := dirIndex(tr.Direction)
 		if i < 0 {
 			continue
 		}
+		tcpObserved[i]++
 		if tr.Incomplete {
 			tcpIncomplete[i] = true
 			continue
 		}
-		d := &f.Dir[i]
-		first := !d.TCPAvailable
-		d.TCPAvailable = true
 		bps := tr.ReceiverBitsPerSecond
 		if bps <= 0 {
 			bps = tr.SenderBitsPerSecond
 		}
-		bitrate := model.Bitrate(bps)
-		if first || bitrate < d.TCPBitrate {
-			d.TCPBitrate = bitrate
+		s := &tcp[i]
+		s.bitrates = append(s.bitrates, bps)
+		s.covs = append(s.covs, tr.ThroughputVariation)
+		s.collapses = max(s.collapses, collapses(tr.IntervalResults, thresholds))
+		if rate, ok := retransRate(tr); ok {
+			s.retrans = append(s.retrans, rate)
 		}
-		d.TCPCoV = max(d.TCPCoV, tr.ThroughputVariation)
-		d.TCPCollapses = max(d.TCPCollapses, collapses(tr.IntervalResults, thresholds))
-		d.TCPRetransRate = max(d.TCPRetransRate, retransRate(tr))
 	}
-	for i, incomplete := range tcpIncomplete {
+	if expected := expectedTCPTrials(r); expected > 0 {
+		for i, observed := range tcpObserved {
+			if observed < expected {
+				tcpIncomplete[i] = true
+			}
+		}
+	}
+	for i, samples := range tcp {
+		d := &f.Dir[i]
+		if len(samples.bitrates) > 0 {
+			d.TCPAvailable = true
+			d.TCPTrialCount = len(samples.bitrates)
+			d.TCPBitrate = model.Bitrate(lowerMedian(samples.bitrates))
+			d.TCPCoV = lowerMedian(samples.covs)
+			d.TCPCollapses = samples.collapses
+			d.TCPRetransRate = lowerMedian(samples.retrans)
+			for _, bps := range samples.bitrates {
+				if throughputShortfall(model.Bitrate(bps), f.NegotiatedSpeed, thresholds) {
+					d.TCPThroughputDeviations++
+				}
+			}
+		}
+		incomplete := tcpIncomplete[i]
 		if incomplete {
-			f.Dir[i].TCPAvailable = false
-			f.Dir[i].TCPBitrate = 0
-			f.Dir[i].TCPCoV = 0
-			f.Dir[i].TCPCollapses = 0
-			f.Dir[i].TCPRetransRate = 0
+			d.TCPAvailable = false
+			d.TCPTrialCount = 0
+			d.TCPThroughputDeviations = 0
+			d.TCPBitrate = 0
+			d.TCPCoV = 0
+			d.TCPCollapses = 0
+			d.TCPRetransRate = 0
 		}
 	}
 
-	f.NegotiatedSpeed = negotiatedSpeed(r)
 	for _, u := range r.Tests.UDP {
 		i := dirIndex(u.Direction)
 		if i < 0 {
@@ -311,6 +347,20 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 	return f
 }
 
+// expectedTCPTrials returns the number of report entries expected in each
+// direction. Soak commits trials only with a completed cycle, so interrupted
+// cycle-local work is deliberately excluded from this count.
+func expectedTCPTrials(r *model.Report) int {
+	repeats := r.Configuration.TCPRepeats
+	if repeats <= 0 {
+		return 0
+	}
+	if r.Configuration.Mode == "soak" {
+		return repeats * r.SoakCyclesCompleted
+	}
+	return repeats
+}
+
 // sideFacts folds a snapshot pair into per-side counter facts.
 func sideFacts(before, after *model.CounterSnapshot, selfInflictedCarrier uint64) SideFacts {
 	set, ok := DeltaSet(before, after)
@@ -355,11 +405,12 @@ func dirIndex(direction string) int {
 }
 
 // retransRate estimates the TCP retransmission rate as retransmits divided by
-// the estimated segment count (total bytes / MSS 1448). It returns 0 when the
-// running iperf3 did not report retransmissions or no byte total is known.
-func retransRate(tr model.TCPResult) float64 {
+// the estimated segment count (total bytes / MSS 1448). The boolean is false
+// when iperf3 did not report retransmissions or no byte total is known; absent
+// data must not be folded into a repeated-trial median as a measured zero.
+func retransRate(tr model.TCPResult) (float64, bool) {
 	if tr.Retransmissions == nil {
-		return 0
+		return 0, false
 	}
 	var bytes float64
 	for _, iv := range tr.IntervalResults {
@@ -371,13 +422,13 @@ func retransRate(tr model.TCPResult) float64 {
 		}
 	}
 	if bytes <= 0 {
-		return 0
+		return 0, false
 	}
 	segments := bytes / defaultMSS
 	if segments <= 0 {
-		return 0
+		return 0, false
 	}
-	return float64(*tr.Retransmissions) / segments
+	return float64(*tr.Retransmissions) / segments, true
 }
 
 // collapses counts intervals whose bitrate fell below the configured share of
@@ -410,6 +461,26 @@ func median(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
+	sorted := sortedValues(values)
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 1 {
+		return sorted[mid]
+	}
+	return (sorted[mid-1] + sorted[mid]) / 2
+}
+
+// lowerMedian returns the middle value for odd counts and the lower middle
+// value for even counts, without mutating the input. Repeat-trial aggregation
+// deliberately uses this conservative policy for standard mode's two trials.
+func lowerMedian(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := sortedValues(values)
+	return sorted[(len(sorted)-1)/2]
+}
+
+func sortedValues(values []float64) []float64 {
 	sorted := make([]float64, len(values))
 	copy(sorted, values)
 	for i := 1; i < len(sorted); i++ { // insertion sort: n is tiny
@@ -417,11 +488,7 @@ func median(values []float64) float64 {
 			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
 		}
 	}
-	mid := len(sorted) / 2
-	if len(sorted)%2 == 1 {
-		return sorted[mid]
-	}
-	return (sorted[mid-1] + sorted[mid]) / 2
+	return sorted
 }
 
 // settingsSpeed converts a captured link state to a Bitrate, 0 when unknown.
