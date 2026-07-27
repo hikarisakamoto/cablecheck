@@ -30,34 +30,9 @@ const regenSizeCap = 64 << 20
 // (missing file, oversize file, malformed JSON, unsupported schema major) is
 // wrapped in an *ExitError{ExitConfig} so the cli maps it to exit 4.
 func Regenerate(path, outDir string, stdout io.Writer) error {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: %w", path, err)}
-	}
-	if !fi.Mode().IsRegular() {
-		return &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: report input must be a regular file", path)}
-	}
-	if fi.Size() > regenSizeCap {
-		return &ExitError{Code: ExitConfig, Err: fmt.Errorf(
-			"%s is %d bytes, larger than the %d-byte (64 MiB) report size cap", path, fi.Size(), int64(regenSizeCap))}
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: %w", path, err)}
-	}
-	defer f.Close()
-	data, err := readRegenerateData(path, f, regenSizeCap)
+	rep, err := loadSavedReport(path)
 	if err != nil {
 		return err
-	}
-
-	var rep model.Report
-	if err := json.Unmarshal(data, &rep); err != nil {
-		return &ExitError{Code: ExitConfig, Err: fmt.Errorf("%s is not a valid cablecheck report: %w", path, err)}
-	}
-	if err := checkSchemaMajor(rep.SchemaVersion); err != nil {
-		return &ExitError{Code: ExitConfig, Err: err}
 	}
 
 	if outDir == "" {
@@ -67,9 +42,9 @@ func Regenerate(path, outDir string, stdout io.Writer) error {
 		name string
 		data []byte
 	}{
-		{"report.md", reporting.RenderMarkdown(&rep)},
-		{"summary.txt", reporting.RenderSummary(&rep)},
-		{"report.html", reporting.RenderHTML(&rep)},
+		{"report.md", reporting.RenderMarkdown(rep)},
+		{"summary.txt", reporting.RenderSummary(rep)},
+		{"report.html", reporting.RenderHTML(rep)},
 	}
 	for _, f := range files {
 		dst := filepath.Join(outDir, f.name)
@@ -81,6 +56,43 @@ func Regenerate(path, outDir string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "regenerated report for %s (classification %s) from %s\n",
 		orUnknownStr(rep.TestID), orUnknownStr(string(rep.Classification)), path)
 	return nil
+}
+
+// loadSavedReport reads and decodes one report with the offline input
+// guardrails shared by report regeneration and comparison. Unknown JSON fields
+// remain accepted so additive changes within the current schema major are
+// forward-compatible.
+func loadSavedReport(path string) (*model.Report, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: %w", path, err)}
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: report input must be a regular file", path)}
+	}
+	if fi.Size() > regenSizeCap {
+		return nil, &ExitError{Code: ExitConfig, Err: fmt.Errorf(
+			"%s is %d bytes, larger than the %d-byte (64 MiB) report size cap", path, fi.Size(), int64(regenSizeCap))}
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, &ExitError{Code: ExitConfig, Err: fmt.Errorf("cannot read %s: %w", path, err)}
+	}
+	defer f.Close()
+	data, err := readRegenerateData(path, f, regenSizeCap)
+	if err != nil {
+		return nil, err
+	}
+
+	var rep model.Report
+	if err := json.Unmarshal(data, &rep); err != nil {
+		return nil, &ExitError{Code: ExitConfig, Err: fmt.Errorf("%s is not a valid cablecheck report: %w", path, err)}
+	}
+	if err := checkSchemaMajor(rep.SchemaVersion); err != nil {
+		return nil, &ExitError{Code: ExitConfig, Err: err}
+	}
+	return &rep, nil
 }
 
 // readRegenerateData reads at most limit+1 bytes so streams and files that

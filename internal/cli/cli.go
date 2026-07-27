@@ -1,5 +1,5 @@
 // Package cli parses the cablecheck command line, dispatches the run,
-// doctor, report and version subcommands, and maps every error onto the
+// doctor, report, compare and version subcommands, and maps every error onto the
 // 0-7 exit-code contract. All parsing uses flag.ContinueOnError — never
 // ExitOnError, whose os.Exit(2) would break the contract.
 package cli
@@ -39,6 +39,8 @@ func dispatch(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return cmdDoctor(ctx, args[1:], stdout, stderr, build)
 	case "report":
 		return cmdReport(ctx, args[1:], stdout, stderr)
+	case "compare":
+		return cmdCompare(ctx, args[1:], stdout, stderr)
 	case "version":
 		return cmdVersion(stdout, build)
 	default:
@@ -95,6 +97,7 @@ Commands:
   run      Run a coordinated cable test (start on both PCs, pc1 first)
   doctor   Check local dependencies and configuration
   report   Re-render report.md/summary.txt/report.html from a report.json
+  compare  Compare a baseline report.json with a candidate report.json
   version  Print version, protocol and schema information
 
 Run "cablecheck run -h" for the full flag reference.

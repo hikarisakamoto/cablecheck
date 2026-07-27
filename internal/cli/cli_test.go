@@ -53,6 +53,13 @@ func TestCLIDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("top-level help lists compare", func(t *testing.T) {
+		code, out, _ := runCLI(t, "help")
+		if code != 0 || !strings.Contains(out, "compare") {
+			t.Errorf("help code = %d and output = %q, want compare command", code, out)
+		}
+	})
+
 	t.Run("unknown subcommand exits 4 with usage", func(t *testing.T) {
 		code, _, errOut := runCLI(t, "bogus")
 		if code != 4 {
@@ -214,6 +221,59 @@ func TestCLIDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("compare requires exactly two paths", func(t *testing.T) {
+		for _, args := range [][]string{{"compare"}, {"compare", "one.json"}, {"compare", "one.json", "two.json", "three.json"}} {
+			code, _, errOut := runCLI(t, args...)
+			if code != 4 {
+				t.Errorf("%v: code = %d, want 4", args, code)
+			}
+			if !strings.Contains(errOut, "baseline.json") || !strings.Contains(errOut, "candidate.json") {
+				t.Errorf("%v: stderr misses operand guidance:\n%s", args, errOut)
+			}
+		}
+	})
+
+	t.Run("compare -h exits 0", func(t *testing.T) {
+		code, _, errOut := runCLI(t, "compare", "-h")
+		if code != 0 {
+			t.Errorf("code = %d, want 0", code)
+		}
+		if !strings.Contains(errOut, "baseline.json") || !strings.Contains(errOut, "candidate.json") {
+			t.Errorf("compare help misses operands:\n%s", errOut)
+		}
+	})
+
+	t.Run("compare on a missing report exits 4", func(t *testing.T) {
+		dir := t.TempDir()
+		valid := filepath.Join(dir, "valid.json")
+		if err := os.WriteFile(valid, cliValidReportJSON(t), 0o600); err != nil {
+			t.Fatalf("write valid report: %v", err)
+		}
+		code, _, errOut := runCLI(t, "compare", valid, filepath.Join(dir, "missing.json"))
+		if code != 4 || !strings.Contains(errOut, "candidate") {
+			t.Errorf("code = %d, stderr = %q; want candidate input error", code, errOut)
+		}
+	})
+
+	t.Run("compare renders a failed candidate and exits 0", func(t *testing.T) {
+		dir := t.TempDir()
+		baseline := filepath.Join(dir, "baseline.json")
+		candidate := filepath.Join(dir, "candidate.json")
+		if err := os.WriteFile(baseline, cliReportJSON(t, "baseline", model.HealthExcellent), 0o600); err != nil {
+			t.Fatalf("write baseline report: %v", err)
+		}
+		if err := os.WriteFile(candidate, cliReportJSON(t, "candidate", model.HealthFailed), 0o600); err != nil {
+			t.Fatalf("write candidate report: %v", err)
+		}
+		code, out, errOut := runCLI(t, "compare", baseline, candidate)
+		if code != 0 {
+			t.Errorf("code = %d, want 0 (stderr: %s)", code, errOut)
+		}
+		if !strings.Contains(out, "EXCELLENT -> FAILED") || !strings.Contains(out, "Assessment: WORSE") {
+			t.Errorf("stdout misses comparison verdict:\n%s", out)
+		}
+	})
+
 	t.Run("doctor -h exits 0", func(t *testing.T) {
 		code, _, _ := runCLI(t, "doctor", "-h")
 		if code != 0 {
@@ -255,15 +315,19 @@ func TestCLIDispatch(t *testing.T) {
 // cliValidReportJSON renders a minimal valid report.json via the reporting
 // layer, so the CLI report test drives the real Regenerate engine end to end.
 func cliValidReportJSON(t *testing.T) []byte {
+	return cliReportJSON(t, "cli-report-test", model.HealthExcellent)
+}
+
+func cliReportJSON(t *testing.T, testID string, class model.HealthClass) []byte {
 	t.Helper()
 	score := 96
 	rep := &model.Report{
 		SchemaVersion:         model.SchemaVersion,
 		ToolVersion:           "1.0.0",
 		ProtocolVersion:       "1",
-		TestID:                "cli-report-test",
+		TestID:                testID,
 		Configuration:         model.ConfigEcho{Role: "pc1", Mode: "quick"},
-		Classification:        model.HealthExcellent,
+		Classification:        class,
 		Score:                 &score,
 		ClassificationReasons: []string{"all measured tests passed"},
 	}
