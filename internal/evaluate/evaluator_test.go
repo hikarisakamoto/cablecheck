@@ -81,6 +81,24 @@ func TestClassifyFoldOrdering(t *testing.T) {
 		}
 	})
 
+	t.Run("global CPU marker still softens clean-direction performance poor", func(t *testing.T) {
+		f := cleanFacts()
+		f.Dir[0].TCPMaxCPUPct = 95
+		f.Dir[0].TCPSenderMaxCPUPct = 95
+		f.Dir[1].TCPBitrate = 300_000_000
+		f.Dir[1].TCPMaxCPUPct = 20
+		f.Dir[1].TCPSenderMaxCPUPct = 20
+		f.MaxCPUPct = 95
+
+		res := Evaluate(f)
+		if res.Class != model.HealthInconclusive {
+			t.Errorf("class = %v, want INCONCLUSIVE from global HOST-01 classification safeguard", res.Class)
+		}
+		if res.Score != nil {
+			t.Errorf("score = %v, want nil for INCONCLUSIVE", *res.Score)
+		}
+	})
+
 	t.Run("receive ring pressure makes performance poor inconclusive", func(t *testing.T) {
 		f := cleanFacts()
 		f.Dir[0].TCPBitrate = 300_000_000
@@ -235,8 +253,8 @@ func TestEvaluateDeterministic(t *testing.T) {
 	if got := findingIDs(first); !reflect.DeepEqual(got, wantIDs) {
 		t.Errorf("finding order = %v, want %v (fixed Rules() order)", got, wantIDs)
 	}
-	if first.RulesVersion != "1.5.0" {
-		t.Errorf("RulesVersion = %q, want 1.5.0", first.RulesVersion)
+	if first.RulesVersion != "1.6.0" {
+		t.Errorf("RulesVersion = %q, want 1.6.0", first.RulesVersion)
 	}
 	if first.Score == nil {
 		t.Fatalf("score = nil, want a value for class %v", first.Class)

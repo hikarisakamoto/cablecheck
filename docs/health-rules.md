@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.5.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.6.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -29,7 +29,10 @@ TCP bitrate, interval-variation, and retransmission facts with a lower median
 instead of letting every worst pass determine the verdict, while retaining
 collapse evidence from the worst pass. Version `1.5.0` consistently omits
 host-sensitive TCP performance deductions when host evidence identifies a
-likely bottleneck; the findings remain visible.
+likely bottleneck; the findings remain visible. Version `1.6.0` attributes
+iperf3 CPU measurements to their one-way traffic direction for UDP evidence
+and performance score deductions, while retaining the report-wide host marker
+and classification safeguard.
 
 ### Reference conditions and status labels
 
@@ -93,7 +96,7 @@ but do not establish CableCheck's health boundary.
 | TCP collapse count | Poor at `>= 3` counted intervals; 1–2 warns. Repeated trials retain the largest per-trial interval count in each direction. | Repeated or sustained collapses carry more weight than an isolated interval without additionally summing evidence across repeated trials. | Conservative policy |
 | TCP directional asymmetry | Warning when `abs(a-b) / max(a,b)` is `> 30%`. | A large directional difference is notable but host-sensitive. | Conservative policy |
 | Isolated TCP throughput outlier | When exactly one of at least two completed trials in a direction misses the throughput policy, cap a poor `PERF-01` result at warning. Requires reliable counters on both peers and no `PHY-01`–`PHY-11` finding. | Prevents one host-sensitive pass from deciding a poor verdict without weakening physical or repeated evidence. | Conservative policy |
-| Host CPU | Mark host limitation and suppress qualifying UDP evidence when maximum iperf3 CPU is `> 90%`; exactly 90% remains eligible. | A highly utilized endpoint can confound performance evidence; iperf3 CPU percentage is not treated as a graded starvation measure. | Conservative policy |
+| Host CPU | Mark global host limitation when maximum iperf3 CPU across all throughput tests is `> 90%`. Gate one-way UDP-loss evidence and host-sensitive TCP/UDP-loss score deductions only when CPU for that traffic direction is `> 90%`; exactly 90% remains eligible. | A highly utilized endpoint can confound performance evidence; directional attribution prevents load in the opposite direction from hiding clean-direction evidence. iperf3 CPU percentage is not treated as a graded starvation measure. | Conservative policy |
 | Score bands | Failed 0–25, poor 26–50, warning 51–79, good 80–94, excellent 95–100; inconclusive has no score. | Clamping prevents the secondary numeric score from contradicting the rule-derived class. | Presentation policy |
 
 ## Physical rules
@@ -138,7 +141,7 @@ annotated separately and removed from the ordinary carrier-event evidence.
 | `TR-05` | transport | A direction's maximum reply gap is greater than 1 second. | poor |
 | `TR-06` | transport | Estimated TCP retransmit rate is at least 0.1% and at most 1%. | warning |
 | `TR-06` | transport | Estimated TCP retransmit rate is greater than 1%. | poor |
-| `TR-07` | transport | CPU is at most 90%, the UDP sender reaches its target, and loss is at least 0.5% and at most 2%. | warning |
+| `TR-07` | transport | CPU for that UDP direction is at most 90%, the sender reaches its target, and loss is at least 0.5% and at most 2%. | warning |
 | `TR-07` | transport | Under the same gates, UDP loss is greater than 2%. | poor |
 | `TR-08` | transport | UDP jitter is greater than 5 ms in any qualifying direction. | warning |
 | `TR-09` | transport | More than 0.1% of UDP datagrams are out of order in any qualifying direction. | warning |
@@ -149,8 +152,10 @@ evidence, the actual sender bitrate must reach at least 90% of the target. A
 target above 95% of known negotiated speed counts as self-inflicted saturation
 and is excluded, though a standard-mode reduced-rate run can still supply
 qualifying evidence. The same target and saturation checks gate the jitter and
-out-of-order facts used by `TR-08` and `TR-09`. `TR-07` is also suppressed when
-maximum iperf3 CPU usage is above 90%.
+out-of-order facts used by `TR-08` and `TR-09`. `TR-07` independently excludes
+each direction whose qualifying UDP runs report endpoint CPU above 90%. CPU
+load in another direction or in the bidirectional stress test does not exclude
+otherwise qualifying loss.
 
 When both conditions of `TR-05` occur, the rule emits a single finding at the
 worse severity.
@@ -173,7 +178,7 @@ CPU, or host can produce these symptoms without a bad cable.
 | `PERF-02` | performance | TCP interval coefficient of variation is greater than 30%. | poor |
 | `PERF-03` | performance | Across both directions, carried event lengths total 1–2 TCP intervals after the first below 50% of the median of the post-first intervals. | warning |
 | `PERF-03` | performance | Carried event lengths total at least 3 such intervals. | poor |
-| `PERF-04` | performance | Both TCP directions exist and `abs(a-b) / max(a,b)` is greater than 30%. | warning |
+| `PERF-04` | performance | Both TCP directions exist and `abs(a-b) / max(a,b)` is greater than 30%. The finding remains visible under host load; its score deduction applies only when sender CPU in both directions is at most 90%. | warning |
 
 `PERF-01` doesn't run when negotiated speed is unknown. Links above 1 Gbit/s
 currently use the explicitly uncalibrated 1 Gbit/s fallback bands pending real
@@ -242,6 +247,8 @@ Rules are evaluated in ID order: `PHY-01..11`, `TR-01..09`, `PERF-01..04`,
 
 This ordering is why a hot CPU can make low throughput inconclusive, but can't
 excuse CRC errors, ping loss, or any other non-host-sensitive failure.
+`HOST-01` deliberately remains report-wide for this classification safeguard,
+even though score and UDP-evidence gating use directional CPU attribution.
 
 ## Score deductions and class bands
 
@@ -262,24 +269,34 @@ classification's band. `INCONCLUSIVE` has a null score.
 | Qualifying UDP loss 0.5%–2%, per direction | 5 |
 | Qualifying UDP loss greater than 2%, per direction | 15 |
 | Full-size loss with clean standard ping (`TR-02`) | 20 once |
-| Worst TCP coefficient of variation 15%–30%, when not host-limited | 5 |
-| Worst TCP coefficient of variation greater than 30%, when not host-limited | 15 |
-| TCP collapse intervals, when not host-limited | 5 each, capped at 20 |
-| Worst TCP ratio in the warning tier, when not host-limited (70%–below 90% at `<= 100 Mbit/s`; 40%–below 70% otherwise) | 10 |
-| Worst TCP ratio in the poor tier, when not host-limited (below 70% at `<= 100 Mbit/s`; below 40% otherwise) | 25 |
-| TCP directional asymmetry greater than 30%, when not host-limited | 5 |
+| Worst eligible-direction TCP coefficient of variation 15%–30% | 5 |
+| Worst eligible-direction TCP coefficient of variation greater than 30% | 15 |
+| Eligible-direction TCP collapse intervals | 5 each, capped at 20 |
+| Worst eligible-direction TCP ratio in the warning tier (70%–below 90% at `<= 100 Mbit/s`; 40%–below 70% otherwise) | 10 |
+| Worst eligible-direction TCP ratio in the poor tier (below 70% at `<= 100 Mbit/s`; below 40% otherwise) | 25 |
+| TCP directional asymmetry greater than 30%, when both directional senders are eligible | 5 |
 | UDP jitter greater than 5 ms in either direction | 5 once |
 
-TCP-ratio, coefficient-of-variation, collapse, and asymmetry deductions are
-omitted when `HOST-01`, `HOST-03`, or `HOST-04` marks the run as host-limited.
-Their findings remain in the report; only score arithmetic is gated. UDP-loss
-deductions require CPU at most 90%, an available result, and a qualifying target
-reached. A `PERF-01` info result has no direct score deduction, but its `GOOD`
-classification still clamps the score to that band. A poor ratio reduced by the
+TCP-ratio, coefficient-of-variation, and collapse deductions omit only
+directions whose one-way TCP result reports endpoint CPU above 90%.
+The asymmetry deduction is omitted when either direction's sender CPU exceeds
+90%; receiver-only load does not invoke this sender-specific caveat.
+`HOST-03` and `HOST-04` still omit all host-sensitive performance deductions
+because their USB and receive-ring evidence has no reliable directional
+attribution. Findings remain in the report; only score arithmetic is gated.
+UDP-loss deductions independently require directional CPU at most 90%, an
+available result, and a qualifying target reached. A `PERF-01` info result has
+no direct score deduction, but its `GOOD` classification still clamps the score
+to that band. A poor ratio reduced by the
 isolated-outlier cap uses the 10-point warning deduction, keeping the score and
 finding severity aligned. `PHY-11` has no separate arithmetic deduction; its
 severity sets the classification and the score is clamped into that class's
 band.
+
+Native `--bidir` and the coordinated two-client fallback both expose one shared
+CPU block in the bidirectional result. The fallback block is intentionally
+coarser than the ordinary one-way results: it can contribute to global
+`HOST-01`, but it is not used for directional TCP or UDP score gates.
 
 | Classification | Score band |
 |---|---:|

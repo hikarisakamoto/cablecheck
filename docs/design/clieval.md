@@ -293,11 +293,14 @@ type DirFacts struct { // one per traffic direction (pc1→pc2, pc2→pc1)
     TCPRetransRate float64 // retransmits / est. segments (bytes/MSS, MSS fallback 1448)
     TCPCoV         float64 // stdev/mean of per-interval bitrates, first interval excluded
     TCPCollapses   int     // carried collapse-event lengths; legacy nil evidence uses the canonical analyzer
+    TCPMaxCPUPct   float64 // maximum client/server CPU among complete trials in this direction
+    TCPSenderMaxCPUPct float64 // maximum client CPU; one-way clients are always the sender
     // UDP
     UDPAvailable   bool
     UDPLossPct     float64
     UDPJitterMs    float64
     UDPOutOfOrderPct float64
+    UDPMaxCPUPct   float64 // maximum client/server CPU among qualifying runs in this direction
     UDPTargetReached bool // actual send rate >= 90% of target
     // Ping
     PingLossPct    float64
@@ -336,7 +339,12 @@ metric. Bitrate, CoV, and valid retransmission rates use the lower median (the
 lower middle value for an even sample count); missing retransmission data is
 excluded rather than treated as zero. Collapse count remains the maximum from
 any trial. An incomplete result or a missing configured repeat makes that TCP
-direction unavailable. UDP retains its qualifying worst-case aggregation.
+direction unavailable. Directional TCP CPU uses the maximum endpoint value
+from the same complete trials, with client-side CPU also retained separately
+as sender CPU. UDP retains its qualifying worst-case aggregation, including
+maximum endpoint CPU only from runs admitted by the target and saturation
+gates. The global `MaxCPUPct` remains independent and includes all usable
+throughput diagnostics for `HOST-01`.
 
 ### 4.2 Rule and Finding types
 
@@ -365,7 +373,7 @@ type Result struct {
     Score           *int // nil for INCONCLUSIVE
     Findings        []Finding
     Recommendations []string
-    RulesVersion    string // "1.5.0"
+    RulesVersion    string // "1.6.0"
 }
 func Evaluate(f *Facts) Result
 ```
@@ -398,7 +406,7 @@ Transport:
 | TR-04 duplicates | PingDuplicates > 0 | WARNING |
 | TR-05 rtt-instability | PingSpikes > 5 → WARNING; PingMaxGap > 1s → POOR | WARNING/POOR |
 | TR-06 tcp-retrans | per direction: 0.1–1% → WARNING; >1% → POOR. `< 0.1%` passes. | WARNING/POOR |
-| TR-07 udp-loss | only if `UDPTargetReached && MaxCPUPct ≤ 90 && !UDPNearSaturation`: 0.5–2% → WARNING; >2% → POOR. `< 0.5%` passes. If preconditions unmet → no finding (host/limitation rules speak instead). | WARNING/POOR |
+| TR-07 udp-loss | per direction, only if `UDPTargetReached && UDPMaxCPUPct ≤ 90`: 0.5–2% → WARNING; >2% → POOR. Near-saturation runs never populate these facts. `< 0.5%` passes. | WARNING/POOR |
 | TR-08 udp-jitter | jitter > 5ms on a direct link | WARNING |
 | TR-09 udp-reorder | out-of-order > 0.1% (should be zero on a direct cable) | WARNING |
 
@@ -409,7 +417,7 @@ Performance (all `HostSensitive: true`):
 | PERF-01 throughput | ratio = lower-median TCPBitrate/NegotiatedSpeed. At ≤100M: ≥0.9 → Info, 0.7–0.9 → WARNING, <0.7 → POOR; this tier never passes silently. Above 100M through 1G: ≥0.9 passes, 0.7–0.9 → Info, 0.4–0.7 → WARNING, <0.4 → POOR. >1G temporarily uses the uncalibrated 1G fallback. Skipped when speed unknown. A POOR direction is capped at WARNING when exactly one of at least two trials deviates, both counter captures are reliable, and every physical rule passes. | INFO/WARNING/POOR |
 | PERF-02 cov | TCPCoV 15–30% → WARNING; >30% → POOR | WARNING/POOR |
 | PERF-03 collapses | 1–2 → WARNING; ≥3 → POOR | WARNING/POOR |
-| PERF-04 asymmetry | \|dir0−dir1\|/max > 30% | WARNING |
+| PERF-04 asymmetry | \|dir0−dir1\|/max > 30%; the finding remains visible, while its score caveat checks sender CPU in both directions | WARNING |
 
 Host (markers, SevMarker/SevInfo — never directly degrade class):
 
@@ -460,7 +468,7 @@ func classify(findings []Finding, f *Facts) model.HealthClass {
 }
 ```
 
-The key asymmetry, per spec: physical POOR/FAILED is **never** softened by host evidence, but performance POOR **is** (→ INCONCLUSIVE) when hostLimited and the physical layer is clean. Note `allPoorAreHostSensitive`: a transport POOR (e.g. ping loss) isn't host-sensitive and keeps POOR even with hot CPUs.
+The key asymmetry, per spec: physical POOR/FAILED is **never** softened by host evidence, but performance POOR **is** (→ INCONCLUSIVE) when hostLimited and the physical layer is clean. Note `allPoorAreHostSensitive`: a transport POOR (e.g. ping loss) isn't host-sensitive and keeps POOR even with hot CPUs. `HOST-01` remains report-wide for this classification safeguard even though score and UDP evidence gates use directional CPU.
 
 ### 4.5 Score (0–100)
 
@@ -476,14 +484,26 @@ Computed only when class ≠ INCONCLUSIVE; otherwise `Score == nil`, since a num
 | ping loss | −min(40, lossPct×20) per direction |
 | full-size loss w/ clean ping | −20 |
 | TCP retrans 0.1–1% / >1% | −5 / −15 per direction |
-| CoV 15–30% / >30% (not host-limited) | −5 / −15 |
-| each collapse (not host-limited) | −5 (cap −20) |
+| worst eligible-direction CoV 15–30% / >30% | −5 / −15 |
+| each eligible-direction collapse | −5 (cap −20) |
 | UDP loss 0.5–2% / >2% | −5 / −15 per direction |
-| effective throughput warning/poor tier after the isolated-outlier cap (not host-limited) | −10 / −25 |
-| asymmetry >30% (not host-limited) | −5 |
+| worst eligible-direction effective throughput warning/poor tier after the isolated-outlier cap | −10 / −25 |
+| asymmetry >30% when both directional senders are CPU-eligible | −5 |
 | jitter >5ms | −5 |
 
-`HOST-01`, `HOST-03`, and `HOST-04` suppress all four host-sensitive TCP score deductions: throughput ratio, CoV, collapse, and asymmetry. The findings remain visible, and unrelated deductions such as retransmissions and UDP jitter still apply.
+For throughput ratio, CoV, and collapse, endpoint CPU above 90% suppresses
+only the direction measured under that load. Asymmetry is suppressed when the
+sender CPU for either compared direction is above 90%; receiver-only load does
+not invoke that sender-specific caveat. `HOST-03` and `HOST-04` still suppress
+all four host-sensitive deductions because their USB and receive-ring evidence
+has no directional attribution. UDP loss uses its own per-direction CPU gate.
+The findings remain visible, and unrelated deductions such as retransmissions
+and UDP jitter still apply.
+
+Bidirectional stress has one shared CPU block, including the coordinated
+two-client fallback. It contributes to global `HOST-01`, but not to the
+ordinary one-way directional gates because it cannot provide equally precise
+CPU attribution for each direction.
 
 Bands (clamp after deductions): FAILED ≤25, POOR 26–50, WARNING 51–79, GOOD 80–94, EXCELLENT 95–100. EXCELLENT also requires no physical, transport, or performance findings (even an informational deviation demotes it to GOOD), all critical tests ran, ping loss 0 both dirs, retrans <0.1%, CoV <15%, UDP loss <0.5%, and throughput in a passing speed tier. Links at or below 100 Mbit/s always produce at least an informational PERF-01 finding.
 
