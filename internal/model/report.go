@@ -72,7 +72,7 @@ type Report struct {
 	Score *int `json:"score"`
 	// ClassificationReasons are the one-line reasons behind the verdict.
 	ClassificationReasons []string `json:"classificationReasons"`
-	// Recommendations are deduplicated, actionable follow-ups.
+	// Recommendations are deduplicated, evidence-grounded follow-ups.
 	Recommendations []string `json:"recommendations"`
 	// Partial is true when the run was interrupted and the report covers
 	// only the tests that completed.

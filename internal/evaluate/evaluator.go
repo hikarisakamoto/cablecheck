@@ -7,7 +7,7 @@ import (
 // RulesVersion identifies the rule set implemented by this package; it is
 // recorded in every evaluation so reports stay interpretable when thresholds
 // change.
-const RulesVersion = "1.6.0"
+const RulesVersion = "1.7.0"
 
 // Result is the complete output of the evaluation engine.
 type Result struct {
@@ -18,8 +18,8 @@ type Result struct {
 	Score *int
 	// Findings lists every rule finding in the fixed Rules() order.
 	Findings []model.Finding
-	// Recommendations are deduplicated, actionable follow-ups in finding
-	// order.
+	// Recommendations are deduplicated, evidence-grounded follow-ups in
+	// finding order.
 	Recommendations []string
 	// RulesVersion is the version of the rule set that produced the result.
 	RulesVersion string

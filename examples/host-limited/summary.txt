@@ -14,7 +14,7 @@ Findings (top 2 of 2):
   [poor] PERF-01: TCP throughput does not meet the passing policy for this negotiated link speed.
   [marker] HOST-01: CPU was saturated during throughput testing - performance results may be host-limited.
 Recommendations (top 2 of 2):
-  - Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.
+  - Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun. Evidence from this run: max iperf3 CPU utilization 98.4% > 90%.
   - Isolation test: same machines with a different cable, then the same cable between different machines.
 
 Full report: report.md and report.json in the report directory.

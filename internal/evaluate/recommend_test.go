@@ -36,17 +36,22 @@ func TestRecommendRuleMappings(t *testing.T) {
 		{
 			name:    "cable test fault",
 			ruleIDs: []string{"PHY-08"},
-			want:    "Cable test reports an open/short pair — replace or re-terminate the cable (the fault distance is listed in the findings).",
+			want:    recCableTest,
 		},
 		{
-			name:    "retest throughput",
-			ruleIDs: []string{"TR-06", "TR-07"},
-			want:    "Retest with `--parallel-streams 1`; correlate with counter deltas and CPU before blaming the cable.",
+			name:    "retest TCP throughput",
+			ruleIDs: []string{"TR-06"},
+			want:    recTCPRetest,
+		},
+		{
+			name:    "retest UDP throughput",
+			ruleIDs: []string{"TR-07"},
+			want:    recUDPRetest,
 		},
 		{
 			name:    "host limited",
 			ruleIDs: []string{"HOST-01", "HOST-03", "HOST-04"},
-			want:    "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.",
+			want:    recHost,
 		},
 		{
 			name:    "virtual interface",
@@ -54,9 +59,9 @@ func TestRecommendRuleMappings(t *testing.T) {
 			want:    "Rerun on the physical interface — a virtual interface cannot exercise the cable.",
 		},
 		{
-			name:    "missing tools",
+			name:    "missing critical coverage",
 			ruleIDs: []string{"LIM-01"},
-			want:    "Install the missing tools (iperf3/ethtool) and rerun for a conclusive result.",
+			want:    recCoverage,
 		},
 		{
 			name:    "data port unreachable",
@@ -74,6 +79,77 @@ func TestRecommendRuleMappings(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRecommendGroundsRuleSpecificActions(t *testing.T) {
+	tests := []struct {
+		name     string
+		finding  model.Finding
+		action   string
+		evidence string
+	}{
+		{
+			name:     "reduced speed above gigabit",
+			finding:  model.Finding{RuleID: "PHY-06", Evidence: []string{"negotiated 1G < expected 2.5G"}},
+			action:   recSpeed,
+			evidence: "negotiated 1G < expected 2.5G",
+		},
+		{
+			name:     "TCP retransmissions",
+			finding:  model.Finding{RuleID: "TR-06", Evidence: []string{"pc1->pc2: estimated retransmit rate 1.25%"}},
+			action:   recTCPRetest,
+			evidence: "pc1->pc2: estimated retransmit rate 1.25%",
+		},
+		{
+			name:     "UDP loss",
+			finding:  model.Finding{RuleID: "TR-07", Evidence: []string{"pc2->pc1: UDP loss 2.50%"}},
+			action:   recUDPRetest,
+			evidence: "pc2->pc1: UDP loss 2.50%",
+		},
+		{
+			name:     "cable impedance without distance",
+			finding:  model.Finding{RuleID: "PHY-08", Evidence: []string{"pair A: IMPEDANCE"}},
+			action:   recCableTest,
+			evidence: "pair A: IMPEDANCE",
+		},
+		{
+			name:     "missing TCP coverage without tool attribution",
+			finding:  model.Finding{RuleID: "LIM-01", Evidence: []string{"no TCP throughput result in either direction"}},
+			action:   recCoverage,
+			evidence: "no TCP throughput result in either direction",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			want := []string{tc.action + " Evidence from this run: " + tc.evidence + "."}
+			if got := recommend([]model.Finding{tc.finding}, model.HealthWarning); !slices.Equal(got, want) {
+				t.Errorf("recommend() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRecommendGroundsSharedActionsInFindingEvidence(t *testing.T) {
+	const crcEvidence = "pc1: CRC-class error counters +42 during the test"
+	findings := []model.Finding{
+		{RuleID: "PHY-02", Evidence: []string{crcEvidence}},
+		{RuleID: "HOST-01", Evidence: []string{"max iperf3 CPU utilization 96.0% > 90%"}},
+		{RuleID: "PHY-09", Evidence: []string{"frame-size error counters +3 across both sides", crcEvidence, ""}},
+		{RuleID: "TR-01", Evidence: []string{"unmapped evidence must not leak"}},
+		{RuleID: "HOST-04", Evidence: []string{
+			"pc1: rx_fifo +2 during the test",
+			"pc2: rx_missed +3 during the test",
+		}},
+	}
+	want := []string{
+		recCable + " Evidence from this run: " + crcEvidence + "; frame-size error counters +3 across both sides.",
+		recHost + " Evidence from this run: max iperf3 CPU utilization 96.0% > 90%; pc1: rx_fifo +2 during the test; pc2: rx_missed +3 during the test.",
+	}
+
+	if got := recommend(findings, model.HealthWarning); !slices.Equal(got, want) {
+		t.Errorf("recommend() = %q, want %q", got, want)
 	}
 }
 

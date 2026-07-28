@@ -157,8 +157,8 @@
 
 ## 19. Recommendations
 
-1. Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun.
-2. Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.
+1. Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun. Evidence from this run: pc1: transmit-carrier/PHY error counters +3 during the test.
+2. Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun. Evidence from this run: pc1: rx_fifo +2 during the test; pc1: rx_missed +3 during the test.
 
 ## 20. Limitations & Unavailable Tests
 

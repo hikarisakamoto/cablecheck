@@ -373,7 +373,7 @@ type Result struct {
     Score           *int // nil for INCONCLUSIVE
     Findings        []Finding
     Recommendations []string
-    RulesVersion    string // "1.6.0"
+    RulesVersion    string // "1.7.0"
 }
 func Evaluate(f *Facts) Result
 ```
@@ -509,17 +509,18 @@ Bands (clamp after deductions): FAILED ≤25, POOR 26–50, WARNING 51–79, GOO
 
 ### 4.6 Recommendations
 
-`var recommendations = map[string]string{...}` keyed by RuleID. The generator walks findings in order, appends the mapped strings, and de-dupes while preserving order. It always appends the isolation-test line when class ∈ {POOR, FAILED, INCONCLUSIVE}. Entries (abridged):
+`var recommendations = map[string]string{...}` maps each RuleID to a static action. The generator walks findings in order, groups rules that share an action, and appends each group's unique `Finding.Evidence` strings in their original order. This grounds advice in the run's measured counters, CPU load, link state, or other triggering observations without reinterpreting raw results. A finding with no evidence retains the static action as a fallback. The generator always appends the isolation-test line when class ∈ {POOR, FAILED, INCONCLUSIVE}. Entries (abridged):
 
 - `PHY-02/09/10/11`: "Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun."
-- `PHY-06/07`: "Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool <if>`)."
+- `PHY-06/07`: "Reduced link speed: inspect cable wiring and connectors, test with another cable, and verify both NICs advertise the expected speed (`ethtool <if>`)."
 - `PHY-03/04`: "Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops."
 - `PHY-05`: "Half duplex usually means autonegotiation failure: enable autoneg on both sides; replace the cable."
-- `PHY-08`: "Cable test reports open/short at ~{distance}m — replace or re-terminate the cable."
-- `TR-06/07`: "Retest with `--parallel-streams 1`; correlate with counter deltas and CPU before blaming the cable."
+- `PHY-08`: "Inspect the cable-test pair/status; replace or re-terminate the cable if the fault persists."
+- `TR-06`: "Retest with `--parallel-streams 1`; correlate with counter deltas and CPU before blaming the cable."
+- `TR-07`: "Rerun UDP at a lower `--udp-rate`; check NIC counter deltas and CPU before blaming the cable."
 - `HOST-01/03/04`: "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun."
 - `HOST-02`: "Rerun on the physical interface — a virtual interface cannot exercise the cable."
-- `LIM-01`: "Install the missing tools (iperf3/ethtool) and rerun for a conclusive result."
+- `LIM-01`: "Restore the missing throughput or NIC-counter measurements and rerun; install iperf3/ethtool if unavailable."
 - isolation: "Isolation test: same machines with a different cable, then the same cable between different machines."
 
 ---
