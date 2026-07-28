@@ -486,7 +486,7 @@
     "TCP throughput does not meet the passing policy for this negotiated link speed."
   ],
   "recommendations": [
-    "Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool \u003cif\u003e`).",
+    "Reduced link speed: inspect cable wiring and connectors, test with another cable, and verify both NICs advertise the expected speed (`ethtool \u003cif\u003e`). Evidence from this run: negotiated 100M \u003c expected 1G.",
     "Isolation test: same machines with a different cable, then the same cable between different machines."
   ],
   "partial": false,

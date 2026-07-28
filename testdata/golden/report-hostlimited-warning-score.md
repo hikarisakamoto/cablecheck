@@ -169,7 +169,7 @@
 
 ## 19. Recommendations
 
-1. Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.
+1. Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun. Evidence from this run: max iperf3 CPU utilization 96.0% > 90%.
 
 ## 20. Limitations & Unavailable Tests
 

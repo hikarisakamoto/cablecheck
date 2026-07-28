@@ -485,7 +485,7 @@
     "CRC-class receive errors incremented by 1555 during the test."
   ],
   "recommendations": [
-    "Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun.",
+    "Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun. Evidence from this run: pc1: CRC-class error counters +1555 during the test.",
     "Isolation test: same machines with a different cable, then the same cable between different machines."
   ],
   "partial": false,

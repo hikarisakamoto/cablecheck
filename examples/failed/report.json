@@ -372,8 +372,8 @@
     "The run was interrupted — the report covers only the tests that completed."
   ],
   "recommendations": [
-    "Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops.",
-    "Install the missing tools (iperf3/ethtool) and rerun for a conclusive result.",
+    "Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops. Evidence from this run: post-test link state reports no carrier on at least one side; carrier change counter advanced by 4 on the worse side.",
+    "Restore the missing throughput or NIC-counter measurements and rerun; install iperf3/ethtool if unavailable. Evidence from this run: no TCP throughput result in either direction.",
     "Isolation test: same machines with a different cable, then the same cable between different machines."
   ],
   "partial": true,

@@ -15,8 +15,8 @@ Findings (top 3 of 4):
   [failed] PHY-03: The link bounced 4 time(s) during the test.
   [marker] LIM-01: Critical evidence is missing - a clean-looking result would not be trustworthy.
 Recommendations (top 3 of 3):
-  - Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops.
-  - Install the missing tools (iperf3/ethtool) and rerun for a conclusive result.
+  - Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops. Evidence from this run: post-test link state reports no carrier on at least one side; carrier change counter advanced by 4 on the worse side.
+  - Restore the missing throughput or NIC-counter measurements and rerun; install iperf3/ethtool if unavailable. Evidence from this run: no TCP throughput result in either direction.
   - Isolation test: same machines with a different cable, then the same cable between different machines.
 
 Full report: report.md and report.json in the report directory.

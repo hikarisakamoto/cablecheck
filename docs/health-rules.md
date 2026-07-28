@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.6.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.7.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -32,7 +32,8 @@ host-sensitive TCP performance deductions when host evidence identifies a
 likely bottleneck; the findings remain visible. Version `1.6.0` attributes
 iperf3 CPU measurements to their one-way traffic direction for UDP evidence
 and performance score deductions, while retaining the report-wide host marker
-and classification safeguard.
+and classification safeguard. Version `1.7.0` grounds follow-up recommendations
+in the concrete finding evidence collected by the same run.
 
 ### Reference conditions and status labels
 

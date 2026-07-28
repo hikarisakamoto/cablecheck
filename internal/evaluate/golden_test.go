@@ -206,19 +206,24 @@ func findingByID(res Result, id string) *model.Finding {
 }
 
 // TestRecommendationsDeduped asserts the recommendation generator collapses
-// duplicate advice: two rules mapping to the same cable text (PHY-02 and
-// PHY-09) yield one line, order is preserved, and the isolation-test line is
-// appended exactly once for a POOR/FAILED/INCONCLUSIVE verdict.
+// duplicate advice while retaining each rule's distinct evidence: two rules
+// mapping to the same cable action (PHY-02 and PHY-09) yield one grounded line,
+// order is preserved, and the isolation-test line is appended exactly once for
+// a POOR/FAILED/INCONCLUSIVE verdict.
 func TestRecommendationsDeduped(t *testing.T) {
-	t.Run("shared text collapses to one line", func(t *testing.T) {
+	t.Run("shared action collapses to one grounded line", func(t *testing.T) {
 		f := &Facts{LinkUpAtEnd: true}
 		// PHY-02 (crc-class) and PHY-09 (frame-size) both map to recCable.
 		f.PC1 = SideFacts{CRCClassErrors: 20, JabberSizeErrors: 20, DeltaOK: true, CountersAvailable: true}
 		res := Evaluate(f)
+		want := recCable + " Evidence from this run: pc1: CRC-class error counters +20 during the test; frame-size error counters +20 across both sides."
 		count := 0
 		for _, r := range res.Recommendations {
-			if r == recCable {
+			if strings.HasPrefix(r, recCable) {
 				count++
+				if r != want {
+					t.Errorf("grounded cable recommendation = %q, want %q", r, want)
+				}
 			}
 		}
 		if count != 1 {

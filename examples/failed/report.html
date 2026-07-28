@@ -142,7 +142,7 @@
     </div></details>
 
     <details open><summary>19. Recommendations</summary><div class="content">
-      <ol><li>Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops.</li><li>Install the missing tools (iperf3/ethtool) and rerun for a conclusive result.</li><li>Isolation test: same machines with a different cable, then the same cable between different machines.</li></ol>
+      <ol><li>Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops. Evidence from this run: post-test link state reports no carrier on at least one side; carrier change counter advanced by 4 on the worse side.</li><li>Restore the missing throughput or NIC-counter measurements and rerun; install iperf3/ethtool if unavailable. Evidence from this run: no TCP throughput result in either direction.</li><li>Isolation test: same machines with a different cable, then the same cable between different machines.</li></ol>
     </div></details>
 
     <details open><summary>20. Limitations &amp; Unavailable Tests</summary><div class="content">

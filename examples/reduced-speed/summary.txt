@@ -14,7 +14,7 @@ Findings (top 2 of 2):
   [poor] PHY-06: The link negotiated 100M although both NICs support 1G. Possible causes: cable wiring or a damaged pair (1000BASE-T needs all four pairs), NIC or driver configuration.
   [info] PERF-01: TCP throughput does not meet the passing policy for this negotiated link speed.
 Recommendations (top 2 of 2):
-  - Reduced link speed: 1000BASE-T needs all four pairs - test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool <if>`).
+  - Reduced link speed: inspect cable wiring and connectors, test with another cable, and verify both NICs advertise the expected speed (`ethtool <if>`). Evidence from this run: negotiated 100M < expected 1G.
   - Isolation test: same machines with a different cable, then the same cable between different machines.
 
 Full report: report.md and report.json in the report directory.

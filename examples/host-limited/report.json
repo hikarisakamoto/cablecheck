@@ -486,7 +486,7 @@
     "CPU was saturated during throughput testing — performance results may be host-limited."
   ],
   "recommendations": [
-    "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun.",
+    "Result appears host-limited: close background load, disable CPU power saving, avoid USB adapters, rerun. Evidence from this run: max iperf3 CPU utilization 98.4% \u003e 90%.",
     "Isolation test: same machines with a different cable, then the same cable between different machines."
   ],
   "partial": false,

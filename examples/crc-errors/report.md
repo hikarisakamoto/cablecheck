@@ -129,7 +129,7 @@
 
 ## 19. Recommendations
 
-1. Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun.
+1. Reseat both connectors and inspect for damage; replace the cable with a known-good Cat5e/Cat6 and rerun. Evidence from this run: pc1: CRC-class error counters +1555 during the test.
 2. Isolation test: same machines with a different cable, then the same cable between different machines.
 
 ## 20. Limitations & Unavailable Tests

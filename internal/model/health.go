@@ -117,7 +117,7 @@ type Evaluation struct {
 	Score *int `json:"score"`
 	// Findings lists every rule finding in deterministic rule order.
 	Findings []Finding `json:"findings,omitempty"`
-	// Recommendations are deduplicated, actionable follow-ups.
+	// Recommendations are deduplicated, evidence-grounded follow-ups.
 	Recommendations []string `json:"recommendations,omitempty"`
 	// RulesVersion identifies the rule set that produced this evaluation.
 	RulesVersion string `json:"rulesVersion"`

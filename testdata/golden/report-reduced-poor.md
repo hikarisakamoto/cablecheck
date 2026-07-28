@@ -153,7 +153,7 @@
 
 ## 19. Recommendations
 
-1. Reduced link speed: 1000BASE-T needs all four pairs — test with another cable; verify both NICs advertise 1000 Mb/s (`ethtool <if>`).
+1. Reduced link speed: inspect cable wiring and connectors, test with another cable, and verify both NICs advertise the expected speed (`ethtool <if>`). Evidence from this run: negotiated 100M < expected 1G.
 2. Isolation test: same machines with a different cable, then the same cable between different machines.
 
 ## 20. Limitations & Unavailable Tests

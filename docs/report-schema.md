@@ -310,7 +310,8 @@ The result block is spread across these top-level fields:
 
 - `classification` and nullable `score` give the final outcome;
 - `classificationReasons` holds the human-readable finding texts;
-- `recommendations` holds follow-up advice; and
+- `recommendations` holds follow-up advice grounded in the triggering findings'
+  concrete evidence when available; and
 - `findings` preserves the structured rule results.
 
 Each `Finding` contains:
