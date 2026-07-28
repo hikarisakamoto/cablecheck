@@ -273,6 +273,150 @@ func TestFactsFromReportDirections(t *testing.T) {
 	}
 }
 
+func TestFactsFromReportAttributesCPUPerDirection(t *testing.T) {
+	report := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		PC2: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		Tests: model.TestsSection{
+			TCP: []model.TCPResult{
+				{
+					Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 900_000_000,
+					CPUUtilization: model.CPUUsage{HostTotal: 95, RemoteTotal: 20},
+				},
+				{
+					Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 910_000_000,
+					CPUUtilization: model.CPUUsage{HostTotal: 50, RemoteTotal: 97},
+				},
+				{
+					Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 920_000_000,
+					CPUUtilization: model.CPUUsage{HostTotal: 30, RemoteTotal: 80},
+				},
+			},
+			UDP: []model.UDPResult{
+				{
+					Direction: model.DirectionPC1ToPC2, TargetBps: 400_000_000,
+					ActualSenderBps: 400_000_000, CPU: model.CPUUsage{HostTotal: 91, RemoteTotal: 10},
+				},
+				{
+					Direction: model.DirectionPC2ToPC1, TargetBps: 400_000_000,
+					ActualSenderBps: 400_000_000, CPU: model.CPUUsage{HostTotal: 40, RemoteTotal: 45},
+				},
+				{
+					Direction: model.DirectionPC2ToPC1, TargetBps: 400_000_000,
+					ActualSenderBps: 100_000_000, CPU: model.CPUUsage{HostTotal: 99, RemoteTotal: 5},
+				},
+			},
+			Bidirectional: &model.BidirResult{
+				CPUUtilization: model.CPUUsage{HostTotal: 98, RemoteTotal: 15},
+			},
+		},
+	}
+
+	facts := FactsFromReport(report)
+	if got := facts.Dir[0].TCPMaxCPUPct; got != 97 {
+		t.Errorf("pc1->pc2 TCP max CPU = %.1f, want 97", got)
+	}
+	if got := facts.Dir[0].TCPSenderMaxCPUPct; got != 95 {
+		t.Errorf("pc1->pc2 TCP sender max CPU = %.1f, want 95", got)
+	}
+	if got := facts.Dir[1].TCPMaxCPUPct; got != 80 {
+		t.Errorf("pc2->pc1 TCP max CPU = %.1f, want 80", got)
+	}
+	if got := facts.Dir[1].TCPSenderMaxCPUPct; got != 30 {
+		t.Errorf("pc2->pc1 TCP sender max CPU = %.1f, want 30", got)
+	}
+	if got := facts.Dir[0].UDPMaxCPUPct; got != 91 {
+		t.Errorf("pc1->pc2 qualifying UDP max CPU = %.1f, want 91", got)
+	}
+	if got := facts.Dir[1].UDPMaxCPUPct; got != 45 {
+		t.Errorf("pc2->pc1 qualifying UDP max CPU = %.1f, want 45; throttled run must not contribute", got)
+	}
+	if got := facts.MaxCPUPct; got != 99 {
+		t.Errorf("global max CPU = %.1f, want 99 from all throughput diagnostics", got)
+	}
+}
+
+func TestEvaluateDirectionalCPUGatingFromReport(t *testing.T) {
+	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	report := &model.Report{
+		PC1: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		PC2: model.PeerReport{NIC: model.NICReport{SpeedMbps: 1000}},
+		Tests: model.TestsSection{
+			TCP: []model.TCPResult{
+				{
+					Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000,
+					Collapses:      []model.TCPCollapseEvent{},
+					CPUUtilization: model.CPUUsage{HostTotal: 95, RemoteTotal: 20},
+				},
+				{
+					Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 600_000_000,
+					ThroughputVariation: 0.20, Collapses: []model.TCPCollapseEvent{{Len: 2}},
+					CPUUtilization: model.CPUUsage{HostTotal: 20, RemoteTotal: 20},
+				},
+			},
+			UDP: []model.UDPResult{
+				{
+					Direction: model.DirectionPC1ToPC2, TargetBps: 400_000_000,
+					ActualSenderBps: 400_000_000, LossPercent: 5,
+					CPU: model.CPUUsage{HostTotal: 95, RemoteTotal: 20},
+				},
+				{
+					Direction: model.DirectionPC2ToPC1, TargetBps: 400_000_000,
+					ActualSenderBps: 400_000_000, LossPercent: 1,
+					CPU: model.CPUUsage{HostTotal: 20, RemoteTotal: 20},
+				},
+			},
+		},
+		InitialCounters: model.PeerCounters{PC1: before, PC2: before},
+		FinalCounters:   model.PeerCounters{PC1: after, PC2: after},
+	}
+
+	result := Evaluate(FactsFromReport(report))
+	if result.Class != model.HealthWarning {
+		t.Fatalf("class = %v, want WARNING (findings %v)", result.Class, findingIDs(result))
+	}
+	if result.Score == nil || *result.Score != 70 {
+		t.Errorf("score = %v, want 70 from only clean-direction UDP loss, CoV, collapses, and throughput", result.Score)
+	}
+	for _, ruleID := range []string{"TR-07", "PERF-01", "PERF-02", "PERF-03", "PERF-04", "HOST-01"} {
+		if !hasFinding(result.Findings, ruleID) {
+			t.Errorf("findings = %v, want %s", findingIDs(result), ruleID)
+		}
+	}
+	tr07 := findingByID(result, "TR-07")
+	if tr07 == nil {
+		t.Fatal("TR-07 = nil, want clean-direction UDP finding")
+	}
+	evidence := strings.Join(tr07.Evidence, " ")
+	if strings.Contains(evidence, "pc1->pc2") || !strings.Contains(evidence, "pc2->pc1") {
+		t.Errorf("TR-07 evidence = %q, want only clean pc2->pc1 direction", evidence)
+	}
+}
+
+func TestFactsFromReportUnknownDirectionsDoNotPopulateDirectionalCPU(t *testing.T) {
+	report := &model.Report{Tests: model.TestsSection{
+		TCP: []model.TCPResult{{
+			Direction: "unknown", ReceiverBitsPerSecond: 900_000_000,
+			CPUUtilization: model.CPUUsage{HostTotal: 99, RemoteTotal: 98},
+		}},
+		UDP: []model.UDPResult{{
+			Direction: "unknown", TargetBps: 100, ActualSenderBps: 100,
+			CPU: model.CPUUsage{HostTotal: 97, RemoteTotal: 96},
+		}},
+	}}
+
+	facts := FactsFromReport(report)
+	for i, direction := range facts.Dir {
+		if direction.TCPMaxCPUPct != 0 || direction.TCPSenderMaxCPUPct != 0 || direction.UDPMaxCPUPct != 0 {
+			t.Errorf("direction %d CPU facts = %+v, want zero for unknown result directions", i, direction)
+		}
+	}
+	if facts.MaxCPUPct != 99 {
+		t.Errorf("global max CPU = %.1f, want 99 diagnostic maximum", facts.MaxCPUPct)
+	}
+}
+
 func TestLowerMedian(t *testing.T) {
 	values := []float64{9, 1, 7, 5}
 	tests := []struct {
@@ -651,14 +795,18 @@ func TestFactsFromReportMissingConfiguredTCPRepeatMakesDirectionUnavailable(t *t
 	report := &model.Report{
 		Configuration: model.ConfigEcho{Mode: "standard", TCPRepeats: 2},
 		Tests: model.TestsSection{TCP: []model.TCPResult{
-			{Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000},
+			{
+				Direction: model.DirectionPC1ToPC2, ReceiverBitsPerSecond: 941_000_000,
+				CPUUtilization: model.CPUUsage{HostTotal: 95, RemoteTotal: 20},
+			},
 			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 941_000_000},
 			{Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 940_000_000},
 		}},
 	}
 
 	facts := FactsFromReport(report)
-	if facts.Dir[0].TCPAvailable || facts.Dir[0].TCPTrialCount != 0 {
+	if facts.Dir[0].TCPAvailable || facts.Dir[0].TCPTrialCount != 0 ||
+		facts.Dir[0].TCPMaxCPUPct != 0 || facts.Dir[0].TCPSenderMaxCPUPct != 0 {
 		t.Errorf("pc1->pc2 facts = %+v, want unavailable after one of two configured repeats was absent", facts.Dir[0])
 	}
 	if !facts.Dir[1].TCPAvailable || facts.Dir[1].TCPTrialCount != 2 {
@@ -693,7 +841,8 @@ func TestFactsFromReportIgnoresIncompleteTCPDirection(t *testing.T) {
 	if f.Dir[0].TCPAvailable {
 		t.Errorf("incomplete TCP direction marked available: %+v", f.Dir[0])
 	}
-	if f.Dir[0].TCPBitrate != 0 || f.Dir[0].TCPCoV != 0 || f.Dir[0].TCPCollapses != 0 || f.Dir[0].TCPRetransRate != 0 {
+	if f.Dir[0].TCPBitrate != 0 || f.Dir[0].TCPCoV != 0 || f.Dir[0].TCPCollapses != 0 || f.Dir[0].TCPRetransRate != 0 ||
+		f.Dir[0].TCPMaxCPUPct != 0 || f.Dir[0].TCPSenderMaxCPUPct != 0 {
 		t.Errorf("incomplete TCP metrics leaked into facts: %+v", f.Dir[0])
 	}
 	if f.MaxCPUPct != 0 {

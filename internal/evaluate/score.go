@@ -13,7 +13,7 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 	if class == model.HealthInconclusive {
 		return nil
 	}
-	hostLimited := hasHostLimit(findings)
+	nonCPUHostLimited := hasFinding(findings, "HOST-03") || hasFinding(findings, "HOST-04")
 	s := 100.0
 
 	// Physical counter movement.
@@ -30,7 +30,6 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 	}
 
 	// Per-direction transport deductions.
-	udpGated := f.MaxCPUPct <= thresholds.CPUHostLimitedAbove
 	for i := range f.Dir {
 		d := &f.Dir[i]
 		if d.PingLossPct > 0 {
@@ -44,7 +43,7 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 				s -= 5
 			}
 		}
-		if udpGated && d.UDPAvailable && d.UDPTargetReached {
+		if d.UDPMaxCPUPct <= thresholds.CPUHostLimitedAbove && d.UDPAvailable && d.UDPTargetReached {
 			switch {
 			case d.UDPLossPct > thresholds.UDPLossPoorAbove:
 				s -= 15
@@ -57,14 +56,25 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 		s -= 20 // full-size loss with clean standard ping
 	}
 
-	// Host-sensitive performance deductions. The findings remain visible when
-	// the run is host-limited, but symptoms the host can cause do not also lower
-	// the cable-health score.
-	if !hostLimited {
+	// Host-sensitive performance deductions. CPU evidence gates only the
+	// direction measured under load. HOST-03 and HOST-04 remain report-wide
+	// because their USB and receive-ring evidence has no directional attribution.
+	if !nonCPUHostLimited {
 		cov := 0.0
+		var collapses [2]int
+		worst := model.Severity(-1)
 		for i := range f.Dir {
-			if f.Dir[i].TCPAvailable && f.Dir[i].TCPCoV > cov {
-				cov = f.Dir[i].TCPCoV
+			d := &f.Dir[i]
+			if !d.TCPAvailable || d.TCPMaxCPUPct > thresholds.CPUHostLimitedAbove {
+				continue
+			}
+			if d.TCPCoV > cov {
+				cov = d.TCPCoV
+			}
+			collapses[i] = d.TCPCollapses
+			_, severity, deviation, _ := assessThroughput(f, i, thresholds)
+			if deviation && severity > worst {
+				worst = severity
 			}
 		}
 		switch {
@@ -73,24 +83,17 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 		case cov >= thresholds.TCPCoVWarningAt:
 			s -= 5
 		}
-		s -= math.Min(20, 5*float64(tcpCollapseTotal(f)))
+		s -= math.Min(20, 5*float64(saturatingPositiveTotal(collapses[0], collapses[1])))
 
-		worst := model.Severity(-1)
-		for i := range f.Dir {
-			if f.Dir[i].TCPAvailable {
-				_, severity, deviation, _ := assessThroughput(f, i, thresholds)
-				if deviation && severity > worst {
-					worst = severity
-				}
-			}
-		}
 		switch worst {
 		case model.SevPoor:
 			s -= 25
 		case model.SevWarning:
 			s -= 10
 		}
-		if asymmetryRatio(f) > thresholds.TCPAsymmetryWarnAbove {
+		if f.Dir[0].TCPSenderMaxCPUPct <= thresholds.CPUHostLimitedAbove &&
+			f.Dir[1].TCPSenderMaxCPUPct <= thresholds.CPUHostLimitedAbove &&
+			asymmetryRatio(f) > thresholds.TCPAsymmetryWarnAbove {
 			s -= 5
 		}
 	}

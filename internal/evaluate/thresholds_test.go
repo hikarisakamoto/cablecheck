@@ -9,7 +9,7 @@ import (
 	"cablecheck/internal/model"
 )
 
-func TestDefaultThresholdsForRulesVersion150(t *testing.T) {
+func TestDefaultThresholdsForRulesVersion160(t *testing.T) {
 	want := Thresholds{
 		CRCPoorAbove:                  10,
 		CRCFailedAbove:                1000,
@@ -44,7 +44,7 @@ func TestDefaultThresholdsForRulesVersion150(t *testing.T) {
 		GoodScoreBand:                 ScoreBand{Min: 80, Max: 94},
 		ExcellentScoreBand:            ScoreBand{Min: 95, Max: 100},
 	}
-	if RulesVersion != "1.5.0" {
+	if RulesVersion != "1.6.0" {
 		t.Fatalf("RulesVersion = %q; review the pinned default thresholds before updating this test", RulesVersion)
 	}
 	if got := Default(); !reflect.DeepEqual(got, want) {
@@ -256,7 +256,9 @@ func TestScoreHonorsSuppliedThresholds(t *testing.T) {
 	t.Run("CPU gate", func(t *testing.T) {
 		thresholds := fullBand()
 		thresholds.CPUHostLimitedAbove = 50
-		facts := &Facts{MaxCPUPct: 60, Dir: [2]DirFacts{{UDPAvailable: true, UDPTargetReached: true, UDPLossPct: 3}}}
+		facts := &Facts{MaxCPUPct: 60, Dir: [2]DirFacts{{
+			UDPAvailable: true, UDPTargetReached: true, UDPLossPct: 3, UDPMaxCPUPct: 60,
+		}}}
 		assertNoDeduction(t, facts, thresholds)
 	})
 	t.Run("coefficient of variation", func(t *testing.T) {

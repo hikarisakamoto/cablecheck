@@ -72,6 +72,13 @@ type DirFacts struct {
 	// TCPCollapses counts carried intervals below the canonical share of median
 	// interval bitrate (first interval excluded).
 	TCPCollapses int
+	// TCPMaxCPUPct is the maximum client/server CPU utilization among completed
+	// one-way TCP trials in this direction.
+	TCPMaxCPUPct float64
+	// TCPSenderMaxCPUPct is the maximum sender CPU utilization among completed
+	// one-way TCP trials in this direction. CableCheck always runs the iperf3
+	// client on the sender, so this is the client-side host total.
+	TCPSenderMaxCPUPct float64
 	// UDPAvailable reports whether a UDP result exists for this direction.
 	UDPAvailable bool
 	// UDPLossPct is the worst server-observed datagram loss percentage among
@@ -82,6 +89,9 @@ type DirFacts struct {
 	// UDPOutOfOrderPct is the worst out-of-order datagram percentage among
 	// qualifying runs.
 	UDPOutOfOrderPct float64
+	// UDPMaxCPUPct is the maximum client/server CPU utilization among qualifying
+	// UDP runs in this direction.
+	UDPMaxCPUPct float64
 	// UDPTargetReached reports whether any run reached the configured share of
 	// its target without being near the configured saturation boundary.
 	UDPTargetReached bool
@@ -238,10 +248,12 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 
 	f.NegotiatedSpeed = negotiatedSpeed(r)
 	type tcpSamples struct {
-		bitrates  []float64
-		covs      []float64
-		retrans   []float64
-		collapses int
+		bitrates     []float64
+		covs         []float64
+		retrans      []float64
+		collapses    int
+		maxCPU       float64
+		senderMaxCPU float64
 	}
 	var tcp [2]tcpSamples
 	var tcpObserved [2]int
@@ -264,6 +276,8 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 		s.bitrates = append(s.bitrates, bps)
 		s.covs = append(s.covs, tr.ThroughputVariation)
 		s.collapses = max(s.collapses, collapseIntervalCount(tr))
+		s.maxCPU = max(s.maxCPU, tr.CPUUtilization.HostTotal, tr.CPUUtilization.RemoteTotal)
+		s.senderMaxCPU = max(s.senderMaxCPU, tr.CPUUtilization.HostTotal)
 		if rate, ok := retransRate(tr); ok {
 			s.retrans = append(s.retrans, rate)
 		}
@@ -284,6 +298,8 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 			d.TCPCoV = lowerMedian(samples.covs)
 			d.TCPCollapses = samples.collapses
 			d.TCPRetransRate = lowerMedian(samples.retrans)
+			d.TCPMaxCPUPct = samples.maxCPU
+			d.TCPSenderMaxCPUPct = samples.senderMaxCPU
 			for _, bps := range samples.bitrates {
 				if throughputShortfall(model.Bitrate(bps), f.NegotiatedSpeed, thresholds) {
 					d.TCPThroughputDeviations++
@@ -299,6 +315,8 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 			d.TCPCoV = 0
 			d.TCPCollapses = 0
 			d.TCPRetransRate = 0
+			d.TCPMaxCPUPct = 0
+			d.TCPSenderMaxCPUPct = 0
 		}
 	}
 
@@ -319,6 +337,7 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 			continue
 		}
 		d.UDPTargetReached = true
+		d.UDPMaxCPUPct = max(d.UDPMaxCPUPct, u.CPU.HostTotal, u.CPU.RemoteTotal)
 		d.UDPLossPct = max(d.UDPLossPct, u.LossPercent)
 		d.UDPJitterMs = max(d.UDPJitterMs, u.JitterMs)
 		if u.OutOfOrder != nil && u.TotalPackets > 0 {
@@ -466,9 +485,15 @@ func collapseIntervalCount(tr model.TCPResult) int {
 // tcpCollapseTotal adds the per-direction counts without allowing malformed
 // externally constructed facts to wrap a positive total negative.
 func tcpCollapseTotal(f *Facts) int {
+	return saturatingPositiveTotal(f.Dir[0].TCPCollapses, f.Dir[1].TCPCollapses)
+}
+
+// saturatingPositiveTotal adds two non-negative counts while treating
+// malformed negatives as zero and preventing integer overflow.
+func saturatingPositiveTotal(a, b int) int {
 	const maxInt = int(^uint(0) >> 1)
-	a := max(0, f.Dir[0].TCPCollapses)
-	b := max(0, f.Dir[1].TCPCollapses)
+	a = max(0, a)
+	b = max(0, b)
 	if a > maxInt-b {
 		return maxInt
 	}

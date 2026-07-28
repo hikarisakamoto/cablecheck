@@ -390,16 +390,39 @@ func TestRuleTR07UDPGating(t *testing.T) {
 	})
 	t.Run("no finding when cpu saturated", func(t *testing.T) {
 		f := base(5)
-		f.MaxCPUPct = 95
+		f.Dir[0].UDPMaxCPUPct = 95
 		if fd := evaluateRule(rule, f); fd != nil {
-			t.Errorf("TR-07 = %+v, want no finding when MaxCPUPct > 90", fd)
+			t.Errorf("TR-07 = %+v, want no finding when direction CPU > 90", fd)
 		}
 	})
 	t.Run("CPU boundary remains eligible", func(t *testing.T) {
 		f := base(5)
-		f.MaxCPUPct = thresholds.CPUHostLimitedAbove
+		f.Dir[0].UDPMaxCPUPct = thresholds.CPUHostLimitedAbove
 		if fd := evaluateRule(rule, f); fd == nil || fd.Severity != model.SevPoor {
 			t.Errorf("TR-07 = %+v, want poor at exact CPU boundary", fd)
+		}
+	})
+	t.Run("hot direction does not hide clean direction loss", func(t *testing.T) {
+		f := base(5)
+		f.Dir[0].UDPMaxCPUPct = math.Nextafter(thresholds.CPUHostLimitedAbove, math.Inf(1))
+		f.Dir[1] = DirFacts{
+			UDPAvailable: true, UDPTargetReached: true, UDPLossPct: 1,
+			UDPMaxCPUPct: thresholds.CPUHostLimitedAbove,
+		}
+		fd := evaluateRule(rule, f)
+		if fd == nil || fd.Severity != model.SevWarning {
+			t.Fatalf("TR-07 = %+v, want warning from clean pc2->pc1 direction", fd)
+		}
+		evidence := strings.Join(fd.Evidence, " ")
+		if strings.Contains(evidence, "pc1->pc2") || !strings.Contains(evidence, "pc2->pc1") {
+			t.Errorf("TR-07 evidence = %q, want only clean pc2->pc1 direction", evidence)
+		}
+	})
+	t.Run("unrelated global CPU does not gate qualifying loss", func(t *testing.T) {
+		f := base(5)
+		f.MaxCPUPct = 99
+		if fd := evaluateRule(rule, f); fd == nil || fd.Severity != model.SevPoor {
+			t.Errorf("TR-07 = %+v, want poor despite unrelated global CPU", fd)
 		}
 	})
 	t.Run("qualified reduced-rate fact survives a separate near-line-rate run", func(t *testing.T) {

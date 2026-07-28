@@ -243,6 +243,7 @@ func TestThroughputScoreDeductionIsHostGated(t *testing.T) {
 	if ungated == nil || *ungated != 75 {
 		t.Fatalf("ungated score = %v, want 75", ungated)
 	}
+	facts.Dir[0].TCPMaxCPUPct = 95
 	for _, ruleID := range []string{"HOST-01", "HOST-03", "HOST-04"} {
 		findings := []model.Finding{{RuleID: ruleID}}
 		got := scoreFor(facts, findings, model.HealthExcellent, thresholds)

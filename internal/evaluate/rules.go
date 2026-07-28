@@ -508,14 +508,13 @@ func ruleTR06(f *Facts, thresholds Thresholds) *model.Finding {
 }
 
 func ruleTR07(f *Facts, thresholds Thresholds) *model.Finding {
-	if f.MaxCPUPct > thresholds.CPUHostLimitedAbove {
-		return nil // host limitation rules speak instead (HOST-01)
-	}
 	worst := model.Severity(-1)
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if !d.UDPAvailable || !d.UDPTargetReached || d.UDPLossPct < thresholds.UDPLossWarningAt {
+		if !d.UDPAvailable || !d.UDPTargetReached ||
+			d.UDPMaxCPUPct > thresholds.CPUHostLimitedAbove ||
+			d.UDPLossPct < thresholds.UDPLossWarningAt {
 			continue
 		}
 		sev := model.SevWarning

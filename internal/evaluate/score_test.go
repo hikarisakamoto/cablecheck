@@ -142,7 +142,7 @@ func TestScoreUsesCarriedCollapseIntervalLengths(t *testing.T) {
 	}
 }
 
-func TestHostLimitSuppressesHostSensitivePerformanceDeductions(t *testing.T) {
+func TestNonCPUHostLimitSuppressesHostSensitivePerformanceDeductions(t *testing.T) {
 	thresholds := Default()
 	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
 
@@ -189,12 +189,103 @@ func TestHostLimitSuppressesHostSensitivePerformanceDeductions(t *testing.T) {
 				t.Fatalf("ungated score = %v, want %d", ungated, tc.wantUngated)
 			}
 
-			for _, ruleID := range []string{"HOST-01", "HOST-03", "HOST-04"} {
+			for _, ruleID := range []string{"HOST-03", "HOST-04"} {
 				findings := []model.Finding{{RuleID: ruleID}}
 				got := scoreFor(tc.facts, findings, model.HealthExcellent, thresholds)
 				if got == nil || *got != 100 {
 					t.Errorf("score with %s = %v, want 100", ruleID, got)
 				}
+			}
+		})
+	}
+}
+
+func TestCPUHostLimitGatesTCPDeductionsPerDirection(t *testing.T) {
+	thresholds := Default()
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+
+	t.Run("clean direction retains variation and collapse deductions", func(t *testing.T) {
+		facts := &Facts{Dir: [2]DirFacts{
+			{
+				TCPAvailable: true, TCPBitrate: 100, TCPCoV: 0.31, TCPCollapses: 2,
+				TCPMaxCPUPct: 95, TCPSenderMaxCPUPct: 95,
+			},
+			{
+				TCPAvailable: true, TCPBitrate: 60, TCPCoV: 0.20, TCPCollapses: 2,
+				TCPMaxCPUPct: 20, TCPSenderMaxCPUPct: 20,
+			},
+		}}
+
+		score := scoreFor(facts, []model.Finding{{RuleID: "HOST-01"}}, model.HealthExcellent, thresholds)
+		if score == nil || *score != 85 {
+			t.Errorf("score = %v, want 85 from clean-direction CoV and two collapse intervals", score)
+		}
+	})
+
+	t.Run("clean direction retains throughput deduction", func(t *testing.T) {
+		facts := &Facts{NegotiatedSpeed: 1_000_000_000, Dir: [2]DirFacts{
+			{
+				TCPAvailable: true, TCPBitrate: 300_000_000,
+				TCPMaxCPUPct: 95, TCPSenderMaxCPUPct: 95,
+			},
+			{
+				TCPAvailable: true, TCPBitrate: 600_000_000,
+				TCPMaxCPUPct: 20, TCPSenderMaxCPUPct: 20,
+			},
+		}}
+
+		score := scoreFor(facts, []model.Finding{{RuleID: "HOST-01"}}, model.HealthExcellent, thresholds)
+		if score == nil || *score != 90 {
+			t.Errorf("score = %v, want 90 from clean-direction warning throughput", score)
+		}
+	})
+}
+
+func TestCPUHostLimitGatesUDPDeductionsPerDirection(t *testing.T) {
+	thresholds := Default()
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+	facts := &Facts{MaxCPUPct: 95, Dir: [2]DirFacts{
+		{
+			UDPAvailable: true, UDPTargetReached: true, UDPLossPct: 5,
+			UDPMaxCPUPct: 95,
+		},
+		{
+			UDPAvailable: true, UDPTargetReached: true, UDPLossPct: 1,
+			UDPMaxCPUPct: 20,
+		},
+	}}
+
+	score := scoreFor(facts, []model.Finding{{RuleID: "HOST-01"}}, model.HealthExcellent, thresholds)
+	if score == nil || *score != 95 {
+		t.Errorf("score = %v, want 95 from only the clean direction's warning loss", score)
+	}
+}
+
+func TestAsymmetryScoreGateUsesSenderCPU(t *testing.T) {
+	thresholds := Default()
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+	tests := []struct {
+		name       string
+		dir0Sender float64
+		dir1Sender float64
+		dir0Max    float64
+		want       int
+	}{
+		{name: "clean senders deduct", dir0Sender: 20, dir1Sender: 30, want: 95},
+		{name: "exact boundary deducts", dir0Sender: thresholds.CPUHostLimitedAbove, dir1Sender: 30, want: 95},
+		{name: "hot first sender suppresses", dir0Sender: math.Nextafter(thresholds.CPUHostLimitedAbove, math.Inf(1)), dir1Sender: 30, want: 100},
+		{name: "hot second sender suppresses", dir0Sender: 20, dir1Sender: 95, want: 100},
+		{name: "hot receiver does not suppress sender caveat", dir0Sender: 20, dir1Sender: 30, dir0Max: 95, want: 95},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := asymmetryFacts(100, 60)
+			facts.Dir[0].TCPSenderMaxCPUPct = tc.dir0Sender
+			facts.Dir[1].TCPSenderMaxCPUPct = tc.dir1Sender
+			facts.Dir[0].TCPMaxCPUPct = tc.dir0Max
+			score := scoreFor(facts, nil, model.HealthExcellent, thresholds)
+			if score == nil || *score != tc.want {
+				t.Errorf("score = %v, want %d", score, tc.want)
 			}
 		})
 	}
@@ -207,6 +298,7 @@ func TestCPUHostLimitScoreGateUsesSuppliedExclusiveThreshold(t *testing.T) {
 	facts := &Facts{MaxCPUPct: 50, Dir: [2]DirFacts{{
 		TCPAvailable: true,
 		TCPCoV:       0.31,
+		TCPMaxCPUPct: 50,
 	}}}
 
 	atBoundary := ruleHOST01(facts, thresholds)
@@ -218,6 +310,7 @@ func TestCPUHostLimitScoreGateUsesSuppliedExclusiveThreshold(t *testing.T) {
 	}
 
 	facts.MaxCPUPct = math.Nextafter(thresholds.CPUHostLimitedAbove, math.Inf(1))
+	facts.Dir[0].TCPMaxCPUPct = facts.MaxCPUPct
 	aboveBoundary := ruleHOST01(facts, thresholds)
 	if aboveBoundary == nil {
 		t.Fatal("HOST-01 above supplied boundary = nil, want marker")
@@ -234,6 +327,7 @@ func TestHostLimitDoesNotSuppressNonHostSensitiveDeductions(t *testing.T) {
 		TCPAvailable:   true,
 		TCPRetransRate: 0.005,
 		TCPCoV:         0.31,
+		TCPMaxCPUPct:   95,
 		UDPJitterMs:    6,
 	}}}
 	findings := []model.Finding{{RuleID: "HOST-01"}}
@@ -417,6 +511,8 @@ func randomizedFacts(seed uint64) *Facts {
 		d.TCPRetransRate = 0
 		d.TCPCoV = 0
 		d.TCPCollapses = 0
+		d.TCPMaxCPUPct = 0
+		d.TCPSenderMaxCPUPct = 0
 		if d.TCPAvailable {
 			base := f.NegotiatedSpeed
 			if base == 0 {
@@ -427,6 +523,9 @@ func randomizedFacts(seed uint64) *Facts {
 			d.TCPRetransRate = []float64{0, thresholds.TCPRetransWarningAt, thresholds.TCPRetransPoorAbove, 0.03}[rng.Intn(4)]
 			d.TCPCoV = []float64{0, thresholds.TCPCoVWarningAt, thresholds.TCPCoVPoorAbove, 0.5}[rng.Intn(4)]
 			d.TCPCollapses = rng.Intn(thresholds.TCPCollapsePoorAt + 3)
+			d.TCPSenderMaxCPUPct = []float64{0, thresholds.CPUHostLimitedAbove, 95, 100}[rng.Intn(4)]
+			receiverCPU := []float64{0, thresholds.CPUHostLimitedAbove, 95, 100}[rng.Intn(4)]
+			d.TCPMaxCPUPct = max(d.TCPSenderMaxCPUPct, receiverCPU)
 		}
 
 		d.UDPAvailable = rng.Intn(5) != 0
@@ -434,14 +533,19 @@ func randomizedFacts(seed uint64) *Facts {
 		d.UDPLossPct = 0
 		d.UDPJitterMs = 0
 		d.UDPOutOfOrderPct = 0
+		d.UDPMaxCPUPct = 0
 		if d.UDPTargetReached {
 			d.UDPLossPct = []float64{0, thresholds.UDPLossWarningAt, thresholds.UDPLossPoorAbove, 5}[rng.Intn(4)]
 			d.UDPJitterMs = []float64{0, thresholds.UDPJitterWarningAbove, 8}[rng.Intn(3)]
 			d.UDPOutOfOrderPct = []float64{0, thresholds.UDPReorderWarningAbove, 1}[rng.Intn(3)]
+			d.UDPMaxCPUPct = []float64{0, thresholds.CPUHostLimitedAbove, 95, 100}[rng.Intn(4)]
 		}
 	}
 
 	f.MaxCPUPct = []float64{0, thresholds.CPUHostLimitedAbove, math.Nextafter(thresholds.CPUHostLimitedAbove, math.Inf(1)), 100}[rng.Intn(4)]
+	for i := range f.Dir {
+		f.MaxCPUPct = max(f.MaxCPUPct, f.Dir[i].TCPMaxCPUPct, f.Dir[i].UDPMaxCPUPct)
+	}
 	f.USBAdapter = rng.Intn(5) == 0
 	f.VirtualInterface = rng.Intn(20) == 0
 	f.Partial = rng.Intn(12) == 0
@@ -454,6 +558,7 @@ func randomizedFacts(seed uint64) *Facts {
 			f.Dir[i].UDPLossPct = 0
 			f.Dir[i].UDPJitterMs = 0
 			f.Dir[i].UDPOutOfOrderPct = 0
+			f.Dir[i].UDPMaxCPUPct = 0
 		}
 	}
 	f.ThroughputUnreachable = rng.Intn(20) == 0
@@ -466,11 +571,14 @@ func randomizedFacts(seed uint64) *Facts {
 			f.Dir[i].TCPRetransRate = 0
 			f.Dir[i].TCPCoV = 0
 			f.Dir[i].TCPCollapses = 0
+			f.Dir[i].TCPMaxCPUPct = 0
+			f.Dir[i].TCPSenderMaxCPUPct = 0
 			f.Dir[i].UDPAvailable = false
 			f.Dir[i].UDPTargetReached = false
 			f.Dir[i].UDPLossPct = 0
 			f.Dir[i].UDPJitterMs = 0
 			f.Dir[i].UDPOutOfOrderPct = 0
+			f.Dir[i].UDPMaxCPUPct = 0
 		}
 	}
 
