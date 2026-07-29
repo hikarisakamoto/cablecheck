@@ -1,0 +1,55 @@
+#!/bin/sh
+
+set -eu
+
+case "${1-}" in
+	-V|--version)
+		printf '%s\n' 'ping from iputils 20240117'
+		exit 0
+		;;
+esac
+
+count=4
+target=127.0.0.1
+full_size=false
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		-c)
+			count=$2
+			shift 2
+			;;
+		-M)
+			full_size=true
+			shift 2
+			;;
+		*)
+			target=$1
+			shift
+			;;
+	esac
+done
+
+payload=56
+reply_bytes=64
+interval_ms=20
+if "$full_size"; then
+	payload=1472
+	reply_bytes=1480
+	interval_ms=200
+fi
+
+# Keep the demo long enough for its progress renderer to be visible without
+# depending on the host's ping interval policy or network stack.
+sleep "${CABLECHECK_STUB_PING_DELAY:-2}"
+
+printf 'PING %s (%s) %s(%s) bytes of data.\n' "$target" "$target" "$payload" "$((payload + 28))"
+i=1
+while [ "$i" -le "$count" ]; do
+	printf '[1752576000.%06d] %s bytes from %s: icmp_seq=%d ttl=64 time=0.200 ms\n' \
+		"$i" "$reply_bytes" "$target" "$i"
+	i=$((i + 1))
+done
+printf '\n--- %s ping statistics ---\n' "$target"
+printf '%d packets transmitted, %d received, 0%% packet loss, time %dms\n' \
+	"$count" "$count" "$((count * interval_ms))"
+printf '%s\n' 'rtt min/avg/max/mdev = 0.200/0.200/0.200/0.000 ms'

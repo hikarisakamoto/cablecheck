@@ -352,10 +352,10 @@ Scenarios (each a subtest of `TestIntegration`):
 testdata/stubtools/iperf3     # sh: "-s" in args → trap TERM/INT, loop sleep (killable server)
                               # client: pick fixture by args (-u? --reverse? --bidir?), sleep 0.3, cat it
 testdata/stubtools/ethtool    # "-S" → stats fixture; "--cable-test" → ok fixture; else link fixture (1Gb/s full)
-testdata/stubtools/fixtures/  # copies of the same testdata/iperf + testdata/ethtool files
+testdata/stubtools/ping       # emit clean, count-aware iputils output after a short deterministic delay
 ```
 
-Stubs resolve fixtures relative to `$0` (`dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)`), so they work from any cwd. `ping` and `ip` are the real binaries (loopback ping to 127.0.0.2 works on Linux; `ip -j addr` is real). Unit and integration tests never touch stubtools.
+Stubs resolve fixtures relative to `$0` (`dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)`), so they work from any cwd. `ip` remains the real binary for loopback discovery; ping is stubbed so the demo does not depend on the host's unprivileged interval policy. Unit and integration tests never touch stubtools.
 
 Demo (no sudo needed — relies on the §2 network rule: loopback prefix-match under `--allow-virtual-interface`; if the network design ends up requiring exact match, fallback documented: `sudo ip addr add 127.0.0.2/8 dev lo` + `ip addr del` cleanup):
 
@@ -372,9 +372,9 @@ export PATH="$PWD/testdata/stubtools:$PATH"
 # type "start" in both when prompted
 ```
 
-**Success proof:** virtual-interface warning printed; 3-2-1 countdown on both; `[n/8]` progress lines; both exit 0 (`echo $?`); PC1 has report.html/summary.txt/report.md/report.json/raw/ while PC2 has only the transferred three-file core; `sha256sum` of PC1 vs PC2 report.json identical; `./cablecheck report <pc1-dir>/report.json` regenerates HTML+Markdown+text (proves `report` subcommand); `./cablecheck doctor --local-ip 127.0.0.1 --allow-virtual-interface` all-green with stub PATH, and *without* stub PATH shows iperf3/ethtool missing with `pacman -S iperf3 ethtool` hint (negative demo). Interrupt demo: Ctrl-C in terminal 1 mid-test ⇒ exit 6, partial report, terminal 2 reports peer abort.
+**Success proof:** virtual-interface warning printed; 3-2-1 countdown on both; `[n/9]` progress lines; both exit 3 (`INCONCLUSIVE`, because loopback cannot test a cable); PC1 has report.html/summary.txt/report.md/report.json/raw/ while PC2 keeps its local raw evidence and diagnostic plus the transferred three-file core; `sha256sum` of PC1 vs PC2 report.json is identical; `./cablecheck report <pc1-dir>/report.json` regenerates HTML+Markdown+text (proves `report` subcommand). `./cablecheck doctor --interface lo --allow-virtual-interface` exercises doctor with the stub PATH. Without that PATH, doctor reports any missing runtime tools with package guidance. Interrupt demo: Ctrl-C in terminal 1 mid-test ⇒ exit 6, partial report, terminal 2 reports peer abort.
 
-Because `--non-interactive` exists, this is also scriptable. `scripts/demo-e2e.sh` runs PC1 in background with port 0→fixed demo port, PC2 foreground, and asserts exit codes + report artifacts + hash equality. It's wired as `make demo-e2e` so the "demo" gate is push-button.
+Because `--non-interactive` exists, this is also scriptable. `scripts/demo-e2e.sh` runs PC1 in the background and PC2 in the foreground on fixed demo ports, then asserts exit codes, report artifacts, and hash equality. It's wired as `make demo-e2e` so the "demo" gate is push-button.
 
 ---
 
