@@ -397,7 +397,7 @@ func sectionBidir(b *md, r *model.Report) {
 	}
 	b.table([]string{"Direction", "Sender", "Receiver", "Retransmits"}, rows)
 	if bd.TwoPhaseFallback {
-		b.note("Ran as two coordinated one-way phases (--bidir unavailable on a peer), not simultaneously.")
+		b.note("Ran as two coordinated one-way clients simultaneously on separate ports (--bidir unavailable on a peer).")
 	}
 }
 
