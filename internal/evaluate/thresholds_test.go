@@ -9,7 +9,7 @@ import (
 	"cablecheck/internal/model"
 )
 
-func TestDefaultThresholdsForRulesVersion170(t *testing.T) {
+func TestDefaultThresholdsForRulesVersion180(t *testing.T) {
 	want := Thresholds{
 		CRCPoorAbove:                  10,
 		CRCFailedAbove:                1000,
@@ -22,7 +22,7 @@ func TestDefaultThresholdsForRulesVersion170(t *testing.T) {
 		PingLossPoorAbove:             0.1,
 		PingSpikesWarningAbove:        5,
 		PingGapPoorAbove:              time.Second,
-		TCPRetransWarningAt:           0.001,
+		TCPRetransWarningAt:           0.0001,
 		TCPRetransPoorAbove:           0.01,
 		UDPLossWarningAt:              0.5,
 		UDPLossPoorAbove:              2,
@@ -36,6 +36,8 @@ func TestDefaultThresholdsForRulesVersion170(t *testing.T) {
 		TCPCollapsePoorAt:             3,
 		TCPAsymmetryWarnAbove:         0.30,
 		CPUHostLimitedAbove:           90,
+		HostRingDropRateAbove:         0.000001,
+		HostRingDropFloor:             100,
 		UDPTargetReachedAt:            0.90,
 		UDPNearSaturationAbove:        0.95,
 		FailedScoreBand:               ScoreBand{Min: 0, Max: 25},
@@ -44,7 +46,7 @@ func TestDefaultThresholdsForRulesVersion170(t *testing.T) {
 		GoodScoreBand:                 ScoreBand{Min: 80, Max: 94},
 		ExcellentScoreBand:            ScoreBand{Min: 95, Max: 100},
 	}
-	if RulesVersion != "1.7.0" {
+	if RulesVersion != "1.8.0" {
 		t.Fatalf("RulesVersion = %q; review the pinned default thresholds before updating this test", RulesVersion)
 	}
 	if got := Default(); !reflect.DeepEqual(got, want) {
@@ -68,6 +70,12 @@ func TestDefaultThresholdsValid(t *testing.T) {
 	}
 	if thresholds.TCPRetransWarningAt >= thresholds.TCPRetransPoorAbove {
 		t.Error("TCP retransmit thresholds are not ordered")
+	}
+	if thresholds.HostRingDropRateAbove <= 0 || thresholds.HostRingDropRateAbove >= 1 {
+		t.Errorf("host receive-ring drop rate = %v, want a share in (0,1)", thresholds.HostRingDropRateAbove)
+	}
+	if thresholds.HostRingDropFloor == 0 {
+		t.Error("host receive-ring drop floor is 0, which makes any single drop a host limitation again")
 	}
 	if thresholds.UDPLossWarningAt >= thresholds.UDPLossPoorAbove {
 		t.Error("UDP loss thresholds are not ordered")
@@ -160,6 +168,10 @@ func TestRulesHonorSuppliedThresholds(t *testing.T) {
 		{"collapse poor", "PERF-03", func(v *Thresholds) { v.TCPCollapsePoorAt = 5 }, &Facts{Dir: [2]DirFacts{{TCPCollapses: 3}}}, model.SevWarning, false},
 		{"asymmetry", "PERF-04", func(v *Thresholds) { v.TCPAsymmetryWarnAbove = 0.5 }, asymmetryFacts(100, 60), 0, true},
 		{"CPU host marker", "HOST-01", func(v *Thresholds) { v.CPUHostLimitedAbove = 50 }, &Facts{MaxCPUPct: 60}, model.SevMarker, false},
+		{"receive-ring drop rate", "HOST-04", func(v *Thresholds) { v.HostRingDropRateAbove = 0.5 },
+			&Facts{PC1: SideFacts{MissedErrors: 100, FramesReceived: 1_000, DeltaOK: true}}, 0, true},
+		{"receive-ring drop rate exceeded", "HOST-04", func(v *Thresholds) { v.HostRingDropRateAbove = 0.05 },
+			&Facts{PC1: SideFacts{MissedErrors: 100, FramesReceived: 1_000, DeltaOK: true}}, model.SevMarker, false},
 	}
 
 	for _, tc := range tests {

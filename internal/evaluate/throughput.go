@@ -54,11 +54,17 @@ func assessThroughput(f *Facts, direction int, thresholds Thresholds) (ratio flo
 	return ratio, severity, true, false
 }
 
-// physicalLayerClean requires trustworthy counter captures and no finding from
-// the canonical physical rule set. Evaluating those rules here avoids a second,
-// drift-prone definition of "clean physical layer" for the outlier cap.
+// physicalLayerClean requires trustworthy counter captures, receive-error
+// evidence from both peers, and no finding from the canonical physical rule set.
+// Evaluating those rules here avoids a second, drift-prone definition of "clean
+// physical layer" for the outlier cap. Reliable counters are not enough on their
+// own: a side that exposes no receive-error counter reports an empty, reliable
+// set by construction, which cannot establish that the layer was clean.
 func physicalLayerClean(f *Facts, thresholds Thresholds) bool {
 	if !f.PC1.DeltaOK || !f.PC2.DeltaOK {
+		return false
+	}
+	if !f.PC1.RXErrorEvidence || !f.PC2.RXErrorEvidence {
 		return false
 	}
 	for _, rule := range Rules() {

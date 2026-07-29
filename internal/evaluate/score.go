@@ -36,10 +36,12 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 			s -= math.Min(40, d.PingLossPct*20)
 		}
 		if d.TCPAvailable {
+			// The sustained rate carries the heavier deduction; a burst seen in only
+			// one trial costs the warning amount, matching TR-06's severity split.
 			switch {
 			case d.TCPRetransRate > thresholds.TCPRetransPoorAbove:
 				s -= 15
-			case d.TCPRetransRate >= thresholds.TCPRetransWarningAt:
+			case max(d.TCPRetransRate, d.TCPRetransRateWorst) >= thresholds.TCPRetransWarningAt:
 				s -= 5
 			}
 		}

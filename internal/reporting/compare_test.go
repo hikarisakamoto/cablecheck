@@ -69,6 +69,39 @@ func TestRenderComparisonGolden(t *testing.T) {
 	checkGolden(t, "compare.txt", RenderComparison(baseline, candidate))
 }
 
+// TestComparisonSurfacesDriverRXErrorAggregate pins that the driver's own
+// receive-error aggregate gets its own comparison row. It is the only corruption
+// evidence Realtek NICs report, and folding it into the per-cause CRC row would
+// double-count every error a driver reports both ways.
+func TestComparisonSurfacesDriverRXErrorAggregate(t *testing.T) {
+	baseline := cloneComparisonReport(t, goldenReport())
+	candidate := cloneComparisonReport(t, goldenReport())
+	baseline.CounterDeltas.PC1["rx_errors_total"] = model.CounterDelta{Delta: 0, OK: true}
+	candidate.CounterDeltas.PC1["rx_errors_total"] = model.CounterDelta{Delta: 482, OK: true}
+	baseline.CounterDeltas.PC1["rx_crc"] = model.CounterDelta{Delta: 0, OK: true}
+	candidate.CounterDeltas.PC1["rx_crc"] = model.CounterDelta{Delta: 0, OK: true}
+
+	var aggregate, crc *comparisonMetric
+	metrics := comparisonMetrics(baseline, candidate)
+	for i, row := range metrics {
+		switch {
+		case strings.Contains(row.name, "aggregate") && strings.Contains(row.name, "pc1"):
+			aggregate = &metrics[i]
+		case strings.HasPrefix(row.name, "CRC/framing errors (pc1)"):
+			crc = &metrics[i]
+		}
+	}
+	if aggregate == nil {
+		t.Fatalf("no driver receive-error aggregate row for pc1")
+	}
+	if aggregate.candidate != "482" {
+		t.Errorf("aggregate row candidate = %q, want %q", aggregate.candidate, "482")
+	}
+	if crc == nil || crc.candidate != "0" {
+		t.Errorf("CRC/framing row = %+v, want the aggregate kept out of it (candidate %q)", crc, "0")
+	}
+}
+
 func TestSavedAssessmentUsesOnlyClassifications(t *testing.T) {
 	tests := []struct {
 		name      string

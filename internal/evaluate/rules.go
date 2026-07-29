@@ -63,15 +63,17 @@ func Rules() []Rule {
 	}
 }
 
-// crcTotal sums the CRC-class error deltas of the sides whose deltas are
-// reliable.
+// crcTotal is the reliable CRC-class receive-error total across both sides. It
+// includes the unexplained remainder of each driver's own receive-error
+// aggregate, without which a NIC that exposes no per-cause counter (Realtek)
+// contributes 0 no matter how many frames it dropped as corrupt.
 func crcTotal(f *Facts) uint64 {
 	var total uint64
 	if f.PC1.DeltaOK {
-		total += f.PC1.CRCClassErrors
+		total += f.PC1.CRCClassErrors + f.PC1.UnclassifiedRXErrors
 	}
 	if f.PC2.DeltaOK {
-		total += f.PC2.CRCClassErrors
+		total += f.PC2.CRCClassErrors + f.PC2.UnclassifiedRXErrors
 	}
 	return total
 }
@@ -102,6 +104,19 @@ func jabberTotal(f *Facts) uint64 {
 	return total
 }
 
+// unclassifiedRXTotal is the reliable part of crcTotal that came from driver
+// receive-error aggregates rather than a per-cause counter.
+func unclassifiedRXTotal(f *Facts) uint64 {
+	var total uint64
+	if f.PC1.DeltaOK {
+		total += f.PC1.UnclassifiedRXErrors
+	}
+	if f.PC2.DeltaOK {
+		total += f.PC2.UnclassifiedRXErrors
+	}
+	return total
+}
+
 // carrierEvents returns the worst per-side carrier event count among the
 // reliable sides (both sides observe the same physical link, so summing would
 // double-count one bounce).
@@ -119,12 +134,19 @@ func carrierEvents(f *Facts) uint64 {
 // crcEvidence lists the per-side CRC-class deltas of the reliable sides.
 func crcEvidence(f *Facts) []string {
 	var ev []string
-	if f.PC1.DeltaOK && f.PC1.CRCClassErrors > 0 {
-		ev = append(ev, fmt.Sprintf("pc1: CRC-class error counters +%d during the test", f.PC1.CRCClassErrors))
+	appendSide := func(name string, side SideFacts) {
+		if !side.DeltaOK {
+			return
+		}
+		if side.CRCClassErrors > 0 {
+			ev = append(ev, fmt.Sprintf("%s: CRC-class error counters +%d during the test", name, side.CRCClassErrors))
+		}
+		if side.UnclassifiedRXErrors > 0 {
+			ev = append(ev, fmt.Sprintf("%s: driver receive-error aggregate +%d beyond the per-cause counters", name, side.UnclassifiedRXErrors))
+		}
 	}
-	if f.PC2.DeltaOK && f.PC2.CRCClassErrors > 0 {
-		ev = append(ev, fmt.Sprintf("pc2: CRC-class error counters +%d during the test", f.PC2.CRCClassErrors))
-	}
+	appendSide("pc1", f.PC1)
+	appendSide("pc2", f.PC2)
 	return ev
 }
 
@@ -171,10 +193,21 @@ func rulePHY02(f *Facts, thresholds Thresholds) *model.Finding {
 	if total == 0 {
 		return nil
 	}
+	// Evidence drawn only from a driver's receive-error aggregate is unexplained,
+	// not proven corrupt: those counters have driver-defined semantics and a
+	// driver could fold its own receive-ring drops into them. Such evidence is
+	// reported as unexplained and cannot escalate past a warning on count alone;
+	// only independent packet loss makes it decisive. That ceiling is what keeps
+	// a host-side drop from ever being scored as a cable fault.
+	unclassifiedOnly := total == unclassifiedRXTotal(f)
 	lossy := anyPingLossOver(f, thresholds.CRCCorroboratingPingLossAbove)
 	sev := model.SevWarning
 	switch {
-	case total > thresholds.CRCFailedAbove || (total > thresholds.CRCPoorAbove && lossy):
+	case total > thresholds.CRCPoorAbove && lossy:
+		sev = model.SevFailed
+	case unclassifiedOnly:
+		// stays at warning whatever the count
+	case total > thresholds.CRCFailedAbove:
 		sev = model.SevFailed
 	case total > thresholds.CRCPoorAbove:
 		sev = model.SevPoor
@@ -183,11 +216,15 @@ func rulePHY02(f *Facts, thresholds Thresholds) *model.Finding {
 	if total > thresholds.CRCPoorAbove && lossy {
 		ev = append(ev, fmt.Sprintf("ping loss above %g%% corroborates the counter movement", thresholds.CRCCorroboratingPingLossAbove))
 	}
+	text := fmt.Sprintf("CRC-class receive errors incremented by %d during the test.", total)
+	if unclassifiedOnly {
+		text = fmt.Sprintf("Receive errors incremented by %d during the test, and no per-cause counter explains them.", total)
+	}
 	return &model.Finding{
 		RuleID:   "PHY-02",
 		Category: model.CategoryPhysical,
 		Severity: sev,
-		Text:     fmt.Sprintf("CRC-class receive errors incremented by %d during the test.", total),
+		Text:     text,
 		Evidence: ev,
 	}
 }
@@ -482,15 +519,24 @@ func ruleTR06(f *Facts, thresholds Thresholds) *model.Finding {
 	var ev []string
 	for i := range f.Dir {
 		d := &f.Dir[i]
-		if !d.TCPAvailable || d.TCPRetransRate < thresholds.TCPRetransWarningAt {
+		// The worst trial can never be below the sustained rate; taking the
+		// maximum keeps the rule correct for facts that carry only one of them.
+		burst := max(d.TCPRetransRate, d.TCPRetransRateWorst)
+		if !d.TCPAvailable || burst < thresholds.TCPRetransWarningAt {
 			continue
 		}
+		// Only a sustained rate convicts. A burst the median smoothed away is
+		// reported, and warns, but one clean repeat shows it was not the norm.
 		sev := model.SevWarning
 		if d.TCPRetransRate > thresholds.TCPRetransPoorAbove {
 			sev = model.SevPoor
 		}
 		ev = append(ev, fmt.Sprintf("%s: estimated retransmit rate %.2f%% (retransmits / (bytes/MSS %d))",
-			dirNames[i], d.TCPRetransRate*100, defaultMSS))
+			dirNames[i], burst*100, defaultMSS))
+		if burst > d.TCPRetransRate {
+			ev = append(ev, fmt.Sprintf("%s: worst trial only; the rate sustained across trials is %.2f%%",
+				dirNames[i], d.TCPRetransRate*100))
+		}
 		if sev > worst {
 			worst = sev
 		}
@@ -504,6 +550,10 @@ func ruleTR06(f *Facts, thresholds Thresholds) *model.Finding {
 		Severity: worst,
 		Text:     "TCP retransmissions are elevated for a direct cable link.",
 		Evidence: ev,
+		// Retransmissions cannot separate wire corruption from local queue or
+		// receive-ring drops, so measured host evidence must be able to hold the
+		// verdict at INCONCLUSIVE instead of convicting the cable.
+		HostSensitive: true,
 	}
 }
 
@@ -722,10 +772,17 @@ func ruleHOST03(f *Facts, thresholds Thresholds) *model.Finding {
 	}
 }
 
-func ruleHOST04(f *Facts, _ Thresholds) *model.Finding {
+func ruleHOST04(f *Facts, thresholds Thresholds) *model.Finding {
 	var ev []string
 	appendSide := func(name string, side SideFacts) {
 		if !side.DeltaOK {
+			return
+		}
+		// Rated on the combined volume: rx_fifo and rx_missed are distinct
+		// registers on the mapped drivers, so judging each alone would let two
+		// half-threshold counters hide twice the drops. Each is still reported
+		// separately, because drivers may count overlapping events.
+		if !limitingDropRate(side.FifoOverrun+side.MissedErrors, side.FramesReceived, thresholds) {
 			return
 		}
 		if side.FifoOverrun > 0 {
@@ -749,10 +806,39 @@ func ruleHOST04(f *Facts, _ Thresholds) *model.Finding {
 	}
 }
 
+// limitingDropRate reports whether a receive-ring drop count is frequent enough
+// to plausibly limit throughput. Because this marker suppresses every
+// host-sensitive performance deduction, a handful of drops across tens of
+// millions of frames must not qualify. Without a frames-received denominator no
+// rate exists, so any movement counts — the conservative reading when the
+// traffic volume behind the drops is unknown.
+func limitingDropRate(drops, framesReceived uint64, thresholds Thresholds) bool {
+	if drops == 0 {
+		return false
+	}
+	// Counters bracket the whole run, so a burst confined to one soak cycle is
+	// diluted by every clean cycle after it. A large absolute count is host
+	// evidence on its own, whatever traffic volume followed.
+	if drops > thresholds.HostRingDropFloor {
+		return true
+	}
+	// Defensive: a completed run always receives frames, so this is unreachable
+	// in practice. Without a denominator no rate exists, and unrated movement is
+	// treated as limiting rather than dismissed.
+	if framesReceived == 0 {
+		return true
+	}
+	return float64(drops)/float64(framesReceived) > thresholds.HostRingDropRateAbove
+}
+
 func ruleLIM01(f *Facts, _ Thresholds) *model.Finding {
 	noTCP := !f.Dir[0].TCPAvailable && !f.Dir[1].TCPAvailable
 	noCounters := !f.PC1.CountersAvailable && !f.PC2.CountersAvailable
-	if !noTCP && !noCounters {
+	// A side can carry counters (carrier changes are always readable) while
+	// exposing nothing that measures frame corruption. Neither side measuring it
+	// means a clean result rests on counters that were never taken.
+	noRXEvidence := !f.PC1.RXErrorEvidence && !f.PC2.RXErrorEvidence
+	if !noTCP && !noCounters && !noRXEvidence {
 		return nil
 	}
 	var ev []string
@@ -761,6 +847,9 @@ func ruleLIM01(f *Facts, _ Thresholds) *model.Finding {
 	}
 	if noCounters {
 		ev = append(ev, "NIC error counters unavailable on both sides")
+	}
+	if noRXEvidence && !noCounters {
+		ev = append(ev, "neither NIC exposes a receive-error counter, so frame corruption was never measured")
 	}
 	return &model.Finding{
 		RuleID:   "LIM-01",
@@ -797,6 +886,15 @@ func ruleLIM02(f *Facts, _ Thresholds) *model.Finding {
 		if noncriticalTests[name] {
 			ev = append(ev, fmt.Sprintf("test %q could not run", name))
 		}
+	}
+	// One side measuring receive errors leaves that direction's receive path
+	// unverified; the other side's clean counters say nothing about it.
+	if f.PC1.RXErrorEvidence != f.PC2.RXErrorEvidence {
+		unmeasured := "pc1"
+		if f.PC1.RXErrorEvidence {
+			unmeasured = "pc2"
+		}
+		ev = append(ev, fmt.Sprintf("%s exposes no receive-error counter, so corruption arriving there was never measured", unmeasured))
 	}
 	if len(ev) == 0 {
 		return nil

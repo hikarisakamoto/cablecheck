@@ -275,16 +275,21 @@ Assembled from the pre-evaluation Report. Every field is plain data, so rules st
 ```go
 type SideFacts struct {
     CRCClassErrors   uint64 // Δ(rx_crc + frame + alignment + symbol), wrap-safe; only counted when DeltaOK
+    UnclassifiedRXErrors uint64 // Δrx_errors_total minus every per-cause receive counter, clamped at 0
     CarrierEvents    uint64 // Δcarrier_changes / link resets during session
     JabberSizeErrors uint64 // Δ(jabber + oversize + undersize + length)
     FifoOverrun      uint64 // Δrx_fifo
     MissedErrors     uint64 // Δrx_missed
+    FramesReceived   uint64 // Δrx.packets: the rate denominator; 0 means no rate can be computed
     CarrierPHYErrors uint64 // Δ(tx_carrier + phy_errors)
     DeltaOK          bool   // false on counter reset/wrap or capture failure
     CountersAvailable bool
+    RXErrorEvidence  bool   // this side exposed a receive-error counter at all (per-cause or aggregate)
 }
 
 type DirFacts struct { // one per traffic direction (pc1→pc2, pc2→pc1)
+    // TCPRetransRate is the lower median (sustained, convicts);
+    // TCPRetransRateWorst is the max across trials (transient, warns).
     // TCP
     TCPAvailable   bool
     TCPTrialCount  int     // completed trials contributing to this direction
@@ -335,10 +340,15 @@ func FactsFromReport(r *model.Report) *Facts
 ```
 
 Completed repeated TCP trials are aggregated independently per direction and
-metric. Bitrate, CoV, and valid retransmission rates use the lower median (the
-lower middle value for an even sample count); missing retransmission data is
-excluded rather than treated as zero. Collapse count remains the maximum from
-any trial. An incomplete result or a missing configured repeat makes that TCP
+metric. Bitrate and CoV use the lower median (the lower middle value for an even
+sample count), because they measure a steady state where one host-sensitive pass
+must not decide the verdict. Collapse count keeps the maximum from any
+trial. Retransmissions keep both reductions: TCPRetransRate is the lower median
+(the sustained rate, the only one that can produce a poor verdict) and
+TCPRetransRateWorst is the maximum (a burst the median would smooth away, which
+warns). Splitting them keeps a soak's larger trial count from escalating a
+verdict by itself. Missing retransmission data is excluded rather than treated as
+zero. An incomplete result or a missing configured repeat makes that TCP
 direction unavailable. Directional TCP CPU uses the maximum endpoint value
 from the same complete trials, with client-side CPU also retained separately
 as sender CPU. UDP retains its qualifying worst-case aggregation, including
@@ -373,7 +383,7 @@ type Result struct {
     Score           *int // nil for INCONCLUSIVE
     Findings        []Finding
     Recommendations []string
-    RulesVersion    string // "1.7.0"
+    RulesVersion    string // "1.8.0"
 }
 func Evaluate(f *Facts) Result
 ```

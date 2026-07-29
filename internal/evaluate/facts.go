@@ -29,6 +29,17 @@ type SideFacts struct {
 	// CRCClassErrors is the delta of rx_crc + rx_frame + rx_align +
 	// rx_symbol, wrap-safe; only counted by rules when DeltaOK.
 	CRCClassErrors uint64
+	// UnclassifiedRXErrors is the part of the driver's own receive-error
+	// aggregate (rx_errors_total) that no per-cause error counter explains.
+	// Realtek NICs report corruption only through that aggregate, so without
+	// this residual their receive path looks error-free. It is unexplained
+	// rather than proven corrupt, so PHY-02 reports it as such and never fails
+	// a run on it alone.
+	UnclassifiedRXErrors uint64
+	// RXErrorEvidence reports whether this side exposed any receive-error
+	// counter at all (per-cause or aggregate). False means corruption was
+	// never measured on this side, which is not the same as zero errors.
+	RXErrorEvidence bool
 	// CarrierEvents is the delta of link_resets (sysfs carrier_changes)
 	// during the session.
 	CarrierEvents uint64
@@ -39,6 +50,11 @@ type SideFacts struct {
 	FifoOverrun uint64
 	// MissedErrors is the delta of rx_missed.
 	MissedErrors uint64
+	// FramesReceived is the rtnetlink receive-packet delta across the run: the
+	// denominator that turns raw drop and error counts into rates. It is 0 when
+	// no traffic was seen or the counter reset, which means "no rate can be
+	// computed", not "no frames".
+	FramesReceived uint64
 	// CarrierPHYErrors is the delta of tx_carrier + phy_errors.
 	CarrierPHYErrors uint64
 	// DeltaOK is false on counter reset/wrap, a key missing from one
@@ -63,9 +79,14 @@ type DirFacts struct {
 	TCPThroughputDeviations int
 	// TCPBitrate is the measured TCP throughput (receiver side).
 	TCPBitrate model.Bitrate
-	// TCPRetransRate is retransmits / estimated segments (bytes/MSS, MSS
-	// fallback 1448), as a fraction.
+	// TCPRetransRate is the sustained retransmission rate: retransmits /
+	// estimated segments (bytes/MSS, MSS fallback 1448) reduced across repeat
+	// trials by the lower median. Only this drives a poor verdict.
 	TCPRetransRate float64
+	// TCPRetransRateWorst is the same rate from the worst repeat trial. A burst
+	// confined to one trial is real evidence but not the steady state, so it
+	// warns without letting trial count alone escalate the verdict.
+	TCPRetransRateWorst float64
 	// TCPCoV is stdev/mean of per-interval bitrates, first interval
 	// excluded, as a fraction.
 	TCPCoV float64
@@ -297,7 +318,12 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 			d.TCPBitrate = model.Bitrate(lowerMedian(samples.bitrates))
 			d.TCPCoV = lowerMedian(samples.covs)
 			d.TCPCollapses = samples.collapses
+			// Retransmissions carry both reductions. The lower median is the
+			// sustained rate that can convict; the worst trial preserves a burst a
+			// median would smooth away, which warns. Keeping them apart stops a
+			// soak's larger trial count from escalating the verdict by itself.
 			d.TCPRetransRate = lowerMedian(samples.retrans)
+			d.TCPRetransRateWorst = worstOf(samples.retrans)
 			d.TCPMaxCPUPct = samples.maxCPU
 			d.TCPSenderMaxCPUPct = samples.senderMaxCPU
 			for _, bps := range samples.bitrates {
@@ -315,6 +341,7 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 			d.TCPCoV = 0
 			d.TCPCollapses = 0
 			d.TCPRetransRate = 0
+			d.TCPRetransRateWorst = 0
 			d.TCPMaxCPUPct = 0
 			d.TCPSenderMaxCPUPct = 0
 		}
@@ -395,6 +422,14 @@ func sideFacts(before, after *model.CounterSnapshot, selfInflictedCarrier uint64
 		}
 		return total
 	}
+	present := func(keys ...string) bool {
+		for _, k := range keys {
+			if _, ok := set[k]; ok {
+				return true
+			}
+		}
+		return false
+	}
 	carrierEvents := sum("link_resets")
 	if selfInflictedCarrier >= carrierEvents {
 		carrierEvents = 0
@@ -402,15 +437,59 @@ func sideFacts(before, after *model.CounterSnapshot, selfInflictedCarrier uint64
 		carrierEvents -= selfInflictedCarrier
 	}
 	return SideFacts{
-		CRCClassErrors:    sum("rx_crc", "rx_frame", "rx_align", "rx_symbol"),
-		CarrierEvents:     carrierEvents,
-		JabberSizeErrors:  sum("jabber", "oversize", "undersize", "rx_length"),
-		FifoOverrun:       sum("rx_fifo"),
-		MissedErrors:      sum("rx_missed"),
-		CarrierPHYErrors:  sum("tx_carrier", "phy_errors"),
-		DeltaOK:           ok && available,
-		CountersAvailable: available,
+		CRCClassErrors:       sum("rx_crc", "rx_frame", "rx_align", "rx_symbol"),
+		UnclassifiedRXErrors: unclassifiedRXErrors(sum),
+		CarrierEvents:        carrierEvents,
+		JabberSizeErrors:     sum("jabber", "oversize", "undersize", "rx_length"),
+		FifoOverrun:          sum("rx_fifo"),
+		MissedErrors:         sum("rx_missed"),
+		FramesReceived:       framesReceived(before, after),
+		CarrierPHYErrors:     sum("tx_carrier", "phy_errors"),
+		DeltaOK:              ok && available,
+		CountersAvailable:    available,
+		RXErrorEvidence:      present(rxErrorEvidenceKeys...),
 	}
+}
+
+// framesReceived returns how many frames this side took in during the run, from
+// the rtnetlink packet counter that every driver maintains. A missing snapshot,
+// an idle link or a counter reset all yield 0: no denominator, so callers must
+// fall back to absolute counts rather than divide.
+func framesReceived(before, after *model.CounterSnapshot) uint64 {
+	if before == nil || after == nil {
+		return 0
+	}
+	delta, ok := CounterDelta(before.IPStats.RX.Packets, after.IPStats.RX.Packets)
+	if !ok {
+		return 0
+	}
+	return delta
+}
+
+// rxErrorEvidenceKeys are the counters whose presence proves a side actually
+// measured receive corruption. Carrier and receive-ring drop counters are
+// deliberately excluded: they say nothing about frame integrity.
+var rxErrorEvidenceKeys = []string{"rx_crc", "rx_frame", "rx_align", "rx_symbol", "rx_errors_total"}
+
+// unclassifiedRXErrors returns the part of the driver's receive-error aggregate
+// that no per-cause error counter accounts for. Drivers exposing no aggregate
+// yield 0.
+//
+// The receive-ring drop counters are deliberately NOT subtracted: on both
+// drivers whose semantics are established here they sit outside the aggregate
+// (e1000e's netdev rx_errors never includes the missed-packet register, and
+// Realtek's RxErr tally is separate from RxMissed), so subtracting them would
+// cancel real corruption evidence one drop for one error. A driver that does
+// fold its drops in cannot escalate past a warning on its own: PHY-02 refuses to
+// fail a run on unclassified evidence alone.
+func unclassifiedRXErrors(sum func(keys ...string) uint64) uint64 {
+	total := sum("rx_errors_total")
+	explained := sum("rx_crc", "rx_frame", "rx_align", "rx_symbol", "rx_length",
+		"undersize", "oversize", "jabber")
+	if total <= explained {
+		return 0
+	}
+	return total - explained
 }
 
 // dirIndex maps a direction label to its Facts.Dir index, -1 when unknown.
@@ -509,6 +588,18 @@ func lowerMedian(values []float64) float64 {
 	}
 	sorted := sortedValues(values)
 	return sorted[(len(sorted)-1)/2]
+}
+
+// worstOf returns the largest sample, the reduction for metrics that count
+// discrete anomalies rather than measure a steady state: an event that happened
+// in one trial happened, and no other trial disproves it. Empty means no
+// samples, which reads as no evidence.
+func worstOf(values []float64) float64 {
+	var worst float64
+	for _, v := range values {
+		worst = max(worst, v)
+	}
+	return worst
 }
 
 func sortedValues(values []float64) []float64 {

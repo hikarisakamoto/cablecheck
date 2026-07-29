@@ -1,6 +1,7 @@
 package evaluate
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -25,6 +26,58 @@ func TestRuleLIM05(t *testing.T) {
 	if fd := evaluateRule(rule, &Facts{}); fd != nil {
 		t.Errorf("LIM-05 without unreachable throughput = %+v, want nil", fd)
 	}
+}
+
+// TestReceiveErrorEvidenceGapIsALimitation pins the blind-side guard: a side
+// whose driver exposes no receive-error counter never measured corruption, so a
+// clean-looking verdict must be downgraded rather than certified.
+func TestReceiveErrorEvidenceGapIsALimitation(t *testing.T) {
+	t.Run("neither side measured receive errors", func(t *testing.T) {
+		f := cleanFacts()
+		f.PC1.RXErrorEvidence = false
+		f.PC2.RXErrorEvidence = false
+		res := Evaluate(f)
+		if !slices.Contains(findingIDs(res), "LIM-01") {
+			t.Errorf("findings = %v, want LIM-01: neither side can prove the link was clean", findingIDs(res))
+		}
+		if res.Class != model.HealthInconclusive {
+			t.Errorf("class = %v, want INCONCLUSIVE", res.Class)
+		}
+	})
+
+	t.Run("one side measured receive errors", func(t *testing.T) {
+		f := cleanFacts()
+		f.PC2.RXErrorEvidence = false
+		res := Evaluate(f)
+		if !slices.Contains(findingIDs(res), "LIM-02") {
+			t.Errorf("findings = %v, want LIM-02 for the one unmeasured side", findingIDs(res))
+		}
+		if res.Class != model.HealthGood {
+			t.Errorf("class = %v, want GOOD: half the link's receive path was never measured", res.Class)
+		}
+	})
+
+	t.Run("both sides measured receive errors", func(t *testing.T) {
+		res := Evaluate(cleanFacts())
+		for _, id := range findingIDs(res) {
+			if id == "LIM-01" || id == "LIM-02" {
+				t.Errorf("findings = %v, want no evidence-gap limitation", findingIDs(res))
+			}
+		}
+		if res.Class != model.HealthExcellent {
+			t.Errorf("class = %v, want EXCELLENT", res.Class)
+		}
+	})
+
+	t.Run("a real fault still wins over the evidence gap", func(t *testing.T) {
+		f := cleanFacts()
+		f.PC1.RXErrorEvidence = false
+		f.PC2.RXErrorEvidence = false
+		f.PC2.CRCClassErrors = 500
+		if res := Evaluate(f); res.Class != model.HealthPoor {
+			t.Errorf("class = %v, want POOR: a limitation must never hide measured corruption", res.Class)
+		}
+	})
 }
 
 // TestClassifyThroughputUnreachable covers the two verdicts that matter: an

@@ -199,7 +199,7 @@ Its optional `pc1ToPc2` and `pc2ToPc1` fields each contain:
 Incomplete TCP entries do not participate. The bitrate is receiver-observed
 throughput, falling back to sender throughput when the receiver value is not
 positive. The median is the lower middle sample for an even count, matching
-the evaluator's conservative repeat-trial policy. `coefficientOfVariation` is
+the evaluator's repeat-trial policy for bitrate and interval variation. `coefficientOfVariation` is
 the population standard deviation divided by the mean; it is zero when the
 mean is zero. The raw trials remain authoritative, and CableCheck recomputes
 the aggregate when rendering rather than trusting a saved derived value.
@@ -240,7 +240,7 @@ Pair statuses are `OK`, `OPEN`, `SHORT_INTRA`, `SHORT_INTER`, `IMPEDANCE`, or
 | JSON field | Type | Meaning |
 |---|---|---|
 | `capturedAt` | timestamp | Snapshot time. |
-| `standard` | object of unsigned integers | Flat normalized counters with stable names such as `rx_crc`, `rx_missed`, and `link_resets`. |
+| `standard` | object of unsigned integers | Flat normalized counters with stable names such as `rx_crc`, `rx_missed`, and `link_resets`. `rx_errors_total` is the driver's own receive-error aggregate rather than a per-cause counter; the evaluator subtracts the per-cause counters from it and treats the remainder as unclassified receive errors. An absent key means the driver does not expose that counter, which is not zero. |
 | `driver` | object of unsigned integers | Driver-specific ethtool counters, retaining their driver names. |
 | `raw` | string | Raw ethtool counter output. |
 | `ipStats` | IPStats64 | Full `stats64` receive/transmit data from `ip -j -s -s link show`. |

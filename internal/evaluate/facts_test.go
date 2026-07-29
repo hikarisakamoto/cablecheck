@@ -443,7 +443,11 @@ func TestLowerMedian(t *testing.T) {
 	}
 }
 
-func TestFactsFromReportUsesLowerMedianForRepeatedTCPResults(t *testing.T) {
+// TestFactsFromReportAggregatesRepeatedTCPResults pins the per-metric reduction:
+// steady-state measurements (bitrate, interval variation) take the lower median
+// so one host-sensitive pass cannot decide the verdict, while discrete anomaly
+// counts (collapse intervals, retransmissions) keep the worst pass.
+func TestFactsFromReportAggregatesRepeatedTCPResults(t *testing.T) {
 	before := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
 	after := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
 	trial := func(bitrate float64, cov float64, retrans uint64, collapse bool) model.TCPResult {
@@ -484,7 +488,10 @@ func TestFactsFromReportUsesLowerMedianForRepeatedTCPResults(t *testing.T) {
 		t.Errorf("pc1->pc2 TCP variation = %v, want lower median 0.2", got)
 	}
 	if got := f.Dir[0].TCPRetransRate; math.Abs(got-0.02) > 1e-12 {
-		t.Errorf("pc1->pc2 retransmit rate = %v, want lower median 0.02", got)
+		t.Errorf("pc1->pc2 sustained retransmit rate = %v, want lower median 0.02", got)
+	}
+	if got := f.Dir[0].TCPRetransRateWorst; math.Abs(got-0.04) > 1e-12 {
+		t.Errorf("pc1->pc2 worst retransmit rate = %v, want the worst trial's 0.04", got)
 	}
 	if got := f.Dir[0].TCPCollapses; got != 1 {
 		t.Errorf("pc1->pc2 collapses = %d, want maximum 1", got)
@@ -577,6 +584,61 @@ func TestFactsFromReportKeepsWorstRepeatedCollapseIntervalCount(t *testing.T) {
 	}
 }
 
+// TestFactsFromReportRetainsTheWorstRetransmissionTrial pins that a burst
+// confined to one repeat survives aggregation. A retransmission burst is
+// discrete anomaly evidence like a collapse interval, not a steady-state rate,
+// so the worst trial is kept. The field case had 1012 retransmits in one 60 s
+// trial and 0 in its repeat: a lower-median reduction scored it as 0 while the
+// summary still printed 1012.
+func TestFactsFromReportRetainsTheWorstRetransmissionTrial(t *testing.T) {
+	// One 60 s trial at 927.7 Mbit/s carries ~6.96 GB, about 4.8M segments.
+	const bytesPerTrial = 6_957_750_000
+	trial := func(retrans uint64) model.TCPResult {
+		return model.TCPResult{
+			Direction: model.DirectionPC2ToPC1, ReceiverBitsPerSecond: 927_700_000,
+			Retransmissions: uint64Ptr(retrans),
+			IntervalResults: []model.TCPInterval{{Bytes: bytesPerTrial}},
+		}
+	}
+	f := FactsFromReport(&model.Report{
+		Configuration: model.ConfigEcho{TCPRepeats: 2},
+		Tests:         model.TestsSection{TCP: []model.TCPResult{trial(1012), trial(0)}},
+	})
+
+	want := 1012 / (float64(bytesPerTrial) / defaultMSS)
+	if got := f.Dir[1].TCPRetransRateWorst; math.Abs(got-want) > 1e-12 {
+		t.Errorf("pc2->pc1 worst retransmit rate = %v, want the worst trial's %v", got, want)
+	}
+	if got := f.Dir[1].TCPRetransRate; got != 0 {
+		t.Errorf("pc2->pc1 sustained retransmit rate = %v, want the lower median 0", got)
+	}
+	fd := evaluateRule(ruleByID(t, "TR-06"), f)
+	if fd == nil {
+		t.Fatalf("TR-06 = nil, want a finding: 1012 retransmits on a direct cable is not a clean trial")
+	}
+	if fd.Severity != model.SevWarning {
+		t.Errorf("TR-06 severity = %v, want warning", fd.Severity)
+	}
+}
+
+// TestTR06SeparatesTransientBurstsFromSustainedLoss pins the two roles of the
+// retransmit aggregates. A burst in one repeat is a warning: real, but one clean
+// repeat says it was not the steady state. Poor requires the sustained rate, so
+// sensitivity cannot grow simply because a soak ran more trials.
+func TestTR06SeparatesTransientBurstsFromSustainedLoss(t *testing.T) {
+	rule := ruleByID(t, "TR-06")
+
+	transient := &Facts{Dir: [2]DirFacts{{TCPAvailable: true, TCPRetransRate: 0, TCPRetransRateWorst: 0.02}}}
+	if fd := evaluateRule(rule, transient); fd == nil || fd.Severity != model.SevWarning {
+		t.Errorf("TR-06 = %+v, want warning for a burst confined to one trial", fd)
+	}
+
+	sustained := &Facts{Dir: [2]DirFacts{{TCPAvailable: true, TCPRetransRate: 0.02, TCPRetransRateWorst: 0.02}}}
+	if fd := evaluateRule(rule, sustained); fd == nil || fd.Severity != model.SevPoor {
+		t.Errorf("TR-06 = %+v, want poor when the rate persists across trials", fd)
+	}
+}
+
 func TestFactsFromReportExcludesMissingRetransmissionSamples(t *testing.T) {
 	withRate := func(retrans *uint64) model.TCPResult {
 		return model.TCPResult{
@@ -593,7 +655,7 @@ func TestFactsFromReportExcludesMissingRetransmissionSamples(t *testing.T) {
 		want   float64
 	}{
 		{name: "missing plus high keeps high", trials: []model.TCPResult{withRate(nil), withRate(&high)}, want: 0.02},
-		{name: "explicit zero participates", trials: []model.TCPResult{withRate(&zero), withRate(&high)}, want: 0},
+		{name: "explicit zero participates in the sustained rate", trials: []model.TCPResult{withRate(&zero), withRate(&high)}, want: 0},
 		{name: "all missing has no rate", trials: []model.TCPResult{withRate(nil), withRate(nil)}, want: 0},
 	}
 	for _, tc := range tests {
@@ -897,3 +959,183 @@ func TestEvaluateOneIncompleteTCPDirectionCapsExcellent(t *testing.T) {
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }
+
+// TestSideFactsUnclassifiedReceiveErrors pins the residual recovered from a
+// driver's own receive-error aggregate: whatever the per-cause counters cannot
+// explain is still corruption evidence, and the subtraction never underflows.
+func TestSideFactsUnclassifiedReceiveErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		before map[string]uint64
+		after  map[string]uint64
+		want   uint64
+	}{
+		{
+			// r8169 shape: only the aggregate plus align/missed exist, so the
+			// aggregate carries CRC and runt errors nothing else reports. Its
+			// ring drops sit outside the aggregate and are not subtracted.
+			name:   "realtek aggregate minus its per-cause error counters",
+			before: map[string]uint64{"rx_errors_total": 100, "rx_align": 10, "rx_missed": 5},
+			after:  map[string]uint64{"rx_errors_total": 284, "rx_align": 51, "rx_missed": 14},
+			want:   143,
+		},
+		{
+			// e1000e shape: the named per-cause errors account for all but the
+			// receive errors the driver exposes under no per-cause name.
+			name: "explained aggregate leaves only what no counter names",
+			before: map[string]uint64{"rx_errors_total": 0, "rx_crc": 0, "rx_align": 0,
+				"rx_length": 0, "oversize": 0, "rx_missed": 0},
+			after: map[string]uint64{"rx_errors_total": 1561, "rx_crc": 1543, "rx_align": 12,
+				"rx_length": 2, "oversize": 2, "rx_missed": 4},
+			want: 2,
+		},
+		{
+			name:   "receive-ring drops do not cancel corruption evidence",
+			before: map[string]uint64{"rx_errors_total": 0, "rx_missed": 0, "rx_fifo": 0},
+			after:  map[string]uint64{"rx_errors_total": 482, "rx_missed": 482, "rx_fifo": 100},
+			want:   482,
+		},
+		{
+			name:   "per-cause counters exceeding the aggregate never underflow",
+			before: map[string]uint64{"rx_errors_total": 0, "rx_crc": 0},
+			after:  map[string]uint64{"rx_errors_total": 3, "rx_crc": 40},
+			want:   0,
+		},
+		{
+			name:   "aggregate alone is fully unclassified",
+			before: map[string]uint64{"rx_errors_total": 0},
+			after:  map[string]uint64{"rx_errors_total": 50},
+			want:   50,
+		},
+		{
+			name:   "no aggregate key means no residual",
+			before: map[string]uint64{"rx_crc": 0},
+			after:  map[string]uint64{"rx_crc": 7},
+			want:   0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			before, after := snap(tc.before), snap(tc.after)
+			f := FactsFromReport(&model.Report{
+				InitialCounters: model.PeerCounters{PC1: &before},
+				FinalCounters:   model.PeerCounters{PC1: &after},
+			})
+			if got := f.PC1.UnclassifiedRXErrors; got != tc.want {
+				t.Errorf("PC1.UnclassifiedRXErrors = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCounterKeyAppearingOnlyAfterErasesSideEvidence documents the blast radius
+// of an unstable counter key set, which is why no normalized key may be sourced
+// from a fallback that suppresses zeros: one key present in only the final
+// capture discards every counter rule for that side, carrier evidence included.
+// internal/testsuite guarantees the key set stays stable across captures.
+func TestCounterKeyAppearingOnlyAfterErasesSideEvidence(t *testing.T) {
+	before := snap(map[string]uint64{"link_resets": 16})
+	after := snap(map[string]uint64{"link_resets": 20, "rx_errors_total": 7})
+
+	f := FactsFromReport(&model.Report{
+		InitialCounters: model.PeerCounters{PC1: &before},
+		FinalCounters:   model.PeerCounters{PC1: &after},
+	})
+	if f.PC1.DeltaOK {
+		t.Fatalf("PC1.DeltaOK = true; the mismatched key set is expected to mark the side unreliable")
+	}
+	if fd := evaluateRule(ruleByID(t, "PHY-03"), f); fd != nil {
+		t.Errorf("PHY-03 = %+v; four carrier events are silently lost, which is why the key set must be stable", fd)
+	}
+}
+
+// TestSideFactsFramesReceived pins the denominator that turns raw drop counts
+// into rates. It comes from the rtnetlink packet counter, which every driver
+// reports, and stays 0 when it cannot be trusted.
+func TestSideFactsFramesReceived(t *testing.T) {
+	withPackets := func(std map[string]uint64, packets uint64) model.CounterSnapshot {
+		s := snap(std)
+		s.IPStats.RX.Packets = packets
+		return s
+	}
+	tests := []struct {
+		name          string
+		before, after uint64
+		want          uint64
+	}{
+		{name: "growth is the frame count", before: 60_298_161, after: 78_420_788, want: 18_122_627},
+		{name: "no traffic is no denominator", before: 500, after: 500, want: 0},
+		{name: "a reset yields no denominator", before: 900, after: 100, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			before := withPackets(map[string]uint64{"rx_crc": 0}, tc.before)
+			after := withPackets(map[string]uint64{"rx_crc": 0}, tc.after)
+			f := FactsFromReport(&model.Report{
+				InitialCounters: model.PeerCounters{PC1: &before},
+				FinalCounters:   model.PeerCounters{PC1: &after},
+			})
+			if got := f.PC1.FramesReceived; got != tc.want {
+				t.Errorf("PC1.FramesReceived = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSideFactsReceiveErrorEvidence pins when a side counts as having measured
+// receive corruption at all. A side carrying only carrier or drop counters
+// measured nothing, and must never be read as "zero errors".
+func TestSideFactsReceiveErrorEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		std  map[string]uint64
+		want bool
+	}{
+		{"per-cause CRC counter", map[string]uint64{"rx_crc": 0}, true},
+		{"driver aggregate only", map[string]uint64{"rx_errors_total": 0}, true},
+		{"alignment counter only", map[string]uint64{"rx_align": 0}, true},
+		{"carrier changes only", map[string]uint64{"link_resets": 3}, false},
+		{"receive-ring drops only", map[string]uint64{"rx_missed": 0, "rx_fifo": 0}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := snap(tc.std)
+			f := FactsFromReport(&model.Report{
+				InitialCounters: model.PeerCounters{PC1: &s},
+				FinalCounters:   model.PeerCounters{PC1: &s},
+			})
+			if got := f.PC1.RXErrorEvidence; got != tc.want {
+				t.Errorf("PC1.RXErrorEvidence = %v, want %v for %v", got, tc.want, tc.std)
+			}
+		})
+	}
+}
+
+// TestFactsFromReportSeesRealtekAggregateReceiveErrors is the regression for the
+// blind side observed in the field: r8169 reported 482 receive errors during a
+// run while rtnetlink's per-cause CRC counter stayed at 0, and the run was
+// graded as a flawless link.
+func TestFactsFromReportSeesRealtekAggregateReceiveErrors(t *testing.T) {
+	// Standard keys exactly as NormalizeCounters resolves them for r8169.
+	before := snap(map[string]uint64{"rx_errors_total": 11, "rx_align": 0, "rx_missed": 0, "link_resets": 4})
+	after := snap(map[string]uint64{"rx_errors_total": 493, "rx_align": 0, "rx_missed": 0, "link_resets": 4})
+	peer := snap(map[string]uint64{"rx_errors_total": 0, "rx_crc": 0, "rx_align": 0, "rx_missed": 0, "link_resets": 6})
+
+	f := FactsFromReport(&model.Report{
+		InitialCounters: model.PeerCounters{PC1: &before, PC2: &peer},
+		FinalCounters:   model.PeerCounters{PC1: &after, PC2: &peer},
+	})
+	if got := f.PC1.UnclassifiedRXErrors; got != 482 {
+		t.Errorf("PC1.UnclassifiedRXErrors = %d, want 482", got)
+	}
+	fd := evaluateRule(ruleByID(t, "PHY-02"), f)
+	if fd == nil {
+		t.Fatalf("PHY-02 = nil, want a finding: the aggregate is the only corruption evidence r8169 reports")
+	}
+	if fd.Severity != model.SevWarning {
+		t.Errorf("PHY-02 severity = %v, want warning: 482 receive errors are reported but unexplained", fd.Severity)
+	}
+	if evidence := strings.Join(fd.Evidence, " "); !strings.Contains(evidence, "pc1") {
+		t.Errorf("PHY-02 evidence = %q, want the pc1 side named", evidence)
+	}
+}
