@@ -118,7 +118,7 @@
     </div></details>
 
     <details open><summary>13. Bidirectional Stress</summary><div class="content">
-      {{with .Report.Tests.Bidirectional}}{{if $.BidirBars}}{{template "throughputChart" $.BidirBars}}{{end}}<div class="table-wrap"><table><thead><tr><th>Direction</th><th>Sender</th><th>Receiver</th><th>Retransmits</th></tr></thead><tbody>{{range $.BidirRows}}<tr><td>{{.Direction}}</td><td>{{formatBps .Sender}}</td><td>{{formatBps .Receiver}}</td><td>{{.Retrans}}</td></tr>{{end}}</tbody></table></div>{{if .TwoPhaseFallback}}<p class="note">Ran as two coordinated one-way phases (--bidir unavailable on a peer), not simultaneously.</p>{{end}}{{else}}<p class="note">Not run: {{skipReason $.Report "bidirectional" "no bidirectional result was recorded."}}</p>{{end}}
+      {{with .Report.Tests.Bidirectional}}{{if $.BidirBars}}{{template "throughputChart" $.BidirBars}}{{end}}<div class="table-wrap"><table><thead><tr><th>Direction</th><th>Sender</th><th>Receiver</th><th>Retransmits</th></tr></thead><tbody>{{range $.BidirRows}}<tr><td>{{.Direction}}</td><td>{{formatBps .Sender}}</td><td>{{formatBps .Receiver}}</td><td>{{.Retrans}}</td></tr>{{end}}</tbody></table></div>{{if .TwoPhaseFallback}}<p class="note">Ran as two coordinated one-way clients simultaneously on separate ports (--bidir unavailable on a peer).</p>{{end}}{{else}}<p class="note">Not run: {{skipReason $.Report "bidirectional" "no bidirectional result was recorded."}}</p>{{end}}
     </div></details>
 
     <details open><summary>14. UDP Loss &amp; Jitter</summary><div class="content">

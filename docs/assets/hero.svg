@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">CableCheck</title>
+  <desc id="desc">Two Linux computers connected by an Ethernet cable, with link health measurements flowing between them.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#0a1b2d"/>
+      <stop offset="1" stop-color="#10243a"/>
+    </linearGradient>
+    <linearGradient id="cable" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#33d6a6"/>
+      <stop offset="0.5" stop-color="#72f1c6"/>
+      <stop offset="1" stop-color="#39bdf8"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#33d6a6" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#33d6a6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#8fb6d4" stroke-opacity="0.055"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="420" rx="28" fill="url(#bg)"/>
+  <rect width="1200" height="420" rx="28" fill="url(#grid)"/>
+  <circle cx="950" cy="210" r="240" fill="url(#glow)"/>
+  <circle cx="1090" cy="55" r="2" fill="#72f1c6" opacity="0.7"/>
+  <circle cx="1140" cy="120" r="1.5" fill="#39bdf8" opacity="0.6"/>
+  <circle cx="1030" cy="350" r="2" fill="#39bdf8" opacity="0.5"/>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+    <g transform="translate(72 70)">
+      <rect width="176" height="32" rx="16" fill="#33d6a6" fill-opacity="0.12" stroke="#33d6a6" stroke-opacity="0.42"/>
+      <circle cx="18" cy="16" r="5" fill="#45e6b4"/>
+      <text x="32" y="21" fill="#bff9e6" font-size="13" font-weight="700" letter-spacing="1.2">LINK DIAGNOSTICS</text>
+    </g>
+
+    <text x="70" y="178" fill="#f4f8fc" font-size="64" font-weight="760" letter-spacing="-2">CableCheck</text>
+    <text x="72" y="222" fill="#a9bfd3" font-size="22">Evidence, not guesswork, for Ethernet links.</text>
+    <text x="72" y="260" fill="#7893aa" font-size="16">Bidirectional load tests. Physical counters. Clear verdicts.</text>
+
+    <g transform="translate(72 307)" font-size="13" font-weight="650">
+      <g><rect width="95" height="34" rx="9" fill="#132c42" stroke="#27485f"/><text x="17" y="22" fill="#c9d9e6">LINUX</text></g>
+      <g transform="translate(108)"><rect width="150" height="34" rx="9" fill="#132c42" stroke="#27485f"/><text x="17" y="22" fill="#c9d9e6">2-PEER TESTING</text></g>
+      <g transform="translate(271)"><rect width="154" height="34" rx="9" fill="#132c42" stroke="#27485f"/><text x="17" y="22" fill="#c9d9e6">OFFLINE REPORTS</text></g>
+    </g>
+  </g>
+
+  <g transform="translate(610 82)">
+    <path d="M110 220 C180 220 175 122 258 122 S335 220 412 220" fill="none" stroke="#1a3347" stroke-width="14" stroke-linecap="round"/>
+    <path d="M110 220 C180 220 175 122 258 122 S335 220 412 220" fill="none" stroke="url(#cable)" stroke-width="5" stroke-linecap="round" filter="url(#soft-glow)"/>
+    <g fill="#72f1c6">
+      <circle cx="160" cy="196" r="4"/><circle cx="258" cy="122" r="5"/><circle cx="358" cy="196" r="4"/>
+    </g>
+
+    <g>
+      <rect x="0" y="166" width="122" height="82" rx="12" fill="#10283c" stroke="#37617b" stroke-width="2"/>
+      <rect x="12" y="178" width="98" height="56" rx="6" fill="#06111e"/>
+      <path d="M39 260h45m-31-12v12m17-12v12" stroke="#55748a" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="26" cy="192" r="4" fill="#45e6b4"/>
+      <path d="m39 196 10 8-10 8m16 0h17" fill="none" stroke="#6fdab8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(400)">
+      <rect x="0" y="166" width="122" height="82" rx="12" fill="#10283c" stroke="#37617b" stroke-width="2"/>
+      <rect x="12" y="178" width="98" height="56" rx="6" fill="#06111e"/>
+      <path d="M39 260h45m-31-12v12m17-12v12" stroke="#55748a" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="26" cy="192" r="4" fill="#39bdf8"/>
+      <path d="m39 196 10 8-10 8m16 0h17" fill="none" stroke="#62c9f4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700" text-anchor="middle">
+      <text x="61" y="294" fill="#a8bfd0">PC1 / COORDINATOR</text>
+      <text x="461" y="294" fill="#a8bfd0">PC2 / WORKER</text>
+      <g transform="translate(177 30)">
+        <rect width="166" height="52" rx="12" fill="#0c2031" stroke="#2d526a"/>
+        <text x="83" y="22" fill="#6f8da4" font-size="11" letter-spacing="1">CABLE HEALTH</text>
+        <text x="83" y="41" fill="#72f1c6" font-size="16">EXCELLENT</text>
+      </g>
+    </g>
+  </g>
+</svg>

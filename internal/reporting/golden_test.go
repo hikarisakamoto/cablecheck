@@ -721,16 +721,19 @@ func TestHTMLTemplateExecutesAllBranches(t *testing.T) {
 		t.Fatalf("populated report fell back:\n%s", out)
 	}
 	for _, want := range []string{
-		"PHY-02",                         // Findings detail
-		"carrier dropped",                // Monitoring timeline event detail
-		"two coordinated one-way phases", // Bidirectional TwoPhaseFallback note
-		"(incomplete)",                   // Incomplete TCP run label
-		"not reported",                   // UDP out-of-order nil branch
-		"~32.5 m",                        // Cable HasFault fault distance
+		"PHY-02",                           // Findings detail
+		"carrier dropped",                  // Monitoring timeline event detail
+		"simultaneously on separate ports", // Bidirectional TwoPhaseFallback note
+		"(incomplete)",                     // Incomplete TCP run label
+		"not reported",                     // UDP out-of-order nil branch
+		"~32.5 m",                          // Cable HasFault fault distance
 	} {
 		if !bytes.Contains(out, []byte(want)) {
 			t.Errorf("populated report omitted branch output %q:\n%s", want, out)
 		}
+	}
+	if md := RenderMarkdown(report); !bytes.Contains(md, []byte("simultaneously on separate ports")) {
+		t.Errorf("populated Markdown report omitted bidirectional fallback behavior:\n%s", md)
 	}
 
 	empty := RenderHTML(&model.Report{})

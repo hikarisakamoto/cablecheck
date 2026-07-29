@@ -1,16 +1,137 @@
 # CableCheck
 
-[![Go](https://img.shields.io/github/go-mod/go-version/hikarisakamoto/cablecheck?logo=go&logoColor=white&label=go)](go.mod)
-[![License](https://img.shields.io/github/license/hikarisakamoto/cablecheck?color=brightgreen)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/hikarisakamoto/cablecheck)](https://github.com/hikarisakamoto/cablecheck/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/hikarisakamoto/cablecheck/total)](https://github.com/hikarisakamoto/cablecheck/releases)
-[![Stars](https://img.shields.io/github/stars/hikarisakamoto/cablecheck)](https://github.com/hikarisakamoto/cablecheck/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/hikarisakamoto/cablecheck)](https://github.com/hikarisakamoto/cablecheck/commits/main)
-[![Platform](https://img.shields.io/badge/platform-Linux-informational)](#supported-environment)
+<p align="center">
+  <img src="docs/assets/hero.svg" width="100%" alt="CableCheck: evidence, not guesswork, for Ethernet links">
+</p>
 
-CableCheck is a Linux command-line tool for testing the health, stability, and performance of an Ethernet link between two directly connected PCs. PC1 coordinates the run and PC2 executes the measurements. Together they inspect link negotiation and NIC counters, watch link state through sysfs, and run bidirectional ping, full-size ping, TCP, UDP, and stress tests with `ping`, `ip`, `ethtool`, and `iperf3`.
+<p align="center">
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/hikarisakamoto/cablecheck?logo=go&logoColor=white&label=Go" alt="Go version"></a>
+  <a href="https://github.com/hikarisakamoto/cablecheck/actions/workflows/main.yml"><img src="https://github.com/hikarisakamoto/cablecheck/actions/workflows/main.yml/badge.svg" alt="Main branch checks"></a>
+  <a href="https://github.com/hikarisakamoto/cablecheck/stargazers"><img src="https://img.shields.io/github/stars/hikarisakamoto/cablecheck?style=flat" alt="GitHub stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/hikarisakamoto/cablecheck?color=33b58e" alt="GPL-3.0 license"></a>
+  <a href="#supported-environment"><img src="https://img.shields.io/badge/platform-Linux-39bdf8" alt="Linux platform"></a>
+</p>
 
-You get a rule-based classification (`EXCELLENT`, `GOOD`, `WARNING`, `POOR`, `FAILED`, or `INCONCLUSIVE`) plus a human report, machine-readable JSON, a short text summary, and the raw evidence.
+<p align="center">
+  <strong>Turn two Linux PCs into an explainable Ethernet link tester.</strong><br>
+  Exercise the link in both directions, correlate physical and transport evidence,<br>
+  and leave with a verdict you can inspect, share, and compare.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> &nbsp;&middot;&nbsp;
+  <a href="#watch-a-test-run">Demo</a> &nbsp;&middot;&nbsp;
+  <a href="#test-modes">Test modes</a> &nbsp;&middot;&nbsp;
+  <a href="#reports-and-raw-data">Reports</a> &nbsp;&middot;&nbsp;
+  <a href="docs/health-rules.md">Health rules</a>
+</p>
+
+CableCheck coordinates a test between two directly connected PCs. It inspects link negotiation and NIC counters, watches carrier state through sysfs, then runs bidirectional ping, full-size ping, TCP, UDP, and stress workloads with the Linux tools already trusted by network operators.
+
+| Physical evidence | Active load testing | Explainable verdicts | Portable evidence |
+|---|---|---|---|
+| CRC, framing, carrier, duplex, negotiated speed, and optional TDR | Stability ping, full-size ping, TCP, UDP, and bidirectional stress | Six health classes, a 0-100 score, ordered findings, and next actions | Self-contained HTML, Markdown, JSON, text, and raw command output |
+
+> [!IMPORTANT]
+> CableCheck tests the complete path between two hosts, not the cable in isolation. A bad result is strong evidence for controlled substitution with a known-good cable, not proof that one component has failed.
+
+## Watch a test run
+
+This is a real two-peer quick-mode run using CableCheck's hermetic loopback demo tools. It shows the coordinator command, authenticated handshake, synchronized countdown, live phase progress, report generation, and final summary. Playback is accelerated 3x.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/cablecheck-run-poster.png">
+    <img src="docs/assets/cablecheck-run.gif" width="100%" alt="VHS recording of a live CableCheck quick-mode test progressing through ping, throughput, UDP, counters, and report generation">
+  </picture>
+</p>
+
+<p align="center"><sub>The demo intentionally uses a virtual interface, so CableCheck returns <code>INCONCLUSIVE</code> instead of pretending it tested a physical cable. <a href="docs/assets/cablecheck-run.tape">View the VHS tape source.</a></sub></p>
+
+## See it catch a bad link
+
+CableCheck's `compare` command can contrast a known-good baseline with a suspect run. In this canonical example, the candidate keeps 1 Gb/s link speed and zero packet loss, but 1,555 new CRC-class errors correctly move the saved verdict from `EXCELLENT` to `FAILED`.
+
+<p align="center">
+  <a href="docs/assets/cablecheck-vhs.gif"><img src="docs/assets/cablecheck-vhs-poster.png" width="100%" alt="CableCheck comparison showing a healthy baseline and CRC-error candidate; select to play the recording"></a>
+</p>
+
+<p align="center"><sub><a href="docs/assets/cablecheck-vhs.gif">Play the comparison recording</a> or <a href="docs/assets/cablecheck-vhs.tape">view its VHS tape source</a>.</sub></p>
+
+Abridged CLI output:
+
+```text
+Baseline:  example-healthy     EXCELLENT  score 100/100
+Candidate: example-crc-errors  FAILED     score 25/100
+Saved verdict: EXCELLENT -> FAILED
+
+ADDED: [failed] PHY-02: CRC-class receive errors incremented by 1555 during the test.
+```
+
+### Explore the example reports
+
+These are synthetic, deterministic scenarios rendered by the same evaluator and report pipeline used for real runs.
+
+| Scenario | Verdict | What it demonstrates | Reports |
+|---|---|---|---|
+| Clean 1 Gb/s link | `EXCELLENT` 100/100 | No loss, retransmits, physical errors, or findings | [Summary](examples/healthy/summary.txt) · [Full report](examples/healthy/report.md) · [JSON](examples/healthy/report.json) |
+| Link falls back to 100 Mb/s | `POOR` 50/100 | Both NICs support 1 Gb/s, but the link negotiates at 100 Mb/s | [Summary](examples/reduced-speed/summary.txt) · [Full report](examples/reduced-speed/report.md) · [JSON](examples/reduced-speed/report.json) |
+| CRC errors under load | `FAILED` 25/100 | Throughput looks healthy while receive CRC errors climb by 1,555 | [Summary](examples/crc-errors/summary.txt) · [Full report](examples/crc-errors/report.md) · [JSON](examples/crc-errors/report.json) |
+| CPU-saturated host | `INCONCLUSIVE` | Poor throughput is softened because host load can explain it | [Summary](examples/host-limited/summary.txt) · [Full report](examples/host-limited/report.md) · [JSON](examples/host-limited/report.json) |
+| Link drops mid-run | `FAILED` 25/100 | Carrier loss, repeated link bounces, and missing critical evidence | [Summary](examples/failed/summary.txt) · [Full report](examples/failed/report.md) · [JSON](examples/failed/report.json) |
+
+## Quick start
+
+You need CableCheck and its four runtime tools on **both** Linux PCs. Normal test runs are unprivileged; assigning temporary link addresses may require root.
+
+1. Install the runtime tools:
+
+   ```bash
+   # Arch Linux
+   sudo pacman -S iperf3 ethtool iputils iproute2
+
+   # Debian / Ubuntu
+   sudo apt update && sudo apt install iperf3 ethtool iputils-ping iproute2
+
+   # Fedora
+   sudo dnf install iperf3 ethtool iputils iproute
+   ```
+
+2. Build the static binary with Go 1.26+ and install it as a command:
+
+   ```bash
+   make build
+   sudo install -m 0755 cablecheck /usr/local/bin/cablecheck
+   cablecheck version
+   ```
+
+3. Connect the ports and assign a private address to each tested interface:
+
+   ```bash
+   # PC1
+   sudo ip addr add 192.168.50.1/24 dev enp3s0
+   sudo ip link set dev enp3s0 up
+
+   # PC2
+   sudo ip addr add 192.168.50.2/24 dev enp4s0
+   sudo ip link set dev enp4s0 up
+   ```
+
+4. Check each machine, then start the coordinator on PC1:
+
+   ```bash
+   cablecheck doctor
+   cablecheck run --role pc1 --interface enp3s0 --peer-ip 192.168.50.2
+   ```
+
+5. PC1 prints a session token and a ready-to-copy command. Run that command on PC2, type `start` in both terminals, and open the report directory printed at the end.
+
+```text
+PC1 / coordinator  <==== trusted direct Ethernet link ====>  PC2 / worker
+       observes + schedules       bidirectional load       observes + executes
+```
+
+The rest of this guide covers interface setup, modes, flags, reports, interpretation, and troubleshooting in detail.
 
 ## What CableCheck can and cannot prove
 
@@ -32,32 +153,9 @@ Runtime requirements on **both** PCs:
 - `iproute2` for `ip -j` interface and counter data.
 - A physical wired Ethernet interface. USB Ethernet adapters work, but can make performance results host-limited.
 
-Install the packages with your distribution's package manager:
+`make build` produces a static binary with no runtime Go dependency. It does not bundle the four tools above. Build once and copy it to the other PC when both machines use the same architecture; `make dist` cross-compiles Linux `amd64` and `arm64` binaries.
 
-```bash
-# Arch Linux
-sudo pacman -S iperf3 ethtool iputils iproute2
-
-# Debian / Ubuntu
-sudo apt update
-sudo apt install iperf3 ethtool iputils-ping iproute2
-
-# Fedora
-sudo dnf install iperf3 ethtool iputils iproute
-```
-
-Build from source:
-
-```bash
-make build
-./cablecheck version
-```
-
-`make build` produces a single static `cablecheck` binary in the repository root. It has no runtime Go dependency and is portable between Linux machines of the same architecture, so build once and copy the binary to the other PC.
-
-### Install it as a command
-
-The rest of this guide invokes the tool as `cablecheck`. For that to work from any directory, put the binary on your `PATH` — do this on **both** PCs:
+To install a locally built binary as `cablecheck`, put it on your `PATH` on both machines:
 
 ```bash
 # System-wide (needs root)
@@ -67,13 +165,7 @@ sudo install -m 0755 cablecheck /usr/local/bin/cablecheck
 install -m 0755 cablecheck ~/.local/bin/cablecheck
 ```
 
-Confirm it's registered:
-
-```bash
-cablecheck version
-```
-
-If you'd rather not install it, run it straight from the build directory as `./cablecheck`, substituting `./cablecheck` for `cablecheck` in every command below.
+If you don't install it, substitute `./cablecheck` for `cablecheck` in the commands below.
 
 ## Prepare the direct link
 
@@ -167,7 +259,7 @@ All modes inspect link settings, take per-peer counter snapshots, and run a sysf
 | `standard` | 1,500-packet stability ping at 20 ms in both directions; the same 100-packet full-size test; two 60 s TCP runs in each direction; one 60 s bidirectional stress run; a 30 s UDP run in each direction at the primary rate and another in each direction at half that rate; initial/final counters. |
 | `soak` | A one-hour wall-clock budget by default. After one link inspection and initial counters, each cycle takes counters, runs 500-packet ping in both directions, one 60 s TCP run in each direction, and one 20 s UDP run in each direction. `periodic` inserts a 60 s default idle gap between cycles; `continuous` runs cycles back-to-back. Full-size ping and bidirectional stress are not part of soak cycles. |
 
-The native bidirectional test runs both directions together. If either peer lacks `iperf3 --bidir`, the fallback uses two one-way phases and takes twice the configured TCP duration.
+The native bidirectional test runs both directions together. If either peer lacks `iperf3 --bidir`, the fallback runs two coordinated one-way clients simultaneously on separate ports for approximately the configured TCP duration.
 
 Examples:
 
@@ -284,7 +376,7 @@ See [docs/report-schema.md](docs/report-schema.md) for the JSON contract and the
 
 ## Tear down the link
 
-CableCheck cleans up after **itself** automatically, on both a normal finish and Ctrl-C. It stops every `iperf3` server it started, terminates its own child processes (by tracked PID and process group, never with a blanket `pkill`), releases its control and `iperf3` ports, and removes its temporary run state under `$XDG_RUNTIME_DIR/cablecheck` (or `/tmp`). Report directories are deliverables, so they're kept.
+CableCheck cleans up after **itself** automatically, on both a normal finish and Ctrl-C. It stops every `iperf3` server it started, terminates its own child processes (by tracked PID and process group, never with a blanket `pkill`), releases its control and `iperf3` ports, and removes its temporary run state under `$XDG_RUNTIME_DIR/cablecheck`, root-only `/run/cablecheck`, or the `/tmp/cablecheck` fallback. Report directories are deliverables, so they're kept.
 
 The only thing you undo by hand is the temporary network configuration you added in [Prepare the direct link](#prepare-the-direct-link). Reverse those two steps on **each** PC: remove the address, and set the interface back down if you brought it up only for this test.
 
@@ -392,7 +484,7 @@ Check whether either side used `--no-report-transfer`, then inspect both `raw/ca
 
 ## Loopback end-to-end demo
 
-The repository includes stub `iperf3` and `ethtool` tools and a scripted two-peer loopback demo:
+The repository includes stub `ping`, `iperf3`, and `ethtool` tools and a scripted two-peer loopback demo:
 
 ```bash
 make demo-e2e
