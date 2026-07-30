@@ -7,7 +7,7 @@ import (
 // RulesVersion identifies the rule set implemented by this package; it is
 // recorded in every evaluation so reports stay interpretable when thresholds
 // change.
-const RulesVersion = "1.8.0"
+const RulesVersion = "1.9.0"
 
 // Result is the complete output of the evaluation engine.
 type Result struct {

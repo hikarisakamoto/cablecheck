@@ -15,7 +15,7 @@ import (
 
 // SchemaVersion is the current report schema version, written into every
 // report's schemaVersion field. Consumers must check the major component.
-const SchemaVersion = "1.2.0"
+const SchemaVersion = "1.3.0"
 
 // Report is the complete record of one CableCheck run and the single source
 // for all rendered outputs (report.json, report.md, summary.txt, report.html).

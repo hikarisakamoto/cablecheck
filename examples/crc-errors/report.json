@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.2.0",
+  "schemaVersion": "1.3.0",
   "toolVersion": "1.0.0",
   "protocolVersion": "1",
   "testId": "example-crc-errors",
@@ -98,6 +98,7 @@
         "duplicates": 0,
         "sendErrors": 0,
         "icmpErrors": 0,
+        "fragNeededErrors": 0,
         "lossPercent": 0,
         "rttMinMs": 0.18,
         "rttAvgMs": 0.21,
@@ -123,6 +124,7 @@
         "duplicates": 0,
         "sendErrors": 0,
         "icmpErrors": 0,
+        "fragNeededErrors": 0,
         "lossPercent": 0,
         "rttMinMs": 0.18,
         "rttAvgMs": 0.21,

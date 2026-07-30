@@ -1,7 +1,7 @@
 # CableCheck report schema
 
 CableCheck writes its machine-readable result to `report.json`. The current
-schema version is `1.2.0`.
+schema version is `1.3.0`.
 
 For a concrete document, see
 [`examples/healthy/report.json`](../examples/healthy/report.json). The other
@@ -40,7 +40,7 @@ forms for a duration. CableCheck emits the object form above.
 
 | JSON field | Type | Meaning |
 |---|---|---|
-| `schemaVersion` | string | Report schema version; currently `1.2.0`. |
+| `schemaVersion` | string | Report schema version; currently `1.3.0`. |
 | `toolVersion` | string | CableCheck version that produced the report. |
 | `protocolVersion` | string | Control-protocol version used by the peers. |
 | `testId` | string | Identifier assigned to this two-peer session. |
@@ -73,7 +73,7 @@ forms for a duration. CableCheck emits the object form above.
 
 The report never contains the authentication token. The evaluator has an
 internal rules-version constant, but `Report` has no `rulesVersion` JSON field
-in schema 1.2.0.
+in schema 1.3.0.
 
 ## Configuration
 
@@ -150,6 +150,10 @@ their `direction` field.
 
 - `direction` and `target`;
 - `transmitted`, `received`, `duplicates`, `sendErrors`, and `icmpErrors`;
+- `fragNeededErrors`, the subset of `sendErrors` plus `icmpErrors` that are
+  classified fragmentation failures (ICMP frag-needed/packet-too-big replies
+  and local EMSGSIZE send errors); added in schema 1.3.0 — absent in older
+  reports, which means unavailable, not zero;
 - `lossPercent`;
 - `rttMinMs`, `rttAvgMs`, `rttMaxMs`, and `rttMdevMs`;
 - `percentiles`, an object whose percentile numbers are string keys;

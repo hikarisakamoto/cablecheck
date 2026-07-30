@@ -149,6 +149,13 @@ type PingResult struct {
 	SendErrors int `json:"sendErrors"`
 	// IcmpErrors counts ICMP error responses (unreachable, frag needed, ...).
 	IcmpErrors int `json:"icmpErrors"`
+	// FragNeededErrors counts the subset of SendErrors and IcmpErrors that
+	// are genuine fragmentation failures: ICMP "Frag needed and DF set" /
+	// "Packet too big" replies and local EMSGSIZE ("message too long") send
+	// errors from -M do probes. Other errors (e.g. Destination Host
+	// Unreachable during a carrier flap) are excluded. Absent in reports
+	// older than schema 1.3.0, which means unavailable, not zero.
+	FragNeededErrors int `json:"fragNeededErrors"`
 	// LossPercent is the packet loss percentage from the summary line.
 	LossPercent float64 `json:"lossPercent"`
 	// RTTMinMs is the minimum round-trip time in milliseconds.

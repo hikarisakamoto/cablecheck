@@ -85,6 +85,30 @@ func TestRuleSeverityBoundaries(t *testing.T) {
 			want: int(model.SevFailed),
 		},
 		{
+			name:   "monitor fallback below failed boundary is poor",
+			ruleID: "PHY-03",
+			facts: func() *Facts {
+				f := cleanFacts()
+				f.PC1.DeltaOK = false
+				f.PC2.DeltaOK = false
+				f.MonitorCarrierTransitions = thresholds.CarrierFailedAt - 1
+				return f
+			}(),
+			want: int(model.SevPoor),
+		},
+		{
+			name:   "monitor fallback failed boundary is inclusive",
+			ruleID: "PHY-03",
+			facts: func() *Facts {
+				f := cleanFacts()
+				f.PC1.DeltaOK = false
+				f.PC2.DeltaOK = false
+				f.MonitorCarrierTransitions = thresholds.CarrierFailedAt
+				return f
+			}(),
+			want: int(model.SevFailed),
+		},
+		{
 			name:   "frame size poor boundary stays warning",
 			ruleID: "PHY-09",
 			facts: func() *Facts {

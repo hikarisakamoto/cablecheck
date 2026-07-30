@@ -61,8 +61,9 @@ func TestPingPerPacket(t *testing.T) {
 		if res.ExitCode != 1 {
 			t.Errorf("ExitCode = %d, want 1", res.ExitCode)
 		}
-		if res.IcmpErrors != 0 || res.SendErrors != 0 {
-			t.Errorf("IcmpErrors/SendErrors = %d/%d, want 0/0", res.IcmpErrors, res.SendErrors)
+		if res.IcmpErrors != 0 || res.SendErrors != 0 || res.FragNeededErrors != 0 {
+			t.Errorf("IcmpErrors/SendErrors/FragNeededErrors = %d/%d/%d, want 0/0/0",
+				res.IcmpErrors, res.SendErrors, res.FragNeededErrors)
 		}
 		if res.UnparsedLines != 0 {
 			t.Errorf("UnparsedLines = %d, want 0", res.UnparsedLines)
@@ -116,6 +117,9 @@ func TestPingPerPacket(t *testing.T) {
 		if res.IcmpErrors != 20 {
 			t.Errorf("IcmpErrors = %d, want 20 (From ... Destination Host Unreachable)", res.IcmpErrors)
 		}
+		if res.FragNeededErrors != 0 {
+			t.Errorf("FragNeededErrors = %d, want 0 — unreachable is not a fragmentation failure", res.FragNeededErrors)
+		}
 		if len(res.MissingSeqRuns) != 1 || res.MissingSeqRuns[0] != (model.SeqRun{FirstSeq: 1, Len: 20}) {
 			t.Errorf("MissingSeqRuns = %+v, want [{1 20}]", res.MissingSeqRuns)
 		}
@@ -124,6 +128,55 @@ func TestPingPerPacket(t *testing.T) {
 		}
 		if res.UnparsedLines != 0 {
 			t.Errorf("UnparsedLines = %d, want 0", res.UnparsedLines)
+		}
+	})
+
+	t.Run("fragneeded_mixed", func(t *testing.T) {
+		res, err := ParsePing(fixture(t, "ping", "fullsize_fragneeded.txt"), nil, 1)
+		if err != nil {
+			t.Fatalf("exit 1 with a parsed summary must be a valid result, got error: %v", err)
+		}
+		if res.IcmpErrors != 4 {
+			t.Errorf("IcmpErrors = %d, want 4 (every From ... error line)", res.IcmpErrors)
+		}
+		if res.FragNeededErrors != 3 {
+			t.Errorf("FragNeededErrors = %d, want 3 — frag-needed and packet-too-big only, not unreachable", res.FragNeededErrors)
+		}
+		if res.SendErrors != 0 {
+			t.Errorf("SendErrors = %d, want 0", res.SendErrors)
+		}
+	})
+}
+
+// TestPingLocalErrorClassification pins that local send errors split the same
+// way ICMP errors do: EMSGSIZE is a fragmentation failure, other sendmsg
+// failures are not.
+func TestPingLocalErrorClassification(t *testing.T) {
+	t.Run("emsgsize is a frag failure", func(t *testing.T) {
+		stdout := []byte(pingHeader +
+			"[1752580000.000000] ping: local error: message too long, mtu=1500\n" +
+			"\n--- 10.0.0.2 ping statistics ---\n" +
+			"1 packets transmitted, 0 received, +1 errors, 100% packet loss, time 0ms\n")
+		res, err := ParsePing(stdout, nil, 1)
+		if err != nil {
+			t.Fatalf("ParsePing: %v", err)
+		}
+		if res.SendErrors != 1 || res.FragNeededErrors != 1 {
+			t.Errorf("SendErrors/FragNeededErrors = %d/%d, want 1/1", res.SendErrors, res.FragNeededErrors)
+		}
+	})
+
+	t.Run("other sendmsg failures are not frag failures", func(t *testing.T) {
+		stdout := []byte(pingHeader +
+			"[1752580000.000000] ping: sendmsg: Network is unreachable\n" +
+			"\n--- 10.0.0.2 ping statistics ---\n" +
+			"1 packets transmitted, 0 received, +1 errors, 100% packet loss, time 0ms\n")
+		res, err := ParsePing(stdout, nil, 1)
+		if err != nil {
+			t.Fatalf("ParsePing: %v", err)
+		}
+		if res.SendErrors != 1 || res.FragNeededErrors != 0 {
+			t.Errorf("SendErrors/FragNeededErrors = %d/%d, want 1/0", res.SendErrors, res.FragNeededErrors)
 		}
 	})
 }

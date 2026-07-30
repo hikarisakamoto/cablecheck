@@ -104,16 +104,22 @@ func unclassifiedRXTotal(f *Facts) uint64 {
 
 // carrierEvents returns the worst per-side carrier event count among the
 // reliable sides (both sides observe the same physical link, so summing would
-// double-count one bounce).
-func carrierEvents(f *Facts) uint64 {
-	var worst uint64
-	if f.PC1.DeltaOK && f.PC1.CarrierEvents > worst {
-		worst = f.PC1.CarrierEvents
+// double-count one bounce). When no side has reliable deltas — an aborted run
+// never captures final snapshots — it falls back to the monitor's transition
+// count and reports the switch via fromMonitor. Counters stay authoritative:
+// PC1's link_resets is the same sysfs counter the monitor polls.
+func carrierEvents(f *Facts) (events uint64, fromMonitor bool) {
+	if f.PC1.DeltaOK || f.PC2.DeltaOK {
+		var worst uint64
+		if f.PC1.DeltaOK && f.PC1.CarrierEvents > worst {
+			worst = f.PC1.CarrierEvents
+		}
+		if f.PC2.DeltaOK && f.PC2.CarrierEvents > worst {
+			worst = f.PC2.CarrierEvents
+		}
+		return worst, false
 	}
-	if f.PC2.DeltaOK && f.PC2.CarrierEvents > worst {
-		worst = f.PC2.CarrierEvents
-	}
-	return worst
+	return f.MonitorCarrierTransitions, true
 }
 
 // crcEvidence lists the per-side CRC-class deltas of the reliable sides.
@@ -215,7 +221,7 @@ func rulePHY02(f *Facts, thresholds Thresholds) *model.Finding {
 }
 
 func rulePHY03(f *Facts, thresholds Thresholds) *model.Finding {
-	events := carrierEvents(f)
+	events, fromMonitor := carrierEvents(f)
 	if events == 0 {
 		return nil
 	}
@@ -223,12 +229,16 @@ func rulePHY03(f *Facts, thresholds Thresholds) *model.Finding {
 	if events >= thresholds.CarrierFailedAt {
 		sev = model.SevFailed
 	}
+	evidence := fmt.Sprintf("carrier change counter advanced by %d on the worse side", events)
+	if fromMonitor {
+		evidence = fmt.Sprintf("link monitor observed %d carrier transition(s); NIC counter deltas were unavailable", events)
+	}
 	return &model.Finding{
 		RuleID:   "PHY-03",
 		Category: model.CategoryPhysical,
 		Severity: sev,
 		Text:     fmt.Sprintf("The link bounced %d time(s) during the test.", events),
-		Evidence: []string{fmt.Sprintf("carrier change counter advanced by %d on the worse side", events)},
+		Evidence: []string{evidence},
 	}
 }
 
@@ -405,6 +415,9 @@ func ruleTR01(f *Facts, thresholds Thresholds) *model.Finding {
 			sev = model.SevPoor
 		}
 		ev = append(ev, fmt.Sprintf("%s: %.2f%% ping loss", dirNames[i], loss))
+		if n := f.Dir[i].NonFragPingErrors; n > 0 {
+			ev = append(ev, fmt.Sprintf("%s: %d non-fragmentation ICMP/send error(s) (e.g. host unreachable) accompanied the loss", dirNames[i], n))
+		}
 		if sev > worst {
 			worst = sev
 		}

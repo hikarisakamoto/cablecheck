@@ -127,6 +127,23 @@ func TestScoreClampedToClassBand(t *testing.T) {
 	})
 }
 
+// TestScoreDeductsMonitorFallbackCarrierEvents verifies the carrier deduction
+// engages when the event count comes from the monitor fallback instead of
+// counter deltas.
+func TestScoreDeductsMonitorFallbackCarrierEvents(t *testing.T) {
+	f := cleanFacts()
+	f.PC1.DeltaOK = false
+	f.PC2.DeltaOK = false
+	f.MonitorCarrierTransitions = 2
+	thresholds := Default()
+	thresholds.ExcellentScoreBand = ScoreBand{Min: 0, Max: 100}
+
+	score := scoreFor(f, nil, model.HealthExcellent, thresholds)
+	if score == nil || *score != 70 {
+		t.Errorf("score = %v, want 70 (two monitor transitions at 15 each)", score)
+	}
+}
+
 func TestScoreUsesCarriedCollapseIntervalLengths(t *testing.T) {
 	report := &model.Report{Tests: model.TestsSection{TCP: []model.TCPResult{{
 		Direction:             model.DirectionPC1ToPC2,

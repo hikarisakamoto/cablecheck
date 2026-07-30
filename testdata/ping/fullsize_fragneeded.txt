@@ -1,0 +1,15 @@
+PING 10.0.0.2 (10.0.0.2) 8972(9000) bytes of data.
+[1721383820.031772] 8980 bytes from 10.0.0.2: icmp_seq=1 ttl=64 time=0.520 ms
+[1721383820.231772] 8980 bytes from 10.0.0.2: icmp_seq=2 ttl=64 time=0.531 ms
+[1721383820.431772] 8980 bytes from 10.0.0.2: icmp_seq=3 ttl=64 time=0.527 ms
+[1721383820.631772] 8980 bytes from 10.0.0.2: icmp_seq=4 ttl=64 time=0.540 ms
+[1721383820.831772] 8980 bytes from 10.0.0.2: icmp_seq=5 ttl=64 time=0.522 ms
+[1721383821.031772] 8980 bytes from 10.0.0.2: icmp_seq=6 ttl=64 time=0.533 ms
+From 10.0.0.1 icmp_seq=7 Frag needed and DF set (mtu = 1500)
+From 10.0.0.1 icmp_seq=8 Frag needed and DF set (mtu = 1500)
+From 10.0.0.1 icmp_seq=9 Packet too big: mtu=1500
+From 10.0.0.1 icmp_seq=10 Destination Host Unreachable
+
+--- 10.0.0.2 ping statistics ---
+10 packets transmitted, 6 received, +4 errors, 40% packet loss, time 1999ms
+rtt min/avg/max/mdev = 0.520/0.528/0.540/0.007 ms

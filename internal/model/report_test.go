@@ -123,9 +123,10 @@ func fullReport() *Report {
 
 	ping := PingResult{
 		Direction: DirectionPC1ToPC2, Target: "192.168.50.11",
-		Transmitted: 500, Received: 499, Duplicates: 1, SendErrors: 0, IcmpErrors: 0,
-		LossPercent: 0.2,
-		RTTMinMs:    0.101, RTTAvgMs: 0.204, RTTMaxMs: 2.5, RTTMdevMs: 0.06,
+		Transmitted: 500, Received: 499, Duplicates: 1, SendErrors: 2, IcmpErrors: 1,
+		FragNeededErrors: 2,
+		LossPercent:      0.2,
+		RTTMinMs:         0.101, RTTAvgMs: 0.204, RTTMaxMs: 2.5, RTTMdevMs: 0.06,
 		Percentiles:          map[int]float64{50: 0.2, 90: 0.31, 95: 0.4, 99: 1.1},
 		Spikes:               []PingSpike{{Seq: 42, RTTMs: 2.5}},
 		MissingSeqRuns:       []SeqRun{{FirstSeq: 100, Len: 1}},
@@ -284,8 +285,13 @@ func TestReportJSONRoundTrip(t *testing.T) {
 	}
 
 	// schemaVersion must be present verbatim on the JSON surface.
-	if !bytes.Contains(data, []byte(`"schemaVersion":"1.2.0"`)) {
+	if !bytes.Contains(data, []byte(`"schemaVersion":"1.3.0"`)) {
 		t.Errorf("JSON missing schemaVersion: %.200s", data)
+	}
+	// The frag-needed subset must survive on the JSON surface: a genuine MTU
+	// signal, distinct from the raw error totals.
+	if !bytes.Contains(data, []byte(`"fragNeededErrors":2`)) {
+		t.Errorf("JSON missing fragNeededErrors: %.1000s", data)
 	}
 	if !bytes.Contains(data, []byte(`"collapses":[{"startSec":12,"len":2,"minBps":42000000}]`)) {
 		t.Errorf("JSON missing TCP collapse evidence: %.1000s", data)

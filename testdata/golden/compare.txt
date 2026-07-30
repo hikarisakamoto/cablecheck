@@ -7,7 +7,7 @@ Assessment: WORSE - the candidate saved classification regressed
 
 Comparability
 -------------
-WARNING: schema versions differ (1.2.0 vs 1.3.0)
+WARNING: schema versions differ (1.3.0 vs 1.4.0)
 WARNING: CableCheck versions differ (1.0.0 vs 1.1.0)
 WARNING: test modes differ (standard vs quick)
 WARNING: negotiated speeds differ (1000 Mb/s vs 100 Mb/s)

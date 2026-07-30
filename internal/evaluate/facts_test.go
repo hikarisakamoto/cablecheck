@@ -206,6 +206,153 @@ func TestPC2GenuineCarrierFaultStillFiresPHY03(t *testing.T) {
 	}
 }
 
+// TestMonitorCarrierTransitions verifies the monitor-event fallback counter:
+// only spontaneous carrier transitions count, in the same both-edges unit as
+// the link_resets delta.
+func TestMonitorCarrierTransitions(t *testing.T) {
+	tests := []struct {
+		name   string
+		events []model.MonitoringEvent
+		want   uint64
+	}{
+		{name: "no events", events: nil, want: 0},
+		{
+			name: "carrier transitions count both edges",
+			events: []model.MonitoringEvent{
+				{Type: "carrier_lost"},
+				{Type: "carrier_restored"},
+				{Type: "carrier_lost"},
+			},
+			want: 3,
+		},
+		{
+			name: "derivative and renegotiation events are excluded",
+			events: []model.MonitoringEvent{
+				{Type: "operstate_changed"},
+				{Type: "renegotiation"},
+				{Type: "speed_changed"},
+				{Type: "duplex_changed"},
+			},
+			want: 0,
+		},
+		{
+			name: "self-inflicted transitions are filtered",
+			events: []model.MonitoringEvent{
+				{Type: "carrier_lost", SelfInflicted: true},
+				{Type: "carrier_restored", SelfInflicted: true},
+				{Type: "carrier_lost"},
+			},
+			want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &model.Report{MonitoringEvents: tt.events}
+			if got := monitorCarrierTransitions(r); got != tt.want {
+				t.Errorf("monitorCarrierTransitions = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAbortedRunFallsBackToMonitorForPHY03 reproduces an aborted flapping-link
+// run: no final counter snapshots (DeltaOK false on both sides) but a monitor
+// timeline full of spontaneous carrier transitions. PHY-03 must still fire
+// from the monitor evidence.
+func TestAbortedRunFallsBackToMonitorForPHY03(t *testing.T) {
+	before := snap(map[string]uint64{"link_resets": 10})
+	events := make([]model.MonitoringEvent, 0, 42)
+	for range 21 {
+		events = append(events,
+			model.MonitoringEvent{Type: "carrier_lost"},
+			model.MonitoringEvent{Type: "carrier_restored"})
+	}
+	report := &model.Report{
+		InitialCounters:  model.PeerCounters{PC1: &before},
+		MonitoringEvents: events,
+	}
+	facts := FactsFromReport(report)
+	if facts.PC1.DeltaOK || facts.PC2.DeltaOK {
+		t.Fatalf("DeltaOK = (%v, %v), want false on both sides without final snapshots", facts.PC1.DeltaOK, facts.PC2.DeltaOK)
+	}
+	if facts.MonitorCarrierTransitions != 42 {
+		t.Errorf("MonitorCarrierTransitions = %d, want 42", facts.MonitorCarrierTransitions)
+	}
+	finding := evaluateRule(ruleByID(t, "PHY-03"), facts)
+	if finding == nil {
+		t.Fatalf("PHY-03 = nil, want FAILED finding from monitor fallback")
+	}
+	if finding.Severity != model.SevFailed {
+		t.Errorf("PHY-03 severity = %v, want FAILED", finding.Severity)
+	}
+	if len(finding.Evidence) == 0 || !strings.Contains(finding.Evidence[0], "monitor") {
+		t.Errorf("PHY-03 evidence = %v, want the monitor named as the source", finding.Evidence)
+	}
+}
+
+// TestCountersStayAuthoritativeOverMonitor verifies that while any side has
+// reliable counter deltas, the counter verdict wins even when the monitor
+// timeline disagrees.
+func TestCountersStayAuthoritativeOverMonitor(t *testing.T) {
+	f := cleanFacts() // both sides DeltaOK with zero carrier events
+	f.MonitorCarrierTransitions = 5
+	if finding := evaluateRule(ruleByID(t, "PHY-03"), f); finding != nil {
+		t.Errorf("PHY-03 = %+v, want nil while reliable counters report zero", finding)
+	}
+}
+
+// TestTR03FiresOnlyOnGenuineFragErrors reproduces the misattribution defect:
+// ICMP errors that are not fragmentation failures (host unreachable during a
+// carrier flap) must not surface as an MTU-mismatch finding.
+func TestTR03FiresOnlyOnGenuineFragErrors(t *testing.T) {
+	report := &model.Report{Tests: model.TestsSection{FullSizePing: []model.PingResult{{
+		Direction:  model.DirectionPC1ToPC2,
+		IcmpErrors: 2, // Destination Host Unreachable during a flap
+	}}}}
+	f := FactsFromReport(report)
+	if f.Dir[0].FragErrors != 0 {
+		t.Errorf("FragErrors = %d, want 0 for non-fragmentation ICMP errors", f.Dir[0].FragErrors)
+	}
+	if finding := evaluateRule(ruleByID(t, "TR-03"), f); finding != nil {
+		t.Errorf("TR-03 = %+v, want nil — unreachable errors are not an MTU mismatch", finding)
+	}
+
+	report.Tests.FullSizePing[0].FragNeededErrors = 1
+	f = FactsFromReport(report)
+	if f.Dir[0].FragErrors != 1 {
+		t.Errorf("FragErrors = %d, want 1 from the classified frag-needed error", f.Dir[0].FragErrors)
+	}
+	finding := evaluateRule(ruleByID(t, "TR-03"), f)
+	if finding == nil {
+		t.Fatalf("TR-03 = nil, want warning for a genuine fragmentation failure")
+	}
+	if finding.Severity != model.SevWarning {
+		t.Errorf("TR-03 severity = %v, want WARNING", finding.Severity)
+	}
+}
+
+// TestTR01EvidenceNamesNonFragErrors verifies that when ping loss fires TR-01
+// and non-fragmentation errors accompanied the loss, the evidence says so.
+func TestTR01EvidenceNamesNonFragErrors(t *testing.T) {
+	report := &model.Report{Tests: model.TestsSection{Ping: []model.PingResult{{
+		Direction:   model.DirectionPC1ToPC2,
+		LossPercent: 2.15,
+		IcmpErrors:  2,
+	}}}}
+	f := FactsFromReport(report)
+	if f.Dir[0].NonFragPingErrors != 2 {
+		t.Errorf("NonFragPingErrors = %d, want 2", f.Dir[0].NonFragPingErrors)
+	}
+	finding := evaluateRule(ruleByID(t, "TR-01"), f)
+	if finding == nil {
+		t.Fatalf("TR-01 = nil, want finding for 2.15%% loss")
+	}
+	joined := strings.Join(finding.Evidence, "\n")
+	if !strings.Contains(joined, "non-fragmentation") {
+		t.Errorf("TR-01 evidence = %v, want a non-fragmentation error line", finding.Evidence)
+	}
+}
+
 func TestCableWindowCarrierCountsIgnorePeerClockSkew(t *testing.T) {
 	before := snap(map[string]uint64{"link_resets": 20})
 	after := snap(map[string]uint64{"link_resets": 22})
