@@ -63,58 +63,43 @@ func Rules() []Rule {
 	}
 }
 
+// sumReliableSides totals field across the sides whose counter deltas are
+// reliable (DeltaOK); unreliable sides contribute nothing.
+func sumReliableSides(f *Facts, field func(*SideFacts) uint64) uint64 {
+	var total uint64
+	if f.PC1.DeltaOK {
+		total += field(&f.PC1)
+	}
+	if f.PC2.DeltaOK {
+		total += field(&f.PC2)
+	}
+	return total
+}
+
 // crcTotal is the reliable CRC-class receive-error total across both sides. It
 // includes the unexplained remainder of each driver's own receive-error
 // aggregate, without which a NIC that exposes no per-cause counter (Realtek)
 // contributes 0 no matter how many frames it dropped as corrupt.
 func crcTotal(f *Facts) uint64 {
-	var total uint64
-	if f.PC1.DeltaOK {
-		total += f.PC1.CRCClassErrors + f.PC1.UnclassifiedRXErrors
-	}
-	if f.PC2.DeltaOK {
-		total += f.PC2.CRCClassErrors + f.PC2.UnclassifiedRXErrors
-	}
-	return total
+	return sumReliableSides(f, func(s *SideFacts) uint64 { return s.CRCClassErrors + s.UnclassifiedRXErrors })
 }
 
 // carrierPHYTotal sums transmit-carrier and PHY error deltas from reliable
 // sides. Unlike carrier events, these are per-packet/error observations rather
 // than two views of one link transition, so both sides contribute.
 func carrierPHYTotal(f *Facts) uint64 {
-	var total uint64
-	if f.PC1.DeltaOK {
-		total += f.PC1.CarrierPHYErrors
-	}
-	if f.PC2.DeltaOK {
-		total += f.PC2.CarrierPHYErrors
-	}
-	return total
+	return sumReliableSides(f, func(s *SideFacts) uint64 { return s.CarrierPHYErrors })
 }
 
 // jabberTotal sums the frame-size error deltas of the reliable sides.
 func jabberTotal(f *Facts) uint64 {
-	var total uint64
-	if f.PC1.DeltaOK {
-		total += f.PC1.JabberSizeErrors
-	}
-	if f.PC2.DeltaOK {
-		total += f.PC2.JabberSizeErrors
-	}
-	return total
+	return sumReliableSides(f, func(s *SideFacts) uint64 { return s.JabberSizeErrors })
 }
 
 // unclassifiedRXTotal is the reliable part of crcTotal that came from driver
 // receive-error aggregates rather than a per-cause counter.
 func unclassifiedRXTotal(f *Facts) uint64 {
-	var total uint64
-	if f.PC1.DeltaOK {
-		total += f.PC1.UnclassifiedRXErrors
-	}
-	if f.PC2.DeltaOK {
-		total += f.PC2.UnclassifiedRXErrors
-	}
-	return total
+	return sumReliableSides(f, func(s *SideFacts) uint64 { return s.UnclassifiedRXErrors })
 }
 
 // carrierEvents returns the worst per-side carrier event count among the

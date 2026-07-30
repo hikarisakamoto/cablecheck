@@ -10,6 +10,7 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 func scriptInferAddr(fr *runnertest.FakeRunner, json string) {
@@ -34,9 +35,7 @@ func inferApp(t *testing.T, fr *runnertest.FakeRunner, localIP string) *App {
 		cfg.LocalIP = netip.MustParseAddr(localIP)
 	}
 	a, err := New(cfg, Deps{Runner: fr, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	return a
 }
 

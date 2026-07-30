@@ -25,9 +25,13 @@ var dirLabels = map[string]string{
 	model.DirectionPC2ToPC1: "pc2 → pc1",
 }
 
-// FormatMbps renders a bits-per-second value in Mbps with one decimal place.
-func FormatMbps(bps float64) string {
-	return fmt.Sprintf("%.1f Mbps", bps/1e6)
+// optionalUint renders a counter that tools may not report; nil is the
+// explicit "not reported" marker, never zero.
+func optionalUint(value *uint64) string {
+	if value == nil {
+		return "not reported"
+	}
+	return fmt.Sprintf("%d", *value)
 }
 
 // FormatBps renders a bits-per-second value with a decimal unit.

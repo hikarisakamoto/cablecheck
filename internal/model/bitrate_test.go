@@ -5,6 +5,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"cablecheck/internal/testutil"
 )
 
 func TestParseBitrate(t *testing.T) {
@@ -115,9 +117,7 @@ func TestBitrateString(t *testing.T) {
 
 func TestBitrateJSON(t *testing.T) {
 	data, err := json.Marshal(Bitrate(2_500_000_000))
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	testutil.Require(t, err, "Marshal")
 	if string(data) != `{"bps":2500000000,"text":"2.5G"}` {
 		t.Errorf("Marshal = %s, want {\"bps\":2500000000,\"text\":\"2.5G\"}", data)
 	}

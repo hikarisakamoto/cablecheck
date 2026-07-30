@@ -7,6 +7,7 @@ import (
 
 	"cablecheck/internal/model"
 	"cablecheck/internal/protocol"
+	"cablecheck/internal/testutil"
 )
 
 // TestIperf3CapsFieldParityAndRoundTrip pins the duplicate protocol and model
@@ -32,9 +33,7 @@ func TestIperf3CapsFieldParityAndRoundTrip(t *testing.T) {
 		GetServerOutput: false, UDP: true, OneOff: false,
 	}
 	raw, err := json.Marshal(toProtocolIperfCaps(want))
-	if err != nil {
-		t.Fatalf("marshal protocol Iperf3Caps: %v", err)
-	}
+	testutil.Require(t, err, "marshal protocol Iperf3Caps")
 	var got model.Iperf3Caps
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal model Iperf3Caps: %v", err)

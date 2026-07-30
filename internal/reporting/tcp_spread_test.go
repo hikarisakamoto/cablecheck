@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/testutil"
 )
 
 func TestTCPTrialSpread(t *testing.T) {
@@ -187,9 +188,7 @@ func TestRenderJSONTCPTrialSpread(t *testing.T) {
 				TCPTrialSpread: &model.TCPTrialSpread{PC2ToPC1: &model.TCPTrialStats{CompletedTrials: 99}},
 			}}
 			got, err := RenderJSON(report)
-			if err != nil {
-				t.Fatalf("RenderJSON: %v", err)
-			}
+			testutil.Require(t, err, "RenderJSON")
 			if bytes.Contains(got, []byte(`"completedTrials": 99`)) {
 				t.Errorf("RenderJSON retained stale aggregate:\n%s", got)
 			}

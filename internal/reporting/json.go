@@ -13,7 +13,6 @@ func RenderJSON(r *model.Report) ([]byte, error) {
 	toRender := r
 	if r != nil {
 		copyReport := *r
-		copyReport.Tests = r.Tests
 		copyReport.Tests.TCPTrialSpread = tcpTrialSpread(r.Tests.TCP)
 		toRender = &copyReport
 	}

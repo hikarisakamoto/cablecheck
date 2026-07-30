@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"cablecheck/internal/clock"
@@ -79,11 +79,9 @@ func Doctor(ctx context.Context, deps Deps, opts DoctorOptions) ([]CheckResult, 
 	add(checkCableTestSupport())
 	add(checkOutputWritable(opts.OutputDir))
 
-	for _, c := range checks {
-		if c.Status == CheckFail {
-			return checks, &ExitError{Code: ExitConfig,
-				Err: fmt.Errorf("doctor found %d failing check(s); fix them before running a test", countFail(checks))}
-		}
+	if n := countFail(checks); n > 0 {
+		return checks, &ExitError{Code: ExitConfig,
+			Err: fmt.Errorf("doctor found %d failing check(s); fix them before running a test", n)}
 	}
 	return checks, nil
 }
@@ -244,7 +242,7 @@ func interfaceDetail(l parser.IPLink, cls network.Class) string {
 			addrs = append(addrs, a.Local)
 		}
 	}
-	sort.Strings(addrs)
+	slices.Sort(addrs)
 	parts := []string{"state " + orUnknownStr(l.Operstate)}
 	if len(addrs) > 0 {
 		parts = append(parts, "ipv4 "+strings.Join(addrs, ","))

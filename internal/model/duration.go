@@ -15,9 +15,6 @@ import (
 // reflection test enforces this.
 type Duration time.Duration
 
-// Std returns the value as a standard time.Duration.
-func (d Duration) Std() time.Duration { return time.Duration(d) }
-
 // String returns the standard Go duration string, e.g. "30s" or "1m30s".
 func (d Duration) String() string { return time.Duration(d).String() }
 

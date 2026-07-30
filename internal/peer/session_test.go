@@ -68,7 +68,7 @@ func TestStdinPromptCommands(t *testing.T) {
 		cfg1, cfg2 := testConfigs(t)
 		tr := newPipeTransport()
 		cfg1.Transport, cfg2.Transport = tr, tr
-		stdout := &syncBuffer{}
+		stdout := &testutil.SyncBuffer{}
 		cfg1.Stdout = stdout
 		cfg1.Stdin = testutil.ScriptStdin(t, "start", "START ", "blorp", "status", "quit")
 
@@ -82,9 +82,7 @@ func TestStdinPromptCommands(t *testing.T) {
 		// "quit" → farewell abort, then the conn closes.
 		ab := h.await(protocol.TypeAbort)
 		abort, err := protocol.DecodePayload[protocol.Abort](ab)
-		if err != nil {
-			t.Fatalf("decode abort: %v", err)
-		}
+		testutil.Require(t, err, "decode abort")
 		if abort.Reason != "user_interrupt" || abort.Initiator != "pc1" {
 			t.Errorf("abort = %+v, want reason user_interrupt initiator pc1", abort)
 		}
@@ -157,7 +155,7 @@ func TestSynchronizedStartCountdown(t *testing.T) {
 	tr := newPipeTransport()
 	cfg1.Transport, cfg2.Transport = tr, tr
 	cfg2.NonInteractive = true
-	stdout := &syncBuffer{}
+	stdout := &testutil.SyncBuffer{}
 	cfg2.Stdout = stdout
 	fc := clockAsFake(t, cfg2.Clock)
 	states := newStateRecorder(&cfg2)
@@ -305,9 +303,7 @@ func TestInvalidStateStrikes(t *testing.T) {
 	}
 	ab := h.await(protocol.TypeAbort)
 	abort, err := protocol.DecodePayload[protocol.Abort](ab)
-	if err != nil {
-		t.Fatalf("decode abort: %v", err)
-	}
+	testutil.Require(t, err, "decode abort")
 	if abort.Reason != "protocol_error" || abort.Stage != string(StateTesting) || abort.Initiator != "pc1" {
 		t.Errorf("abort = %+v, want protocol_error at testing from pc1", abort)
 	}
@@ -398,9 +394,7 @@ func TestMintOrderMatchesWireOrder(t *testing.T) {
 	for range 2 {
 		select {
 		case err := <-errs:
-			if err != nil {
-				t.Fatalf("send: %v", err)
-			}
+			testutil.Require(t, err, "send")
 		case <-time.After(testutil.TestTimeout(t)):
 			t.Fatal("timed out waiting for the racing sends")
 		}
@@ -431,9 +425,7 @@ func messageSeq(t *testing.T, id string) uint64 {
 		t.Fatalf("message ID %q has no sequence", id)
 	}
 	n, err := strconv.ParseUint(id[i+1:], 10, 64)
-	if err != nil {
-		t.Fatalf("message ID %q: parse sequence: %v", id, err)
-	}
+	testutil.Require(t, err, "message ID %q: parse sequence", id)
 	return n
 }
 
@@ -441,9 +433,7 @@ func messageSeq(t *testing.T, id string) uint64 {
 func decodeWarning(t *testing.T, env *protocol.Envelope) *protocol.Warning {
 	t.Helper()
 	w, err := protocol.DecodePayload[protocol.Warning](env)
-	if err != nil {
-		t.Fatalf("decode warning: %v", err)
-	}
+	testutil.Require(t, err, "decode warning")
 	return w
 }
 

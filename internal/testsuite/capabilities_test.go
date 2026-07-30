@@ -6,6 +6,7 @@ import (
 
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // TestCapabilityDetection pins the version+help agreement rule: a capability
@@ -25,9 +26,7 @@ func TestCapabilityDetection(t *testing.T) {
 
 	t.Run("Version39HelpWithoutBidir", func(t *testing.T) {
 		got, err := detect(t, fixture(t, "iperf", "version_39"), fixture(t, "iperf", "help_no_bidir"))
-		if err != nil {
-			t.Fatalf("DetectIperfCaps: %v", err)
-		}
+		testutil.Require(t, err, "DetectIperfCaps")
 		if got.Version != "3.9" {
 			t.Errorf("Version = %q, want 3.9", got.Version)
 		}
@@ -44,9 +43,7 @@ func TestCapabilityDetection(t *testing.T) {
 
 	t.Run("Version316HelpWithBidir", func(t *testing.T) {
 		got, err := detect(t, fixture(t, "iperf", "version_316"), fixture(t, "iperf", "help_with_bidir"))
-		if err != nil {
-			t.Fatalf("DetectIperfCaps: %v", err)
-		}
+		testutil.Require(t, err, "DetectIperfCaps")
 		if got.Version != "3.16" {
 			t.Errorf("Version = %q, want 3.16", got.Version)
 		}
@@ -81,9 +78,7 @@ func TestCapabilityDetection(t *testing.T) {
 		// output is backward-compatible and capabilities come from --help.
 		version := runner.CommandResult{Stdout: []byte("iperf 3.21 (cJSON 1.7.18)\n")}
 		got, err := detect(t, version, fixture(t, "iperf", "help_with_bidir"))
-		if err != nil {
-			t.Fatalf("DetectIperfCaps rejected iperf 3.21, want accept: %v", err)
-		}
+		testutil.Require(t, err, "DetectIperfCaps rejected iperf 3.21, want accept")
 		if got.Version != "3.21" {
 			t.Errorf("Version = %q, want 3.21", got.Version)
 		}

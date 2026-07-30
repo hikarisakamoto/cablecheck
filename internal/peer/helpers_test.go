@@ -1,12 +1,10 @@
 package peer
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,31 +13,10 @@ import (
 	"cablecheck/internal/testutil"
 )
 
-// syncBuffer is a mutex-guarded bytes.Buffer: the session event loop writes
-// prompt output concurrently with test assertions.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-// Write implements io.Writer.
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-// String returns the accumulated output.
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
 // newTestLogger returns a text slog.Logger capturing into the returned
-// syncBuffer, for asserting on warn lines after the session finished.
-func newTestLogger() (*slog.Logger, *syncBuffer) {
-	buf := &syncBuffer{}
+// buffer, for asserting on warn lines after the session finished.
+func newTestLogger() (*slog.Logger, *testutil.SyncBuffer) {
+	buf := &testutil.SyncBuffer{}
 	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})), buf
 }
 
@@ -139,14 +116,10 @@ func (h *harness) startDrain() {
 func startWorkerHarness(t *testing.T, ctx context.Context, tr *pipeTransport, cfg Config) *harness {
 	t.Helper()
 	nc, err := tr.Dial(ctx, cfg.LocalIP, "192.168.1.1:8443")
-	if err != nil {
-		t.Fatalf("harness dial: %v", err)
-	}
+	testutil.Require(t, err, "harness dial")
 	conn := protocol.NewConn(nc)
 	hs, err := workerHandshake(conn, cfg)
-	if err != nil {
-		t.Fatalf("harness worker handshake: %v", err)
-	}
+	testutil.Require(t, err, "harness worker handshake")
 	h := &harness{t: t, conn: conn, hs: hs}
 	t.Cleanup(func() { conn.Close() })
 	h.startDrain()
@@ -158,18 +131,12 @@ func startWorkerHarness(t *testing.T, ctx context.Context, tr *pipeTransport, cf
 func startCoordinatorHarness(t *testing.T, ctx context.Context, tr *pipeTransport, cfg Config) *harness {
 	t.Helper()
 	ln, err := tr.Listen(ctx, "192.168.1.1:8443")
-	if err != nil {
-		t.Fatalf("harness listen: %v", err)
-	}
+	testutil.Require(t, err, "harness listen")
 	nc, err := ln.Accept()
-	if err != nil {
-		t.Fatalf("harness accept: %v", err)
-	}
+	testutil.Require(t, err, "harness accept")
 	conn := protocol.NewConn(nc)
 	hs, err := coordinatorHandshake(conn, cfg)
-	if err != nil {
-		t.Fatalf("harness coordinator handshake: %v", err)
-	}
+	testutil.Require(t, err, "harness coordinator handshake")
 	h := &harness{t: t, conn: conn, hs: hs}
 	t.Cleanup(func() { conn.Close() })
 	h.startDrain()

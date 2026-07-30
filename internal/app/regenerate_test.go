@@ -12,6 +12,7 @@ import (
 
 	"cablecheck/internal/model"
 	"cablecheck/internal/reporting"
+	"cablecheck/internal/testutil"
 )
 
 // regenReport builds a small but complete report for the regeneration tests:
@@ -57,9 +58,7 @@ func regenReport() *model.Report {
 func writeReportJSON(t *testing.T, dir string, rep *model.Report) string {
 	t.Helper()
 	data, err := reporting.RenderJSON(rep)
-	if err != nil {
-		t.Fatalf("RenderJSON: %v", err)
-	}
+	testutil.Require(t, err, "RenderJSON")
 	path := filepath.Join(dir, "report.json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write report.json: %v", err)
@@ -82,13 +81,9 @@ func TestRegenerateFromJSON(t *testing.T) {
 		// regeneration re-parses the JSON and renders through the same pure
 		// functions, so any divergence is a bug.
 		gotMD, err := os.ReadFile(filepath.Join(dir, "report.md"))
-		if err != nil {
-			t.Fatalf("read regenerated report.md: %v", err)
-		}
+		testutil.Require(t, err, "read regenerated report.md")
 		gotSum, err := os.ReadFile(filepath.Join(dir, "summary.txt"))
-		if err != nil {
-			t.Fatalf("read regenerated summary.txt: %v", err)
-		}
+		testutil.Require(t, err, "read regenerated summary.txt")
 		if wantMD := reporting.RenderMarkdown(rep); !bytes.Equal(gotMD, wantMD) {
 			t.Errorf("regenerated report.md differs from a direct render")
 		}
@@ -96,9 +91,7 @@ func TestRegenerateFromJSON(t *testing.T) {
 			t.Errorf("regenerated summary.txt differs from a direct render")
 		}
 		gotHTML, err := os.ReadFile(filepath.Join(dir, "report.html"))
-		if err != nil {
-			t.Fatalf("read regenerated report.html: %v", err)
-		}
+		testutil.Require(t, err, "read regenerated report.html")
 		if wantHTML := reporting.RenderHTML(rep); !bytes.Equal(gotHTML, wantHTML) {
 			t.Errorf("regenerated report.html differs from a direct render")
 		}
@@ -156,9 +149,7 @@ func TestRegenerateFromJSON(t *testing.T) {
 		rep.SchemaVersion = "1.0.0"
 		rep.Tests.TCPTrialSpread = nil
 		data, err := json.MarshalIndent(rep, "", "  ")
-		if err != nil {
-			t.Fatalf("Marshal legacy report: %v", err)
-		}
+		testutil.Require(t, err, "Marshal legacy report")
 		dir := t.TempDir()
 		path := filepath.Join(dir, "report.json")
 		if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
@@ -170,9 +161,7 @@ func TestRegenerateFromJSON(t *testing.T) {
 		}
 		for _, name := range []string{"report.md", "report.html"} {
 			output, err := os.ReadFile(filepath.Join(dir, name))
-			if err != nil {
-				t.Fatalf("read regenerated %s: %v", name, err)
-			}
+			testutil.Require(t, err, "read regenerated %s", name)
 			if !bytes.Contains(output, []byte("Inter-trial CoV")) {
 				t.Errorf("regenerated %s omitted spread derived from legacy raw trials", name)
 			}

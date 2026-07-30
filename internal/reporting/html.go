@@ -347,13 +347,6 @@ func directionSlug(direction string) string {
 	}
 }
 
-func optionalUint(value *uint64) string {
-	if value == nil {
-		return "not reported"
-	}
-	return fmt.Sprintf("%d", *value)
-}
-
 func finiteNonNegative(value float64) float64 {
 	if !isFinite(value) || value < 0 {
 		return 0

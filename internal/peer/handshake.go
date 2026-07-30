@@ -150,18 +150,24 @@ func requireIperf3JSON(caps protocol.Capabilities) error {
 	return nil
 }
 
-// helloPeerIPMatches validates the hello's peerIp claim against our local
-// IP, tolerating IPv4-in-IPv6 mapping.
-func helloPeerIPMatches(claim string, localIP netip.Addr) bool {
+// helloIPClaimMatches validates one of the hello's IP claims — the worker's
+// peerIp against our local IP, or its localIp against the coordinator's
+// configured peer address — tolerating IPv4-in-IPv6 mapping.
+func helloIPClaimMatches(claim string, want netip.Addr) bool {
 	a, err := netip.ParseAddr(claim)
-	return err == nil && a.Unmap() == localIP.Unmap()
+	return err == nil && a.Unmap() == want.Unmap()
 }
 
-// helloLocalIPMatches validates the worker's claimed local interface address
-// against the coordinator's configured peer address.
-func helloLocalIPMatches(claim string, peerIP netip.Addr) bool {
-	a, err := netip.ParseAddr(claim)
-	return err == nil && a.Unmap() == peerIP.Unmap()
+// checkVersionOrAbort enforces the protocol version of a handshake frame: on
+// mismatch it sends abort(version_mismatch) best-effort and returns the typed
+// error to surface. testID is empty before the coordinator assigned one.
+func checkVersionOrAbort(conn *protocol.Conn, ids *protocol.MessageIDMaker, cfg Config, testID string, env *protocol.Envelope) error {
+	if protocol.CheckVersion(env) == nil {
+		return nil
+	}
+	detail := versionDetail(env.ProtocolVersion)
+	_ = sendAbort(conn, ids, cfg, testID, abortVersionMismatch, detail)
+	return fmt.Errorf("%w (%s)", errVersionMismatch, detail)
 }
 
 // coordinatorHandshake runs PC1's half of the handshake on an accepted (and
@@ -204,10 +210,8 @@ func coordinatorHandshake(conn *protocol.Conn, cfg Config) (res *handshakeResult
 		_ = sendAbort(conn, ids, cfg, "", abortProtocolError, fmt.Sprintf("expected hello, got %s", env.Type))
 		return nil, fmt.Errorf("%w: first frame is %s, want hello", errProtocol, env.Type)
 	}
-	if protocol.CheckVersion(env) != nil {
-		detail := versionDetail(env.ProtocolVersion)
-		_ = sendAbort(conn, ids, cfg, "", abortVersionMismatch, detail)
-		return nil, fmt.Errorf("%w (%s)", errVersionMismatch, detail)
+	if err := checkVersionOrAbort(conn, ids, cfg, "", env); err != nil {
+		return nil, err
 	}
 	hello, err := protocol.DecodePayload[protocol.Hello](env)
 	if err != nil {
@@ -224,11 +228,11 @@ func coordinatorHandshake(conn *protocol.Conn, cfg Config) (res *handshakeResult
 		_ = sendAbort(conn, ids, cfg, "", abortProtocolError, fmt.Sprintf("unexpected role %q", hello.Role))
 		return nil, fmt.Errorf("%w: hello role %q, want %q", errProtocol, hello.Role, RolePC2)
 	}
-	if !helloPeerIPMatches(hello.PeerIP, cfg.LocalIP) {
+	if !helloIPClaimMatches(hello.PeerIP, cfg.LocalIP) {
 		_ = sendAbort(conn, ids, cfg, "", abortProtocolError, fmt.Sprintf("hello peerIp %q does not match our local IP", hello.PeerIP))
 		return nil, fmt.Errorf("%w: hello peerIp %q does not match local IP %s", errProtocol, hello.PeerIP, cfg.LocalIP)
 	}
-	if !helloLocalIPMatches(hello.LocalIP, cfg.PeerIP) {
+	if !helloIPClaimMatches(hello.LocalIP, cfg.PeerIP) {
 		_ = sendAbort(conn, ids, cfg, "", abortProtocolError, fmt.Sprintf("hello localIp %q does not match expected peer IP", hello.LocalIP))
 		return nil, fmt.Errorf("%w: hello localIp %q does not match expected peer IP %s", errProtocol, hello.LocalIP, cfg.PeerIP)
 	}
@@ -258,10 +262,8 @@ func coordinatorHandshake(conn *protocol.Conn, cfg Config) (res *handshakeResult
 		_ = sendAbort(conn, ids, cfg, testID, abortProtocolError, "reading capabilities failed")
 		return nil, fmt.Errorf("%w: reading capabilities: %v", errProtocol, err)
 	}
-	if verr := protocol.CheckVersion(capsEnv); verr != nil {
-		detail := versionDetail(capsEnv.ProtocolVersion)
-		_ = sendAbort(conn, ids, cfg, testID, abortVersionMismatch, detail)
-		return nil, fmt.Errorf("%w (%s)", errVersionMismatch, detail)
+	if err := checkVersionOrAbort(conn, ids, cfg, testID, capsEnv); err != nil {
+		return nil, err
 	}
 	if capsEnv.Type != protocol.TypeCapabilities {
 		_ = sendAbort(conn, ids, cfg, testID, abortProtocolError, fmt.Sprintf("expected capabilities, got %s", capsEnv.Type))
@@ -334,10 +336,8 @@ func workerReadReply(conn *protocol.Conn, cfg Config, clk clock.Clock, deadline 
 	if env.Type == protocol.TypeAbort {
 		return nil, mapWorkerAbort(env)
 	}
-	if verr := protocol.CheckVersion(env); verr != nil {
-		detail := versionDetail(env.ProtocolVersion)
-		_ = sendAbort(conn, ids, cfg, testID, abortVersionMismatch, detail)
-		return nil, fmt.Errorf("%w (%s)", errVersionMismatch, detail)
+	if err := checkVersionOrAbort(conn, ids, cfg, testID, env); err != nil {
+		return nil, err
 	}
 	if env.Type != wantType {
 		_ = sendAbort(conn, ids, cfg, testID, abortProtocolError, fmt.Sprintf("expected %s, got %s", wantType, env.Type))

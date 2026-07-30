@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cablecheck/internal/config"
+	"cablecheck/internal/testutil"
 )
 
 // TestLoggingTokenRedaction drives log traffic through both handlers (stderr
@@ -28,9 +29,7 @@ func TestLoggingTokenRedaction(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cablecheck-pc1.log")
 	log, closer, err := AttachDebugFile(base, path)
-	if err != nil {
-		t.Fatalf("AttachDebugFile: %v", err)
-	}
+	testutil.Require(t, err, "AttachDebugFile")
 
 	cfg := config.RunConfig{
 		Role:    config.RolePC1,
@@ -43,7 +42,9 @@ func TestLoggingTokenRedaction(t *testing.T) {
 	log.Info("frame", slog.Group("hello", slog.String("payload", token)))
 	log.Info("run configuration", slog.Any("config", cfg))
 	log.Debug("debug-only line", "payload", token, "detail", "visible in file only")
-	log.Info("envelope", MsgAttrs("send", "hello", "pc1-00000001", 128))
+	log.Info("envelope", slog.Group("msg",
+		slog.String("dir", "send"), slog.String("type", "hello"),
+		slog.String("id", "pc1-00000001"), slog.Int("bytes", 128)))
 	// A secret riding under a group NAMED for the secret must also be redacted
 	// (redactSecrets checks the group path, not only the leaf key).
 	log.Info("grouped", slog.Group("token", slog.String("value", token)))
@@ -53,9 +54,7 @@ func TestLoggingTokenRedaction(t *testing.T) {
 		t.Fatalf("close debug file: %v", err)
 	}
 	fileBytes, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read debug file: %v", err)
-	}
+	testutil.Require(t, err, "read debug file")
 
 	stderrOut := stderrBuf.String()
 	fileOut := string(fileBytes)
@@ -82,9 +81,9 @@ func TestLoggingTokenRedaction(t *testing.T) {
 		t.Errorf("file sink misses debug record:\n%s", fileOut)
 	}
 
-	// MsgAttrs logs metadata only.
+	// The envelope group logs metadata only.
 	if !strings.Contains(fileOut, "pc1-00000001") {
-		t.Errorf("file sink misses MsgAttrs message id:\n%s", fileOut)
+		t.Errorf("file sink misses the envelope message id:\n%s", fileOut)
 	}
 }
 
@@ -121,7 +120,9 @@ func TestConsoleHandlerFormat(t *testing.T) {
 
 	rec := slog.NewRecord(ts, slog.LevelInfo, "handshake", 0)
 	rec.Add("token", token, "peer", "pc2")
-	rec.AddAttrs(MsgAttrs("send", "hello", "pc1-00000001", 128))
+	rec.AddAttrs(slog.Group("msg",
+		slog.String("dir", "send"), slog.String("type", "hello"),
+		slog.String("id", "pc1-00000001"), slog.Int("bytes", 128)))
 	rec.AddAttrs(slog.Any("config", config.RunConfig{
 		Role:    config.RolePC1,
 		LocalIP: netip.MustParseAddr("192.168.50.10"),
@@ -141,7 +142,7 @@ func TestConsoleHandlerFormat(t *testing.T) {
 		"peer=pc2",                // record attr
 		"token=[REDACTED]",        // secret leaf redacted
 		"msg.dir=send",            // dotted group prefix
-		"msg.id=pc1-00000001",     // MsgAttrs group
+		"msg.id=pc1-00000001",     // envelope group
 		"config.token=[REDACTED]", // LogValuer resolved + redacted
 	} {
 		if !strings.Contains(got, want) {
@@ -355,9 +356,7 @@ func TestAttachDebugFileExclusive(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log.json")
 	base := NewStderr(&bytes.Buffer{}, false, false)
 	_, closer, err := AttachDebugFile(base, path)
-	if err != nil {
-		t.Fatalf("first AttachDebugFile: %v", err)
-	}
+	testutil.Require(t, err, "first AttachDebugFile")
 	defer closer.Close()
 	if _, _, err := AttachDebugFile(base, path); err == nil {
 		t.Errorf("second AttachDebugFile on the same path succeeded; want O_EXCL failure")

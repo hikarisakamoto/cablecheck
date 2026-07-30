@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"cablecheck/internal/testutil"
 )
 
 func TestIperf3TCPVersions(t *testing.T) {
@@ -18,9 +20,7 @@ func TestIperf3TCPVersions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := ParseIperf3(fixture(t, "iperf", tc.file))
-			if err != nil {
-				t.Fatalf("ParseIperf3: %v", err)
-			}
+			testutil.Require(t, err, "ParseIperf3")
 			if res.Version != tc.version {
 				t.Errorf("Version = %q, want %q", res.Version, tc.version)
 			}
@@ -90,9 +90,7 @@ func TestIperf3TCPVersions(t *testing.T) {
 
 	t.Run("collapse_and_retransmit_burst", func(t *testing.T) {
 		res, err := ParseIperf3(fixture(t, "iperf", "tcp_collapse_retr.json"))
-		if err != nil {
-			t.Fatalf("ParseIperf3: %v", err)
-		}
+		testutil.Require(t, err, "ParseIperf3")
 		if len(res.Intervals) != 12 {
 			t.Fatalf("len(Intervals) = %d, want 12", len(res.Intervals))
 		}
@@ -160,9 +158,7 @@ func TestIperf3TCPRequiresThroughputSummary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := ParseIperf3([]byte(tc.raw))
-			if err != nil {
-				t.Fatalf("ParseIperf3: %v", err)
-			}
+			testutil.Require(t, err, "ParseIperf3")
 			if tc.wantSent {
 				if res.Sent == nil || res.Sent.BitsPerSecond != 0 || res.Received != nil {
 					t.Errorf("Sent/Received = %+v/%+v, want a present zero sender summary only", res.Sent, res.Received)
@@ -191,9 +187,7 @@ func TestIperf3TCPRequiresThroughputSummary(t *testing.T) {
 func TestIperf3UDP(t *testing.T) {
 	t.Run("v3.9_loss_with_out_of_order", func(t *testing.T) {
 		res, err := ParseIperf3(fixture(t, "iperf", "udp_39_loss.json"))
-		if err != nil {
-			t.Fatalf("ParseIperf3: %v", err)
-		}
+		testutil.Require(t, err, "ParseIperf3")
 		if res.Protocol != "UDP" {
 			t.Fatalf("Protocol = %q, want UDP", res.Protocol)
 		}
@@ -235,9 +229,7 @@ func TestIperf3UDP(t *testing.T) {
 
 	t.Run("v3.16_no_out_of_order_anywhere", func(t *testing.T) {
 		res, err := ParseIperf3(fixture(t, "iperf", "udp_316.json"))
-		if err != nil {
-			t.Fatalf("ParseIperf3: %v", err)
-		}
+		testutil.Require(t, err, "ParseIperf3")
 		if res.UDP == nil {
 			t.Fatal("UDP = nil, want end.sum stats")
 		}
@@ -268,9 +260,7 @@ func TestIperf3BidirFromStreams(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := ParseIperf3(fixture(t, "iperf", tc.file))
-			if err != nil {
-				t.Fatalf("ParseIperf3: %v", err)
-			}
+			testutil.Require(t, err, "ParseIperf3")
 			if res.Version != tc.version {
 				t.Errorf("Version = %q, want %q", res.Version, tc.version)
 			}
@@ -347,9 +337,7 @@ func TestIperf3BidirMissingForwardIntervalKeepsSeriesContiguous(t *testing.T) {
 		]}
 	}`)
 	res, err := ParseIperf3(raw)
-	if err != nil {
-		t.Fatalf("ParseIperf3: %v", err)
-	}
+	testutil.Require(t, err, "ParseIperf3")
 	if len(res.Intervals) != 3 {
 		t.Fatalf("len(Intervals) = %d, want 3 contiguous samples", len(res.Intervals))
 	}

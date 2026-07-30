@@ -40,9 +40,7 @@ func TestDribbleRotatesChunkSizes(t *testing.T) {
 func TestDribbleTotalContentPreserved(t *testing.T) {
 	content := bytes.Repeat([]byte("cablecheck!"), 13) // 143 bytes, not a multiple of any cycle
 	got, err := io.ReadAll(testutil.Dribble(bytes.NewReader(content), 7))
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
+	testutil.Require(t, err, "ReadAll")
 	if !bytes.Equal(got, content) {
 		t.Fatalf("content mangled:\n got %q\nwant %q", got, content)
 	}
@@ -64,9 +62,7 @@ func TestDribbleRespectsSmallBuffer(t *testing.T) {
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
-			t.Fatalf("Read: %v", err)
-		}
+		testutil.Require(t, err, "Read")
 		if n < 1 {
 			t.Fatal("Read returned 0 bytes with nil error")
 		}

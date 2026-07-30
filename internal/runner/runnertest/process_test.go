@@ -106,9 +106,7 @@ func TestFakeProcessTerminateAndKill(t *testing.T) {
 		t.Error("Terminated() = false after Terminate")
 	}
 	res, err := p1.Wait(t.Context())
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
+	testutil.Require(t, err, "Wait")
 	if res.ExitCode != -1 || res.Signal != "SIGTERM" {
 		t.Errorf("Terminate result = exit %d signal %q, want -1/SIGTERM", res.ExitCode, res.Signal)
 	}
@@ -133,9 +131,7 @@ func TestFakeProcessTerminateAndKill(t *testing.T) {
 		t.Error("Killed() = false after Kill")
 	}
 	res, err = p2.Wait(t.Context())
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
+	testutil.Require(t, err, "Wait")
 	if res.ExitCode != -1 || res.Signal != "SIGKILL" {
 		t.Errorf("Kill result = exit %d signal %q, want -1/SIGKILL", res.ExitCode, res.Signal)
 	}
@@ -181,9 +177,7 @@ func TestFakeProcessDelayAutoExit(t *testing.T) {
 	}
 	close(delay)
 	res, err := p.Wait(t.Context())
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
+	testutil.Require(t, err, "Wait")
 	if res.ExitCode != 0 || string(res.Stdout) != "server output\n" {
 		t.Errorf("auto-exit result = %+v, want the scripted result", res)
 	}

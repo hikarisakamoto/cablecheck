@@ -4,6 +4,8 @@ import (
 	"errors"
 	"slices"
 	"testing"
+
+	"cablecheck/internal/testutil"
 )
 
 // inet returns the first IPv4 addr_info entry of a link, or nil.
@@ -19,9 +21,7 @@ func inet(l IPLink) *IPAddrInfo {
 func TestIPAddrParse(t *testing.T) {
 	t.Run("multi", func(t *testing.T) {
 		links, err := ParseIPAddr(fixture(t, "ip", "addr_multi.json"))
-		if err != nil {
-			t.Fatalf("ParseIPAddr: %v", err)
-		}
+		testutil.Require(t, err, "ParseIPAddr")
 		var names []string
 		byName := map[string]IPLink{}
 		for _, l := range links {
@@ -96,9 +96,7 @@ func TestIPAddrParse(t *testing.T) {
 
 	t.Run("single_25g_altnames", func(t *testing.T) {
 		links, err := ParseIPAddr(fixture(t, "ip", "addr_single_25g.json"))
-		if err != nil {
-			t.Fatalf("ParseIPAddr: %v", err)
-		}
+		testutil.Require(t, err, "ParseIPAddr")
 		if len(links) != 1 {
 			t.Fatalf("got %d links, want 1", len(links))
 		}
@@ -116,9 +114,7 @@ func TestIPAddrParse(t *testing.T) {
 
 	t.Run("ip_not_found_shape", func(t *testing.T) {
 		links, err := ParseIPAddr(fixture(t, "ip", "addr_ip_not_found.json"))
-		if err != nil {
-			t.Fatalf("ParseIPAddr: %v", err)
-		}
+		testutil.Require(t, err, "ParseIPAddr")
 		if len(links) != 2 {
 			t.Fatalf("got %d links, want 2", len(links))
 		}
@@ -137,9 +133,7 @@ func TestIPAddrParse(t *testing.T) {
 func TestIPLinkStats(t *testing.T) {
 	t.Run("clean", func(t *testing.T) {
 		l, err := ParseIPLinkStats(fixture(t, "ip", "linkstats_clean.json"))
-		if err != nil {
-			t.Fatalf("ParseIPLinkStats: %v", err)
-		}
+		testutil.Require(t, err, "ParseIPLinkStats")
 		s := l.Stats64
 		if s == nil {
 			t.Fatal("Stats64 = nil, want populated")
@@ -157,9 +151,7 @@ func TestIPLinkStats(t *testing.T) {
 
 	t.Run("errors_flat_fields", func(t *testing.T) {
 		l, err := ParseIPLinkStats(fixture(t, "ip", "linkstats_errors.json"))
-		if err != nil {
-			t.Fatalf("ParseIPLinkStats: %v", err)
-		}
+		testutil.Require(t, err, "ParseIPLinkStats")
 		if l.Operstate != "up" {
 			t.Errorf("Operstate = %q, want %q (normalized lowercase)", l.Operstate, "up")
 		}

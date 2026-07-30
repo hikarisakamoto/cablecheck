@@ -3,7 +3,8 @@
 // report directory, fanned out through a multi-handler.
 //
 // Token redaction is layered (docs/design/clieval.md §8): protocol code logs
-// envelope metadata only (MsgAttrs), ALL handlers (stderr text, verbose-TTY
+// envelope metadata only (direction, type, message ID and payload size —
+// never payload bytes), ALL handlers (stderr text, verbose-TTY
 // console, JSON debug file) redact any attr keyed "token" or "payload" via
 // the shared redactSecrets hook, and config.RunConfig implements
 // slog.LogValuer with the token pre-redacted. The one legitimate token
@@ -94,17 +95,6 @@ func AttachDebugFile(base *slog.Logger, path string) (*slog.Logger, io.Closer, e
 	})
 	tee := multiHandler{base.Handler(), fileHandler}
 	return slog.New(tee), &flushCloser{bw: bw, f: f}, nil
-}
-
-// MsgAttrs is the ONLY sanctioned way to log a protocol envelope: direction,
-// type, message ID and payload size — never payload bytes.
-func MsgAttrs(dir, msgType, messageID string, payloadBytes int) slog.Attr {
-	return slog.Group("msg",
-		slog.String("dir", dir),
-		slog.String("type", msgType),
-		slog.String("id", messageID),
-		slog.Int("bytes", payloadBytes),
-	)
 }
 
 // multiHandler fans one record out to several child handlers (stdlib has no

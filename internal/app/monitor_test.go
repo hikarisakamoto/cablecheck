@@ -72,9 +72,7 @@ func TestAssembleReportSurfacesRenegotiation(t *testing.T) {
 
 	cfg := &config.RunConfig{Role: config.RolePC1}
 	a, err := New(cfg, Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	a.monitor = m
 
 	when := time.Date(2026, 7, 18, 13, 0, 0, 0, time.UTC)
@@ -106,9 +104,7 @@ func TestAssembleReportSurfacesRenegotiation(t *testing.T) {
 func TestAssemblePartialReportRetainsPlanMonitoringEvents(t *testing.T) {
 	cfg := &config.RunConfig{Role: config.RolePC1, Mode: config.ModeSoak}
 	a, err := New(cfg, Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	event := model.MonitoringEvent{
 		At:     time.Date(2026, 7, 19, 14, 0, 0, 0, time.UTC),
 		Type:   "carrier_lost",
@@ -142,9 +138,7 @@ func TestStartLinkMonitorNoLeak(t *testing.T) {
 	fc := clocktest.New(time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC))
 	cfg := &config.RunConfig{Role: config.RolePC1, MonitorInterval: time.Second}
 	a, err := New(cfg, Deps{Clock: fc, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	a.sysfsRoot = root
 
 	a.startLinkMonitor(context.Background(), iface)
@@ -186,9 +180,7 @@ func TestStopLinkMonitorTagsFinalEventInsideCableWindow(t *testing.T) {
 	fc := clocktest.New(time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC))
 	cfg := &config.RunConfig{Role: config.RolePC1, MonitorInterval: time.Second}
 	a, err := New(cfg, Deps{Clock: fc, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	a.sysfsRoot = root
 	a.startLinkMonitor(context.Background(), iface)
 	fc.BlockUntilWaiters(1)
@@ -236,9 +228,7 @@ func TestSetCableTestWindowKeepsPreWindowFaultForPHY03(t *testing.T) {
 
 	cfg := &config.RunConfig{Role: config.RolePC1}
 	a, err := New(cfg, Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	a.monitor = m
 
 	// This +2 fault occurs before the disruptive window opens. The opening

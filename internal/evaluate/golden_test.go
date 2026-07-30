@@ -170,9 +170,6 @@ func TestClassifyGoldenScenarios(t *testing.T) {
 				if len(fd.Evidence) == 0 {
 					t.Errorf("%s finding carries no evidence", tc.wantRule)
 				}
-				if !anyFindingHasEvidence(res) {
-					t.Errorf("scenario carries no evidence-bearing finding (findings %v)", findingIDs(res))
-				}
 			} else {
 				// The healthy scenario is EXCELLENT precisely because it has
 				// no finding above Info — there is nothing to explain.
@@ -182,16 +179,6 @@ func TestClassifyGoldenScenarios(t *testing.T) {
 			}
 		})
 	}
-}
-
-// anyFindingHasEvidence reports whether any finding carries evidence strings.
-func anyFindingHasEvidence(res Result) bool {
-	for _, fd := range res.Findings {
-		if len(fd.Evidence) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // findingByID returns a pointer to the first finding with the given rule ID,

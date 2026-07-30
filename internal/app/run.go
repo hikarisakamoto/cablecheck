@@ -13,7 +13,6 @@ import (
 	"cablecheck/internal/clock"
 	"cablecheck/internal/config"
 	"cablecheck/internal/logging"
-	"cablecheck/internal/model"
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/reporting"
@@ -312,7 +311,7 @@ func (a *App) buildPlan(pf *preflightInfo, ops *testsuite.Ops, results *testsuit
 			SoakDuration:   a.cfg.SoakDuration,
 			SoakLoad:       a.cfg.SoakLoad,
 			CycleGap:       a.soakCycleGap(),
-			EventSource:    a.monitorEventSnapshot,
+			EventSource:    a.monitoringEvents,
 			Results:        results,
 			OnStep:         a.baseStepObserver(),
 			OnProgress:     a.deps.OnProgress,
@@ -384,14 +383,6 @@ func (a *App) soakCycleGap() time.Duration {
 		gap = time.Second
 	}
 	return gap
-}
-
-// monitorEventSnapshot returns the sysfs link monitor's event timeline mapped
-// onto the report model, or nil when no monitor is running. The soak plan calls
-// it after each cycle so completed cycles retain their disconnect/renegotiation
-// events even if a later cycle is interrupted.
-func (a *App) monitorEventSnapshot() []model.MonitoringEvent {
-	return a.monitoringEvents()
 }
 
 // printTokenBanner displays the session token and the matching PC2 command

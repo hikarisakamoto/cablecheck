@@ -63,18 +63,18 @@ const standardExtraUDPRateFraction = 50
 // for its TCPRepeats. The TCP repeats and the extra reduced-rate UDP pass are
 // named explicitly so the operator sees the real workload the mode performs.
 func (p *StandardPlan) planSteps() []string {
-	repeats := p.repeats()
+	reps := repeats(p.TCPRepeats)
 	steps := []string{
 		"link settings",
 		"initial counter snapshot",
 		"ping stability",
 		"full-size ping",
 	}
-	for i := 1; i <= repeats; i++ {
-		steps = append(steps, fmt.Sprintf("TCP throughput PC1 → PC2 (repeat %d/%d)", i, repeats))
+	for i := 1; i <= reps; i++ {
+		steps = append(steps, fmt.Sprintf("TCP throughput PC1 → PC2 (repeat %d/%d)", i, reps))
 	}
-	for i := 1; i <= repeats; i++ {
-		steps = append(steps, fmt.Sprintf("TCP throughput PC2 → PC1 (repeat %d/%d)", i, repeats))
+	for i := 1; i <= reps; i++ {
+		steps = append(steps, fmt.Sprintf("TCP throughput PC2 → PC1 (repeat %d/%d)", i, reps))
 	}
 	steps = append(steps,
 		"bidirectional stress",
@@ -94,11 +94,11 @@ func StandardPlanSteps() []string {
 }
 
 // repeats returns the effective TCP repeat count, floored at 1.
-func (p *StandardPlan) repeats() int {
-	if p.TCPRepeats < 1 {
+func repeats(n int) int {
+	if n < 1 {
 		return 1
 	}
-	return p.TCPRepeats
+	return n
 }
 
 // engine builds the QuickPlan the standard plan reuses to execute each step.
@@ -127,17 +127,17 @@ func (p *StandardPlan) engine() *QuickPlan {
 // quick plan does — partial per-repeat and per-direction results survive.
 func (p *StandardPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
 	q := p.engine()
-	repeats := p.repeats()
+	reps := repeats(p.TCPRepeats)
 	steps := []func(context.Context, peer.RemoteCaller) error{
 		q.stepLink,
 		q.stepInitialCounters,
 		q.stepPing,
 		q.stepFullSizePing,
 	}
-	for range repeats {
+	for range reps {
 		steps = append(steps, q.stepTCPForward)
 	}
-	for range repeats {
+	for range reps {
 		steps = append(steps, q.stepTCPReverse)
 	}
 	// Derive the default UDP rate once (recording its notes/flags a single

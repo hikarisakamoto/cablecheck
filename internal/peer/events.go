@@ -72,10 +72,3 @@ func (evOpProgress) isEvent()   {}
 func (evPlanDone) isEvent()     {}
 func (evTransferDone) isEvent() {}
 func (evCallExpired) isEvent()  {}
-
-// Compile-time checks that every producer type satisfies event; the session
-// event loop consumes these.
-var _ = []event{
-	evFrame{}, evConnErr{}, evStdin{}, evStdinEOF{}, evOpDone{}, evOpProgress{},
-	evPlanDone{}, evTransferDone{}, evCallExpired{},
-}

@@ -104,14 +104,6 @@ type SoakPlan struct {
 	OnProgress func(protocol.TestProgress)
 }
 
-// repeats returns the effective per-cycle TCP repeat count, floored at 1.
-func (p *SoakPlan) repeats() int {
-	if p.TCPRepeats < 1 {
-		return 1
-	}
-	return p.TCPRepeats
-}
-
 // gap returns the inter-cycle wait for the configured load profile.
 func (p *SoakPlan) gap() time.Duration {
 	if p.SoakLoad == config.SoakLoadContinuous {
@@ -265,13 +257,13 @@ func (p *SoakPlan) runCycle(ctx context.Context, rc peer.RemoteCaller, cycle int
 		return nil, model.PeerCounters{}, model.PeerCounters{}, err
 	}
 	announce(soakSteps[2])
-	for range p.repeats() {
+	for range repeats(p.TCPRepeats) {
 		if err := q.stepTCPForward(ctx, rc); err != nil {
 			return nil, model.PeerCounters{}, model.PeerCounters{}, err
 		}
 	}
 	announce(soakSteps[3])
-	for range p.repeats() {
+	for range repeats(p.TCPRepeats) {
 		if err := q.stepTCPReverse(ctx, rc); err != nil {
 			return nil, model.PeerCounters{}, model.PeerCounters{}, err
 		}

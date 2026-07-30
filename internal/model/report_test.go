@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"cablecheck/internal/testutil"
 )
 
 // TestNoRawDurationInReport walks the full Report type tree by reflection and
@@ -52,9 +54,7 @@ func TestZeroCycleSoakJSONIncludesCycleCount(t *testing.T) {
 		SoakCyclesCompleted: 0,
 	}
 	data, err := json.Marshal(rep)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	testutil.Require(t, err, "Marshal")
 	if !bytes.Contains(data, []byte(`"soakCyclesCompleted":0`)) {
 		t.Errorf("zero-cycle soak JSON omits soakCyclesCompleted: %s", data)
 	}
@@ -273,9 +273,7 @@ func fullReport() *Report {
 func TestReportJSONRoundTrip(t *testing.T) {
 	r := fullReport()
 	data, err := json.Marshal(r)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	testutil.Require(t, err, "Marshal")
 
 	var got Report
 	if err := json.Unmarshal(data, &got); err != nil {
@@ -351,9 +349,7 @@ func TestReportJSONRoundTrip(t *testing.T) {
 
 func TestTCPResultCollapseAnalysisPresence(t *testing.T) {
 	clean, err := json.Marshal(TCPResult{Collapses: []TCPCollapseEvent{}})
-	if err != nil {
-		t.Fatalf("Marshal clean TCPResult: %v", err)
-	}
+	testutil.Require(t, err, "Marshal clean TCPResult")
 	if !bytes.Contains(clean, []byte(`"collapses":[]`)) {
 		t.Errorf("completed clean analysis = %s, want collapses:[]", clean)
 	}
@@ -374,9 +370,7 @@ func TestScoreNullForInconclusive(t *testing.T) {
 	r.Score = nil
 	r.Classification = HealthInconclusive
 	data, err := json.Marshal(r)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	testutil.Require(t, err, "Marshal")
 	if !bytes.Contains(data, []byte(`"score":null`)) {
 		t.Errorf("nil score must marshal as \"score\":null")
 	}
