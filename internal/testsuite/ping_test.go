@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // TestPingLadder exercises the interval fallback ladder (0.02 denied → 0.2
@@ -30,9 +31,7 @@ func TestPingLadder(t *testing.T) {
 	pt := &PingTester{R: fr}
 
 	res, notes, err := pt.Quick(ctx, peer, 100)
-	if err != nil {
-		t.Fatalf("Quick: %v", err)
-	}
+	testutil.Require(t, err, "Quick")
 	if res.IntervalUsedSec != 0.2 {
 		t.Errorf("IntervalUsedSec = %v, want 0.2 after the denied 0.02 rung", res.IntervalUsedSec)
 	}
@@ -68,9 +67,7 @@ func TestPingLadder(t *testing.T) {
 	}
 
 	fres, _, err := pt.FullSize(ctx, peer, 1500, 100)
-	if err != nil {
-		t.Fatalf("FullSize: %v", err)
-	}
+	testutil.Require(t, err, "FullSize")
 	if fres.Transmitted != 100 {
 		t.Errorf("FullSize Transmitted = %d, want 100", fres.Transmitted)
 	}
@@ -168,9 +165,7 @@ func TestPingRunnerTimeout(t *testing.T) {
 			t.Fatalf("call %d args %q lack a -w wall-clock bound", i, call.Args)
 		}
 		wSec, err := strconv.Atoi(call.Args[wi+1])
-		if err != nil {
-			t.Fatalf("call %d args %q: -w value not an integer: %v", i, call.Args, err)
-		}
+		testutil.Require(t, err, "call %d args %q: -w value not an integer", i, call.Args)
 		want := time.Duration(wSec+10) * time.Second
 		if call.Spec.Timeout != want {
 			t.Errorf("call %d (%q): Spec.Timeout = %v, want %v (-w %ds + 10s backstop)",

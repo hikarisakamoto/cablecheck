@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cablecheck/internal/config"
+	"cablecheck/internal/testutil"
 	"cablecheck/internal/ui"
 )
 
@@ -27,9 +28,7 @@ func baseRunArgs(extra ...string) []string {
 func TestRunFlagPresets(t *testing.T) {
 	t.Run("quick presets fill unset flags", func(t *testing.T) {
 		cfg, err := parseRunFlags(baseRunArgs(), &bytes.Buffer{})
-		if err != nil {
-			t.Fatalf("parseRunFlags: %v", err)
-		}
+		testutil.Require(t, err, "parseRunFlags")
 		if cfg.TCPDuration != 30*time.Second {
 			t.Errorf("TCPDuration = %v, want 30s", cfg.TCPDuration)
 		}
@@ -52,9 +51,7 @@ func TestRunFlagPresets(t *testing.T) {
 
 	t.Run("explicit flag beats the preset", func(t *testing.T) {
 		cfg, err := parseRunFlags(baseRunArgs("--tcp-duration", "45s"), &bytes.Buffer{})
-		if err != nil {
-			t.Fatalf("parseRunFlags: %v", err)
-		}
+		testutil.Require(t, err, "parseRunFlags")
 		if cfg.TCPDuration != 45*time.Second {
 			t.Errorf("TCPDuration = %v, want explicit 45s", cfg.TCPDuration)
 		}
@@ -65,9 +62,7 @@ func TestRunFlagPresets(t *testing.T) {
 
 	t.Run("standard presets differ from quick", func(t *testing.T) {
 		cfg, err := parseRunFlags(baseRunArgs("--mode", "standard"), &bytes.Buffer{})
-		if err != nil {
-			t.Fatalf("parseRunFlags: %v", err)
-		}
+		testutil.Require(t, err, "parseRunFlags")
 		if cfg.TCPDuration != 60*time.Second || cfg.UDPDuration != 30*time.Second {
 			t.Errorf("standard durations = %v/%v, want 60s/30s", cfg.TCPDuration, cfg.UDPDuration)
 		}
@@ -98,9 +93,7 @@ func TestRunFlagPresets(t *testing.T) {
 func TestRunPresentationFlags(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
 		cfg, err := parseRunFlags(baseRunArgs(), &bytes.Buffer{})
-		if err != nil {
-			t.Fatalf("parseRunFlags: %v", err)
-		}
+		testutil.Require(t, err, "parseRunFlags")
 		if cfg.Color != "auto" || cfg.Quiet {
 			t.Errorf("presentation defaults = color %q, quiet %v; want auto, false", cfg.Color, cfg.Quiet)
 		}
@@ -116,9 +109,7 @@ func TestRunPresentationFlags(t *testing.T) {
 	} {
 		t.Run(tc.value, func(t *testing.T) {
 			cfg, err := parseRunFlags(baseRunArgs("--color", tc.value, "--quiet"), &bytes.Buffer{})
-			if err != nil {
-				t.Fatalf("parseRunFlags: %v", err)
-			}
+			testutil.Require(t, err, "parseRunFlags")
 			if cfg.Color != tc.value || !cfg.Quiet {
 				t.Errorf("presentation flags = color %q, quiet %v; want %q, true", cfg.Color, cfg.Quiet, tc.value)
 			}
@@ -143,9 +134,7 @@ func TestRunPresentationFlags(t *testing.T) {
 func TestRendererOptionsSoakBudget(t *testing.T) {
 	t.Run("soak mode carries the soak duration", func(t *testing.T) {
 		cfg, err := parseRunFlags(baseRunArgs("--mode", "soak", "--soak-duration", "2h"), &bytes.Buffer{})
-		if err != nil {
-			t.Fatalf("parseRunFlags: %v", err)
-		}
+		testutil.Require(t, err, "parseRunFlags")
 		if got := rendererOptions(cfg).SoakBudget; got != 2*time.Hour {
 			t.Errorf("soak SoakBudget = %v, want 2h", got)
 		}
@@ -154,9 +143,7 @@ func TestRendererOptionsSoakBudget(t *testing.T) {
 	for _, mode := range []string{"quick", "standard"} {
 		t.Run(mode+" mode leaves the budget zero", func(t *testing.T) {
 			cfg, err := parseRunFlags(baseRunArgs("--mode", mode), &bytes.Buffer{})
-			if err != nil {
-				t.Fatalf("parseRunFlags: %v", err)
-			}
+			testutil.Require(t, err, "parseRunFlags")
 			if got := rendererOptions(cfg).SoakBudget; got != 0 {
 				t.Errorf("%s SoakBudget = %v, want 0", mode, got)
 			}

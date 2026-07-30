@@ -11,6 +11,7 @@ import (
 	"cablecheck/internal/model"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // newTestOps wires an Ops handler over one FakeRunner with a sysfs root.
@@ -222,9 +223,7 @@ func TestDecodeOpResult(t *testing.T) {
 	}
 	for _, tc := range cases {
 		raw, err := json.Marshal(tc.payload)
-		if err != nil {
-			t.Fatalf("%s: marshal: %v", tc.op, err)
-		}
+		testutil.Require(t, err, "%s: marshal", tc.op)
 		got, err := DecodeOpResult(tc.op, raw)
 		if err != nil {
 			t.Errorf("%s: decode: %v", tc.op, err)
@@ -247,9 +246,7 @@ func TestDecodeOpResult(t *testing.T) {
 func TestDecodeLegacyTCPResultLeavesCollapseAnalysisUnavailable(t *testing.T) {
 	raw := json.RawMessage(`{"tcp":{"direction":"pc2_to_pc1","intervalResults":[{"startSec":0,"endSec":1,"bytes":1,"bitsPerSecond":100}]}}`)
 	got, err := DecodeOpResult(OpIperfClientRun, raw)
-	if err != nil {
-		t.Fatalf("DecodeOpResult: %v", err)
-	}
+	testutil.Require(t, err, "DecodeOpResult")
 	result := got.(*TCPRunResult)
 	if result.TCP.Collapses != nil {
 		t.Errorf("legacy Collapses = %+v, want nil unavailable analysis", result.TCP.Collapses)

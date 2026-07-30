@@ -91,22 +91,16 @@ func TestFrameRoundTrip(t *testing.T) {
 	hello, err := protocol.NewEnvelope(protocol.TypeHello, "", "pc2-00000001", protocol.Hello{
 		Token: "tok", Role: "pc2", CablecheckVersion: "1.0.0", LocalIP: "192.168.1.2", PeerIP: "192.168.1.1",
 	})
-	if err != nil {
-		t.Fatalf("NewEnvelope(hello): %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope(hello)")
 	ack, err := protocol.NewEnvelope(protocol.TypeHelloAck, "ct-x", "pc1-00000001", protocol.HelloAck{
 		TestID: "ct-x", CablecheckVersion: "1.0.0",
 	})
-	if err != nil {
-		t.Fatalf("NewEnvelope(hello_ack): %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope(hello_ack)")
 	ack.InReplyTo = "pc2-00000001"
 	hb, err := protocol.NewEnvelope(protocol.TypeHeartbeat, "ct-x", "pc1-00000002", protocol.Heartbeat{
 		Seq: 7, State: "testing", ActiveOp: "ping_run",
 	})
-	if err != nil {
-		t.Fatalf("NewEnvelope(heartbeat): %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope(heartbeat)")
 	want := []*protocol.Envelope{hello, ack, hb}
 
 	done := make(chan struct{})
@@ -123,9 +117,7 @@ func TestFrameRoundTrip(t *testing.T) {
 	got := make([]*protocol.Envelope, 0, len(want))
 	for i := range want {
 		env, err := b.ReadEnvelope()
-		if err != nil {
-			t.Fatalf("ReadEnvelope #%d: %v", i, err)
-		}
+		testutil.Require(t, err, "ReadEnvelope #%d", i)
 		got = append(got, env)
 	}
 	testutil.WaitFor(t, done, "round-trip writer goroutine")
@@ -142,16 +134,12 @@ func TestFrameRoundTrip(t *testing.T) {
 	}
 
 	h, err := protocol.DecodePayload[protocol.Hello](got[0])
-	if err != nil {
-		t.Fatalf("DecodePayload[Hello]: %v", err)
-	}
+	testutil.Require(t, err, "DecodePayload[Hello]")
 	if h.Token != "tok" || h.Role != "pc2" || h.PeerIP != "192.168.1.1" {
 		t.Errorf("hello payload = %+v", h)
 	}
 	beat, err := protocol.DecodePayload[protocol.Heartbeat](got[2])
-	if err != nil {
-		t.Fatalf("DecodePayload[Heartbeat]: %v", err)
-	}
+	testutil.Require(t, err, "DecodePayload[Heartbeat]")
 	if beat.Seq != 7 || beat.State != "testing" || beat.ActiveOp != "ping_run" {
 		t.Errorf("heartbeat payload = %+v", beat)
 	}
@@ -204,13 +192,9 @@ func TestFramePartialReads(t *testing.T) {
 
 		for i := 1; i <= frames; i++ {
 			env, err := reader.ReadEnvelope()
-			if err != nil {
-				t.Fatalf("ReadEnvelope #%d over dribbling conn: %v", i, err)
-			}
+			testutil.Require(t, err, "ReadEnvelope #%d over dribbling conn", i)
 			beat, err := protocol.DecodePayload[protocol.Heartbeat](env)
-			if err != nil {
-				t.Fatalf("DecodePayload #%d: %v", i, err)
-			}
+			testutil.Require(t, err, "DecodePayload #%d", i)
 			if beat.Seq != uint64(i) {
 				t.Errorf("frame #%d seq = %d, want %d", i, beat.Seq, i)
 			}
@@ -227,13 +211,9 @@ func TestFramePartialReads(t *testing.T) {
 		})
 
 		env, err := protocol.NewEnvelope(protocol.TypeReady, "ct-x", "pc2-00000002", protocol.Ready{NonInteractive: true})
-		if err != nil {
-			t.Fatalf("NewEnvelope: %v", err)
-		}
+		testutil.Require(t, err, "NewEnvelope")
 		body, err := json.Marshal(env)
-		if err != nil {
-			t.Fatalf("marshal envelope: %v", err)
-		}
+		testutil.Require(t, err, "marshal envelope")
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -251,9 +231,7 @@ func TestFramePartialReads(t *testing.T) {
 		}()
 
 		got, err := reader.ReadEnvelope()
-		if err != nil {
-			t.Fatalf("ReadEnvelope with header/body split: %v", err)
-		}
+		testutil.Require(t, err, "ReadEnvelope with header/body split")
 		if got.Type != protocol.TypeReady || got.MessageID != "pc2-00000002" {
 			t.Errorf("envelope = %+v", got)
 		}
@@ -288,9 +266,7 @@ func TestFrameMaxSize(t *testing.T) {
 		}()
 
 		env, err := reader.ReadEnvelope()
-		if err != nil {
-			t.Fatalf("ReadEnvelope on exactly-MaxFrameSize frame: %v", err)
-		}
+		testutil.Require(t, err, "ReadEnvelope on exactly-MaxFrameSize frame")
 		if env.Type != protocol.TypeHeartbeat || env.MessageID != "pc1-00000001" {
 			t.Errorf("envelope = %+v", env)
 		}
@@ -349,9 +325,7 @@ func TestFrameMaxSize(t *testing.T) {
 		env, err := protocol.NewEnvelope(protocol.TypeWarning, "ct-x", "pc1-00000001", struct {
 			Pad string `json:"pad"`
 		}{Pad: strings.Repeat("x", protocol.MaxFrameSize)})
-		if err != nil {
-			t.Fatalf("NewEnvelope: %v", err)
-		}
+		testutil.Require(t, err, "NewEnvelope")
 		// Nobody reads p2: a compliant WriteEnvelope returns a FrameError
 		// without touching the wire, so this must not block.
 		err = conn.WriteEnvelope(env)
@@ -571,13 +545,9 @@ func TestWriteConcurrency(t *testing.T) {
 	counts := map[string]int{}
 	for i := 0; i < len(roles)*perWriter; i++ {
 		env, err := b.ReadEnvelope()
-		if err != nil {
-			t.Fatalf("ReadEnvelope #%d: %v", i, err)
-		}
+		testutil.Require(t, err, "ReadEnvelope #%d", i)
 		beat, err := protocol.DecodePayload[protocol.Heartbeat](env)
-		if err != nil {
-			t.Fatalf("frame #%d damaged (interleaved writes?): %v", i, err)
-		}
+		testutil.Require(t, err, "frame #%d damaged (interleaved writes?)", i)
 		role, _, ok := strings.Cut(env.MessageID, "-")
 		if !ok || (role != "pc1" && role != "pc2") {
 			t.Fatalf("frame #%d messageId = %q", i, env.MessageID)

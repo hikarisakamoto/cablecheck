@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/testutil"
 )
 
 // validRaw returns a RawRunFlags baseline that passes every validation rule,
@@ -178,9 +179,7 @@ func TestValidateIPs(t *testing.T) {
 		raw.LocalIP = ""
 		raw.Interface = "enp3s0"
 		cfg, err := Resolve(raw, nil)
-		if err != nil {
-			t.Fatalf("Resolve with --interface and no --local-ip: %v", err)
-		}
+		testutil.Require(t, err, "Resolve with --interface and no --local-ip")
 		if cfg.LocalIP.IsValid() {
 			t.Errorf("LocalIP = %v, want the zero addr (inferred at preflight)", cfg.LocalIP)
 		}
@@ -775,9 +774,7 @@ func TestOutputPathValidation(t *testing.T) {
 			t.Fatalf("Resolve() error = %v, want nil", err)
 		}
 		want, err := filepath.Abs(".")
-		if err != nil {
-			t.Fatalf("filepath.Abs: %v", err)
-		}
+		testutil.Require(t, err, "filepath.Abs")
 		if cfg.OutputDir != want {
 			t.Errorf("OutputDir = %q, want %q", cfg.OutputDir, want)
 		}

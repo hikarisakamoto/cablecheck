@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"cablecheck/internal/testutil"
 )
 
 // TestRegeneratePure pins the property that makes `cablecheck report` (offline
@@ -33,13 +35,9 @@ func TestRegeneratePure(t *testing.T) {
 	}
 
 	js1, err := RenderJSON(r)
-	if err != nil {
-		t.Fatalf("RenderJSON: %v", err)
-	}
+	testutil.Require(t, err, "RenderJSON")
 	js2, err := RenderJSON(r)
-	if err != nil {
-		t.Fatalf("RenderJSON (second call): %v", err)
-	}
+	testutil.Require(t, err, "RenderJSON (second call)")
 	if !bytes.Equal(js1, js2) {
 		t.Errorf("RenderJSON is not pure: two calls on the same report differ")
 	}
@@ -52,9 +50,7 @@ func TestReportingDependencyPurity(t *testing.T) {
 	cmd := exec.Command("go", "list", "-deps", "./internal/reporting")
 	cmd.Dir = filepath.Join("..", "..")
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("go list -deps: %v", err)
-	}
+	testutil.Require(t, err, "go list -deps")
 	allowed := map[string]bool{
 		"cablecheck/internal/model":     true,
 		"cablecheck/internal/reporting": true,

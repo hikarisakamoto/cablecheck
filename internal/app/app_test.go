@@ -29,16 +29,12 @@ func minimalConfig(role config.Role, controlPort uint16) *config.RunConfig {
 func TestWaitAfterFailedStart(t *testing.T) {
 	defer testutil.LeakCheck(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("occupy port: %v", err)
-	}
+	testutil.Require(t, err, "occupy port")
 	defer ln.Close()
 	port := uint16(ln.Addr().(*net.TCPAddr).Port)
 
 	a, err := New(minimalConfig(config.RolePC1, port), Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	if err := a.Start(context.Background()); err == nil {
 		t.Fatalf("Start succeeded on an occupied port")
 	}
@@ -65,9 +61,7 @@ func TestWaitAfterFailedStart(t *testing.T) {
 func TestWaitBeforeStart(t *testing.T) {
 	defer testutil.LeakCheck(t)
 	a, err := New(minimalConfig(config.RolePC1, 0), Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	done := make(chan struct{})
 	var code ExitCode
 	var werr error

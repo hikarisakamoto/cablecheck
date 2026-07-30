@@ -39,9 +39,7 @@ func TestReportTransferSeam(t *testing.T) {
 		})
 		ackEnv := h.await(protocol.TypeReportAck)
 		ack, err := protocol.DecodePayload[protocol.ReportAck](ackEnv)
-		if err != nil {
-			t.Fatalf("decode report_ack: %v", err)
-		}
+		testutil.Require(t, err, "decode report_ack")
 		if !ack.Declined || ack.OK {
 			t.Errorf("report_ack = %+v, want a manifest-level decline", ack)
 		}
@@ -154,9 +152,7 @@ func TestDeclinedManifestChunksDoNotAbort(t *testing.T) {
 	})
 	ackEnv := h.await(protocol.TypeReportAck)
 	ack, err := protocol.DecodePayload[protocol.ReportAck](ackEnv)
-	if err != nil {
-		t.Fatalf("decode report_ack: %v", err)
-	}
+	testutil.Require(t, err, "decode report_ack")
 	if !ack.Declined {
 		t.Fatalf("report_ack = %+v, want a manifest-level decline", ack)
 	}
@@ -212,9 +208,7 @@ func TestTransferRouteFullBufferDoesNotBlock(t *testing.T) {
 		env, err := protocol.NewEnvelope(protocol.TypeReportChunk, s.testID, s.ids.Next(), protocol.ReportChunk{
 			Name: "report.json", Seq: seq,
 		})
-		if err != nil {
-			t.Fatalf("NewEnvelope: %v", err)
-		}
+		testutil.Require(t, err, "NewEnvelope")
 		return env
 	}
 	for i := range transferBufferSize {
@@ -336,9 +330,7 @@ func TestCoordinatorAuthThreeStrikes(t *testing.T) {
 
 	for i := range 3 {
 		nc, err := tr.Dial(ctx, cfg1.PeerIP, "192.168.1.1:8443")
-		if err != nil {
-			t.Fatalf("dial %d: %v", i, err)
-		}
+		testutil.Require(t, err, "dial %d", i)
 		conn := protocol.NewConn(nc)
 		hello := mustEnvelope(t, protocol.TypeHello, "", "pc2-00000001", protocol.Hello{
 			Token: "wrong-token", Role: "pc2", LocalIP: "192.168.1.2", PeerIP: "192.168.1.1",
@@ -347,16 +339,12 @@ func TestCoordinatorAuthThreeStrikes(t *testing.T) {
 			t.Fatalf("attempt %d: write hello: %v", i, err)
 		}
 		reply, err := conn.ReadEnvelope()
-		if err != nil {
-			t.Fatalf("attempt %d: read reply: %v", i, err)
-		}
+		testutil.Require(t, err, "attempt %d: read reply", i)
 		if reply.Type != protocol.TypeAbort {
 			t.Fatalf("attempt %d: reply = %s, want abort", i, reply.Type)
 		}
 		ab, err := protocol.DecodePayload[protocol.Abort](reply)
-		if err != nil {
-			t.Fatalf("attempt %d: decode abort: %v", i, err)
-		}
+		testutil.Require(t, err, "attempt %d: decode abort", i)
 		if ab.Reason != abortAuthFailed || ab.Detail != "" {
 			t.Errorf("attempt %d: abort = %+v, want bare auth_failed", i, ab)
 		}

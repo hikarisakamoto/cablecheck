@@ -13,6 +13,7 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // fixture returns the path of a shared testdata fixture.
@@ -95,9 +96,7 @@ func newPreflightApp(t *testing.T, fr *runnertest.FakeRunner) (*App, *bytes.Buff
 		StateDir: t.TempDir(),
 		Build:    BuildInfo{Version: "test"},
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	a.sysfsRoot = fakeSysfs(t, "e1000e")
 	return a, &out
 }
@@ -110,9 +109,7 @@ func TestPreflightHappyPath(t *testing.T) {
 	a, _ := newPreflightApp(t, fr)
 
 	pf, err := a.preflight(context.Background())
-	if err != nil {
-		t.Fatalf("preflight: %v", err)
-	}
+	testutil.Require(t, err, "preflight")
 	if pf.Iface.Name != "eth0" {
 		t.Errorf("Iface.Name = %q, want eth0", pf.Iface.Name)
 	}

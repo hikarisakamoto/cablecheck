@@ -9,6 +9,7 @@
 package evaluate
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -529,7 +530,7 @@ func retransRate(tr model.TCPResult) (float64, bool) {
 		bytes += float64(iv.Bytes)
 	}
 	if bytes == 0 {
-		if secs := tr.Duration.Std().Seconds(); secs > 0 {
+		if secs := time.Duration(tr.Duration).Seconds(); secs > 0 {
 			bytes = tr.SenderBitsPerSecond * secs / 8
 		}
 	}
@@ -618,11 +619,7 @@ func worstOf(values []float64) float64 {
 func sortedValues(values []float64) []float64 {
 	sorted := make([]float64, len(values))
 	copy(sorted, values)
-	for i := 1; i < len(sorted); i++ { // insertion sort: n is tiny
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
+	slices.Sort(sorted)
 	return sorted
 }
 

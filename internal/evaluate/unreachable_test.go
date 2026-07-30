@@ -8,15 +8,6 @@ import (
 	"cablecheck/internal/model"
 )
 
-func recsContain(res Result, sub string) bool {
-	for _, r := range res.Recommendations {
-		if strings.Contains(r, sub) {
-			return true
-		}
-	}
-	return false
-}
-
 // TestRuleLIM05 pins the data-port-unreachable limitation marker.
 func TestRuleLIM05(t *testing.T) {
 	rule := ruleByID(t, "LIM-05")
@@ -99,7 +90,7 @@ func TestClassifyThroughputUnreachable(t *testing.T) {
 		if res.Score != nil {
 			t.Errorf("score = %v, want nil for INCONCLUSIVE", *res.Score)
 		}
-		if !recsContain(res, "data port") {
+		if !slices.ContainsFunc(res.Recommendations, func(r string) bool { return strings.Contains(r, "data port") }) {
 			t.Errorf("recommendations = %v, want the firewall/data-port hint", res.Recommendations)
 		}
 	})

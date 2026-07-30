@@ -23,9 +23,7 @@ const deadPID = 1 << 30
 func writeJSON(t *testing.T, path string, v any) {
 	t.Helper()
 	data, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	testutil.Require(t, err, "marshal")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
@@ -40,9 +38,7 @@ func TestRegistryOwnershipVerification(t *testing.T) {
 	}
 
 	reg, err := NewRegistry("t-123", clock.Real{})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	testutil.Require(t, err, "NewRegistry")
 	wantDir := filepath.Join(base, "cablecheck", "t-123")
 	if reg.StateDir() != wantDir {
 		t.Errorf("StateDir() = %q, want %q", reg.StateDir(), wantDir)
@@ -54,9 +50,7 @@ func TestRegistryOwnershipVerification(t *testing.T) {
 
 	self := os.Getpid()
 	info, err := NewProcessInfo(self, "self-label", "t-123")
-	if err != nil {
-		t.Fatalf("NewProcessInfo(self): %v", err)
-	}
+	testutil.Require(t, err, "NewProcessInfo(self)")
 	if info.PID != self {
 		t.Errorf("PID = %d, want %d", info.PID, self)
 	}
@@ -71,14 +65,10 @@ func TestRegistryOwnershipVerification(t *testing.T) {
 	}
 
 	unregister, err := reg.Register(info)
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	testutil.Require(t, err, "Register")
 	pidfile := filepath.Join(wantDir, fmt.Sprintf("%d.json", self))
 	data, err := os.ReadFile(pidfile)
-	if err != nil {
-		t.Fatalf("pidfile not written: %v", err)
-	}
+	testutil.Require(t, err, "pidfile not written")
 	var fields map[string]any
 	if err := json.Unmarshal(data, &fields); err != nil {
 		t.Fatalf("pidfile is not JSON: %v", err)
@@ -141,9 +131,7 @@ func TestRegistryOwnershipVerification(t *testing.T) {
 	}
 
 	stale, warns, err := ScanStale(filepath.Join(base, "cablecheck"))
-	if err != nil {
-		t.Fatalf("ScanStale: %v", err)
-	}
+	testutil.Require(t, err, "ScanStale")
 	if len(warns) != 0 {
 		t.Errorf("ScanStale warnings = %v, want none", warns)
 	}
@@ -264,9 +252,7 @@ func TestStateDirModeRepairedWhenOwnedByUs(t *testing.T) {
 	}
 	for _, p := range []string{base, dir} {
 		fi, err := os.Lstat(p)
-		if err != nil {
-			t.Fatalf("lstat %s: %v", p, err)
-		}
+		testutil.Require(t, err, "lstat %s", p)
 		if fi.Mode().Perm() != 0o700 {
 			t.Errorf("mode of %s = %#o after NewRegistry, want 0700", p, fi.Mode().Perm())
 		}
@@ -287,9 +273,7 @@ func TestScanStaleSkipsUntrustedDirs(t *testing.T) {
 		// through the symlink.
 		target := t.TempDir()
 		victim, err := NewProcessInfo(self, "victim", "t-planted")
-		if err != nil {
-			t.Fatalf("NewProcessInfo: %v", err)
-		}
+		testutil.Require(t, err, "NewProcessInfo")
 		pidfile := filepath.Join(target, fmt.Sprintf("%d.json", self))
 		writeJSON(t, pidfile, victim)
 		if err := os.Symlink(target, filepath.Join(root, "t-planted")); err != nil {
@@ -297,9 +281,7 @@ func TestScanStaleSkipsUntrustedDirs(t *testing.T) {
 		}
 
 		stale, warns, err := ScanStale(root)
-		if err != nil {
-			t.Fatalf("ScanStale: %v", err)
-		}
+		testutil.Require(t, err, "ScanStale")
 		if len(stale) != 0 {
 			t.Errorf("ScanStale = %+v, want empty (planted pidfiles must never be reported)", stale)
 		}
@@ -319,17 +301,13 @@ func TestScanStaleSkipsUntrustedDirs(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 		victim, err := NewProcessInfo(self, "victim", "t-victim")
-		if err != nil {
-			t.Fatalf("NewProcessInfo: %v", err)
-		}
+		testutil.Require(t, err, "NewProcessInfo")
 		pidfile := filepath.Join(dir, fmt.Sprintf("%d.json", self))
 		writeJSON(t, pidfile, victim)
 		fakeEUID(t, os.Geteuid()+1) // everything now looks foreign-owned
 
 		stale, warns, err := ScanStale(root)
-		if err != nil {
-			t.Fatalf("ScanStale: %v", err)
-		}
+		testutil.Require(t, err, "ScanStale")
 		if len(stale) != 0 {
 			t.Errorf("ScanStale = %+v, want empty (foreign-owned state must never be trusted)", stale)
 		}
@@ -357,19 +335,13 @@ func TestSessionMarkerRepairedOnReuse(t *testing.T) {
 	writeJSON(t, marker, staleMarker)
 
 	reg, err := NewRegistry("t-reuse", clock.Real{})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	testutil.Require(t, err, "NewRegistry")
 	want, err := NewProcessInfo(os.Getpid(), "cablecheck-session", "t-reuse")
-	if err != nil {
-		t.Fatalf("NewProcessInfo: %v", err)
-	}
+	testutil.Require(t, err, "NewProcessInfo")
 	readMarker := func() ProcessInfo {
 		t.Helper()
 		data, err := os.ReadFile(marker)
-		if err != nil {
-			t.Fatalf("read marker: %v", err)
-		}
+		testutil.Require(t, err, "read marker")
 		var got ProcessInfo
 		if err := json.Unmarshal(data, &got); err != nil {
 			t.Fatalf("unmarshal marker: %v", err)
@@ -384,13 +356,9 @@ func TestSessionMarkerRepairedOnReuse(t *testing.T) {
 	// clobbered mid-session (e.g. by a same-testID session that since died).
 	writeJSON(t, marker, staleMarker)
 	info, err := NewProcessInfo(os.Getpid(), "self", "t-reuse")
-	if err != nil {
-		t.Fatalf("NewProcessInfo: %v", err)
-	}
+	testutil.Require(t, err, "NewProcessInfo")
 	unregister, err := reg.Register(info)
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	testutil.Require(t, err, "Register")
 	defer unregister()
 	if got := readMarker(); got != want {
 		t.Errorf("marker after Register = %+v, want this process's identity %+v", got, want)
@@ -411,9 +379,7 @@ func TestScanStaleDeadSessionCleanup(t *testing.T) {
 	writeJSON(t, filepath.Join(goneDir, fmt.Sprintf("%d.json", deadPID)), deadProc)
 
 	stale, warns, err := ScanStale(root)
-	if err != nil {
-		t.Fatalf("ScanStale: %v", err)
-	}
+	testutil.Require(t, err, "ScanStale")
 	if len(warns) != 0 {
 		t.Errorf("ScanStale warnings = %v, want none", warns)
 	}
@@ -428,9 +394,7 @@ func TestScanStaleDeadSessionCleanup(t *testing.T) {
 func TestRegisterSurvivesPrunedStateDir(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	reg, err := NewRegistry("t-pruned", clock.Real{})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	testutil.Require(t, err, "NewRegistry")
 	// Simulate a sibling session's ScanStale pruning the directory in the
 	// window between NewRegistry and Register — the race the re-create
 	// defends against.
@@ -438,13 +402,9 @@ func TestRegisterSurvivesPrunedStateDir(t *testing.T) {
 		t.Fatalf("remove state dir: %v", err)
 	}
 	info, err := NewProcessInfo(os.Getpid(), "self", "t-pruned")
-	if err != nil {
-		t.Fatalf("NewProcessInfo: %v", err)
-	}
+	testutil.Require(t, err, "NewProcessInfo")
 	unregister, err := reg.Register(info)
-	if err != nil {
-		t.Fatalf("Register after prune: %v", err)
-	}
+	testutil.Require(t, err, "Register after prune")
 	if _, err := os.Stat(pidfilePath(reg.StateDir(), info.PID)); err != nil {
 		t.Errorf("pidfile not written after prune: %v", err)
 	}
@@ -460,17 +420,11 @@ func TestRegistryKillAll(t *testing.T) {
 
 	r := newTestRunner()
 	p, err := r.Start(t.Context(), helperSpec(t, "sleep-forever"))
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	reg, err := NewRegistry("kill-test", clock.Real{})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	testutil.Require(t, err, "NewRegistry")
 	info, err := NewProcessInfo(p.PID(), "sleeper", "kill-test")
-	if err != nil {
-		t.Fatalf("NewProcessInfo: %v", err)
-	}
+	testutil.Require(t, err, "NewProcessInfo")
 	if _, err := reg.Register(info); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -479,9 +433,7 @@ func TestRegistryKillAll(t *testing.T) {
 		t.Fatalf("KillAll errors: %v", errs)
 	}
 	res, err := p.Wait(t.Context())
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
+	testutil.Require(t, err, "Wait")
 	if res.Signal != "SIGTERM" {
 		t.Errorf("Signal = %q, want SIGTERM (verified group terminate)", res.Signal)
 	}
@@ -500,13 +452,9 @@ func TestRegistryKillAllEscalatesToSIGKILL(t *testing.T) {
 		p := startHelperReady(t, r, t.Context(), helperSpec(t, "ignore-sigterm"), "ready\n")
 		fc := clocktest.New(time.Unix(1_700_000_000, 0))
 		reg, err := NewRegistry("kill-esc", fc)
-		if err != nil {
-			t.Fatalf("NewRegistry: %v", err)
-		}
+		testutil.Require(t, err, "NewRegistry")
 		info, err := NewProcessInfo(p.PID(), "trapper", "kill-esc")
-		if err != nil {
-			t.Fatalf("NewProcessInfo: %v", err)
-		}
+		testutil.Require(t, err, "NewProcessInfo")
 		if _, err := reg.Register(info); err != nil {
 			t.Fatalf("Register: %v", err)
 		}
@@ -521,9 +469,7 @@ func TestRegistryKillAllEscalatesToSIGKILL(t *testing.T) {
 			t.Fatalf("KillAll errors: %v", errs)
 		}
 		res, err := p.Wait(t.Context())
-		if err != nil {
-			t.Fatalf("Wait: %v", err)
-		}
+		testutil.Require(t, err, "Wait")
 		if res.Signal != "SIGKILL" {
 			t.Errorf("Signal = %q, want SIGKILL (survivor of the ignored SIGTERM must be escalated)", res.Signal)
 		}
@@ -536,13 +482,9 @@ func TestRegistryKillAllEscalatesToSIGKILL(t *testing.T) {
 		p := startHelperReady(t, r, t.Context(), helperSpec(t, "ignore-sigterm"), "ready\n")
 		fc := clocktest.New(time.Unix(1_700_000_000, 0))
 		reg, err := NewRegistry("kill-poll", fc)
-		if err != nil {
-			t.Fatalf("NewRegistry: %v", err)
-		}
+		testutil.Require(t, err, "NewRegistry")
 		info, err := NewProcessInfo(p.PID(), "trapper", "kill-poll")
-		if err != nil {
-			t.Fatalf("NewProcessInfo: %v", err)
-		}
+		testutil.Require(t, err, "NewProcessInfo")
 		if _, err := reg.Register(info); err != nil {
 			t.Fatalf("Register: %v", err)
 		}

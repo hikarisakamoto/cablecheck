@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/testutil"
 )
 
 const pingHeader = "PING 10.0.0.2 (10.0.0.2) 56(84) bytes of data.\n"
@@ -18,9 +19,7 @@ func near(got, want, tol float64) bool {
 func TestPingPerPacket(t *testing.T) {
 	t.Run("quick_500_loss_dup", func(t *testing.T) {
 		res, err := ParsePing(fixture(t, "ping", "quick_500_loss_dup.txt"), nil, 1)
-		if err != nil {
-			t.Fatalf("exit 1 with a parsed summary must be a valid result, got error: %v", err)
-		}
+		testutil.Require(t, err, "exit 1 with a parsed summary must be a valid result, got error")
 		if res.Target != "10.0.0.2" {
 			t.Errorf("Target = %q, want 10.0.0.2", res.Target)
 		}
@@ -73,9 +72,7 @@ func TestPingPerPacket(t *testing.T) {
 
 	t.Run("quick_clean_100", func(t *testing.T) {
 		res, err := ParsePing(fixture(t, "ping", "quick_clean_100.txt"), nil, 0)
-		if err != nil {
-			t.Fatalf("ParsePing: %v", err)
-		}
+		testutil.Require(t, err, "ParsePing")
 		if res.Transmitted != 100 || res.Received != 100 {
 			t.Errorf("transmitted/received = %d/%d, want 100/100", res.Transmitted, res.Received)
 		}
@@ -110,9 +107,7 @@ func TestPingPerPacket(t *testing.T) {
 
 	t.Run("unreachable_errors_summary", func(t *testing.T) {
 		res, err := ParsePing(fixture(t, "ping", "unreachable.stdout"), nil, 1)
-		if err != nil {
-			t.Fatalf("exit 1 with a parsed summary must be a valid result, got error: %v", err)
-		}
+		testutil.Require(t, err, "exit 1 with a parsed summary must be a valid result, got error")
 		if res.Transmitted != 20 || res.Received != 0 {
 			t.Errorf("transmitted/received = %d/%d, want 20/0", res.Transmitted, res.Received)
 		}
@@ -197,9 +192,7 @@ func TestPingSummaryDupsReconciled(t *testing.T) {
 		"5 packets transmitted, 3 received, +3 duplicates, 40% packet loss, time 80ms\n" +
 		"rtt min/avg/max/mdev = 0.250/0.254/0.260/0.004 ms\n")
 	res, err := ParsePing(stdout, nil, 1)
-	if err != nil {
-		t.Fatalf("ParsePing: %v", err)
-	}
+	testutil.Require(t, err, "ParsePing")
 	if res.Duplicates != 3 {
 		t.Errorf("Duplicates = %d, want 3 — the summary count wins over truncated reply lines", res.Duplicates)
 	}

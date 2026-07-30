@@ -388,7 +388,7 @@ func ParseIperf3(out []byte) (Iperf3Result, error) {
 				Lost:        s.LostPackets,
 				Total:       s.Packets,
 				LostPercent: s.LostPercent,
-				OutOfOrder:  copyI64(s.OutOfOrder),
+				OutOfOrder:  copyPtr(s.OutOfOrder),
 			}
 			if udp.OutOfOrder == nil {
 				udp.OutOfOrder = sumOutOfOrder(w.End.Streams)
@@ -426,7 +426,7 @@ func intervalRow(s *iperfSum) IntervalStat {
 		EndSec:      s.End,
 		Bytes:       s.Bytes,
 		Bps:         s.BitsPerSecond,
-		Retransmits: copyU64(s.Retransmits),
+		Retransmits: copyPtr(s.Retransmits),
 	}
 }
 
@@ -499,7 +499,7 @@ func dirStats(s *iperfSum) *DirStats {
 	return &DirStats{
 		Bytes:         s.Bytes,
 		BitsPerSecond: s.BitsPerSecond,
-		Retransmits:   copyU64(s.Retransmits),
+		Retransmits:   copyPtr(s.Retransmits),
 	}
 }
 
@@ -550,17 +550,8 @@ func addRetransmits(dst **uint64, v uint64) {
 	**dst += v
 }
 
-// copyU64 clones an optional uint64 so results do not alias wire memory.
-func copyU64(p *uint64) *uint64 {
-	if p == nil {
-		return nil
-	}
-	v := *p
-	return &v
-}
-
-// copyI64 clones an optional int64 so results do not alias wire memory.
-func copyI64(p *int64) *int64 {
+// copyPtr clones an optional value so results do not alias wire memory.
+func copyPtr[T any](p *T) *T {
 	if p == nil {
 		return nil
 	}

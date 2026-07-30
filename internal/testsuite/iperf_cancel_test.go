@@ -14,6 +14,7 @@ import (
 
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // TestCancellationMidTCP cancels the context while the TCP client is running:
@@ -33,9 +34,7 @@ func TestCancellationMidTCP(t *testing.T) {
 	peer := netip.MustParseAddr("10.0.0.2")
 
 	h, err := m.StartServer(context.Background(), local, 5201)
-	if err != nil {
-		t.Fatalf("StartServer: %v", err)
-	}
+	testutil.Require(t, err, "StartServer")
 	if err := h.Ready(context.Background()); err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
@@ -73,9 +72,7 @@ func TestStaleProcessPreflight(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 		info, err := runner.NewProcessInfo(os.Getpid(), "iperf3-server", "ct-old")
-		if err != nil {
-			t.Fatalf("NewProcessInfo(self): %v", err)
-		}
+		testutil.Require(t, err, "NewProcessInfo(self)")
 		writePidfile(t, dir, info)
 
 		_, err = PreflightStaleProcesses(base)
@@ -116,9 +113,7 @@ func writePidfile(t *testing.T, dir string, info runner.ProcessInfo) string {
 	t.Helper()
 	path := filepath.Join(dir, strconv.Itoa(info.PID)+".json")
 	data, err := json.Marshal(info)
-	if err != nil {
-		t.Fatalf("marshal pidfile: %v", err)
-	}
+	testutil.Require(t, err, "marshal pidfile")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write pidfile: %v", err)
 	}

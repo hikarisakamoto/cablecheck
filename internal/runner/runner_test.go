@@ -212,9 +212,7 @@ func bigOutput() []byte {
 func helperSpec(t testing.TB, mode string, args ...string) CommandSpec {
 	t.Helper()
 	exe, err := os.Executable()
-	if err != nil {
-		t.Fatalf("os.Executable: %v", err)
-	}
+	testutil.Require(t, err, "os.Executable")
 	return CommandSpec{
 		Name:  exe,
 		Args:  args,
@@ -231,9 +229,7 @@ func newTestRunner() *Exec { return New(clock.Real{}) }
 func startHelperReady(t *testing.T, r *Exec, ctx context.Context, spec CommandSpec, want string) Process {
 	t.Helper()
 	p, err := r.Start(ctx, spec)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	line, err := bufio.NewReader(p.Stdout()).ReadString('\n')
 	if err != nil || line != want {
 		t.Fatalf("live stdout line = %q, %v; want %q", line, err, want)
@@ -267,9 +263,7 @@ func TestRunCapturesOutput(t *testing.T) {
 	testutil.LeakCheck(t)
 	r := newTestRunner()
 	res, err := r.Run(t.Context(), helperSpec(t, "echo-args", "hello", "world"))
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	testutil.Require(t, err, "Run")
 	if got, want := string(res.Stdout), "hello\nworld\n"; got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
 	}
@@ -354,9 +348,7 @@ func TestRunTimeoutVsFailure(t *testing.T) {
 
 	t.Run("non-zero exit is not a timeout", func(t *testing.T) {
 		res, err := r.Run(t.Context(), helperSpec(t, "exit-n", "3"))
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
+		testutil.Require(t, err, "Run")
 		if res.TimedOut {
 			t.Error("TimedOut = true, want false")
 		}
@@ -374,9 +366,7 @@ func TestRunMaxOutputTruncation(t *testing.T) {
 	spec.MaxOutputBytes = 4096
 	spec.TeeStdoutPath = tee
 	res, err := r.Run(t.Context(), spec)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	testutil.Require(t, err, "Run")
 	if !res.StdoutTruncated {
 		t.Error("StdoutTruncated = false, want true")
 	}
@@ -394,9 +384,7 @@ func TestRunMaxOutputTruncation(t *testing.T) {
 		t.Errorf("in-memory stdout length = %d, want <= cap + marker", len(res.Stdout))
 	}
 	got, err := os.ReadFile(tee)
-	if err != nil {
-		t.Fatalf("read tee file: %v", err)
-	}
+	testutil.Require(t, err, "read tee file")
 	if !bytes.Equal(got, full) {
 		t.Errorf("tee file has %d bytes, want the complete %d-byte stream", len(got), len(full))
 	}
@@ -407,9 +395,7 @@ func TestRunNoShellInterpretation(t *testing.T) {
 	r := newTestRunner()
 	args := []string{"a b", "$(reboot)", ";", "&&"}
 	res, err := r.Run(t.Context(), helperSpec(t, "echo-args", args...))
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	testutil.Require(t, err, "Run")
 	want := "a b\n$(reboot)\n;\n&&\n"
 	if got := string(res.Stdout); got != want {
 		t.Errorf("stdout = %q, want args echoed verbatim %q", got, want)
@@ -420,9 +406,7 @@ func TestStartTerminateDeliversSIGTERM(t *testing.T) {
 	testutil.LeakCheck(t)
 	r := newTestRunner()
 	p, err := r.Start(t.Context(), helperSpec(t, "trap-sigterm-exit-42"))
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	if p.PID() <= 0 {
 		t.Errorf("PID = %d, want > 0", p.PID())
 	}
@@ -441,9 +425,7 @@ func TestStartTerminateDeliversSIGTERM(t *testing.T) {
 		t.Fatalf("Terminate: %v", err)
 	}
 	res, err := p.Wait(t.Context())
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
+	testutil.Require(t, err, "Wait")
 	if res.ExitCode != 42 {
 		t.Errorf("ExitCode = %d, want 42 (helper traps SIGTERM)", res.ExitCode)
 	}
@@ -467,9 +449,7 @@ func TestContextCancelKillsChild(t *testing.T) {
 	r := newTestRunner()
 	ctx, cancel := context.WithCancel(t.Context())
 	p, err := r.Start(ctx, helperSpec(t, "sleep-forever"))
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	cancel()
 	// Bounded by t.Context (test deadline), no sleeps: the runner must kill
 	// the child and Wait must return promptly.
@@ -575,9 +555,7 @@ func TestWaitDelayBackstopGrandchildHoldsPipe(t *testing.T) {
 	spec := helperSpec(t, "spawn-pipe-holder")
 	spec.GracePeriod = 50 * time.Millisecond // WaitDelay = GracePeriod + 2s of wall time
 	p, err := r.Start(t.Context(), spec)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	// The grandchild inherits the pipes and never writes; the parent exits 0
 	// immediately. Only the WaitDelay backstop can unblock the reap, and per
 	// the contract exec.ErrWaitDelay is data: the exit status is still valid.
@@ -606,9 +584,7 @@ func TestProcessGroupKill(t *testing.T) {
 	spec := helperSpec(t, "spawn-grandchild-heartbeats", hb)
 	spec.GracePeriod = 500 * time.Millisecond
 	p, err := r.Start(t.Context(), spec)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	line, err := bufio.NewReader(p.Stdout()).ReadString('\n')
 	if err != nil || line != "spawned\n" {
 		t.Fatalf("live stdout line = %q, %v; want \"spawned\\n\"", line, err)
@@ -620,9 +596,7 @@ func TestProcessGroupKill(t *testing.T) {
 		t.Fatalf("Kill: %v", err)
 	}
 	res, err := p.Wait(t.Context())
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
+	testutil.Require(t, err, "Wait")
 	if res.Signal != "SIGKILL" {
 		t.Errorf("Signal = %q, want SIGKILL", res.Signal)
 	}
@@ -709,21 +683,15 @@ func TestStartLiveStdoutBounded(t *testing.T) {
 	spec := helperSpec(t, "emit-big-output")
 	spec.MaxOutputBytes = 4096
 	p, err := r.Start(t.Context(), spec)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	// Deliberately read nothing until the child has exited: the live stream
 	// must be bounded even with no reader draining it — the readiness-scan
 	// consumer stops reading after the banner, and a long-lived child's
 	// subsequent output must not accumulate unboundedly in memory.
 	res, err := p.Wait(t.Context())
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
+	testutil.Require(t, err, "Wait")
 	live, err := io.ReadAll(p.Stdout())
-	if err != nil {
-		t.Fatalf("read live stdout: %v", err)
-	}
+	testutil.Require(t, err, "read live stdout")
 	if int64(len(live)) != spec.MaxOutputBytes {
 		t.Errorf("live stream delivered %d bytes, want exactly the %d-byte cap", len(live), spec.MaxOutputBytes)
 	}
@@ -746,23 +714,17 @@ func TestRawStreamTee(t *testing.T) {
 	spec.TeeStdoutPath = outTee
 	spec.TeeStderrPath = errTee
 	res, err := r.Run(t.Context(), spec)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	testutil.Require(t, err, "Run")
 	if !res.StdoutTruncated {
 		t.Error("StdoutTruncated = false, want true")
 	}
 	gotOut, err := os.ReadFile(outTee)
-	if err != nil {
-		t.Fatalf("read stdout tee: %v", err)
-	}
+	testutil.Require(t, err, "read stdout tee")
 	if full := bigOutput(); !bytes.Equal(gotOut, full) {
 		t.Errorf("stdout tee has %d bytes, want complete %d-byte stream despite in-memory cap", len(gotOut), len(full))
 	}
 	gotErr, err := os.ReadFile(errTee)
-	if err != nil {
-		t.Fatalf("read stderr tee: %v", err)
-	}
+	testutil.Require(t, err, "read stderr tee")
 	if want := "big done\n"; string(gotErr) != want {
 		t.Errorf("stderr tee = %q, want %q", gotErr, want)
 	}

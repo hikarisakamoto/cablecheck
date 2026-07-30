@@ -59,9 +59,7 @@ func TestRPCCorrelation(t *testing.T) {
 
 		req := h.await(protocol.TypeTestRequest)
 		treq, err := protocol.DecodePayload[protocol.TestRequest](req)
-		if err != nil {
-			t.Fatalf("decode test_request: %v", err)
-		}
+		testutil.Require(t, err, "decode test_request")
 		if treq.Op != "ping_run" || treq.TimeoutMs != 2000 {
 			t.Errorf("test_request = op %q timeoutMs %d, want ping_run/2000", treq.Op, treq.TimeoutMs)
 		}
@@ -79,9 +77,7 @@ func TestRPCCorrelation(t *testing.T) {
 			Status: "ok", Result: json.RawMessage(`{"x":1}`),
 		})
 		testutil.WaitFor(t, callDone, "Call never resolved")
-		if callErr != nil {
-			t.Fatalf("Call: %v", callErr)
-		}
+		testutil.Require(t, callErr, "Call")
 		if res == nil || res.Status != "ok" || string(res.Result) != `{"x":1}` {
 			t.Errorf("Call result = %+v, want status ok result {\"x\":1}", res)
 		}
@@ -150,9 +146,7 @@ func TestRPCCorrelation(t *testing.T) {
 
 		ab := h.await(protocol.TypeAbort)
 		abort, err := protocol.DecodePayload[protocol.Abort](ab)
-		if err != nil {
-			t.Fatalf("decode abort: %v", err)
-		}
+		testutil.Require(t, err, "decode abort")
 		if abort.Reason != "request_timeout" || abort.Stage != "ping_run" || abort.Initiator != "pc1" {
 			t.Errorf("abort = %+v, want reason request_timeout, stage ping_run, initiator pc1", abort)
 		}
@@ -204,9 +198,7 @@ func TestRemoteCallerWarn(t *testing.T) {
 
 	w := h.await(protocol.TypeWarning)
 	warn, err := protocol.DecodePayload[protocol.Warning](w)
-	if err != nil {
-		t.Fatalf("decode warning: %v", err)
-	}
+	testutil.Require(t, err, "decode warning")
 	if warn.Code != "mtu_mismatch" || warn.Text != "peer MTU 9000 exceeds local 1500" || warn.Stage != string(StateTesting) {
 		t.Errorf("warning = %+v, want mtu_mismatch text at stage testing", warn)
 	}

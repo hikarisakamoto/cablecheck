@@ -9,6 +9,7 @@ import (
 	"cablecheck/internal/parser"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // reducedSpeedSettings is an ethtool output where both ends advertise
@@ -46,9 +47,7 @@ func TestLinkTestFlags(t *testing.T) {
 		fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact(ifName), Result: res})
 		li := &LinkInspector{R: fr, IfName: ifName}
 		settings, obs, err := li.Inspect(ctx)
-		if err != nil {
-			t.Fatalf("Inspect: %v", err)
-		}
+		testutil.Require(t, err, "Inspect")
 		if settings.Raw == nil {
 			t.Errorf("Inspect returned settings without raw key/value map")
 		}

@@ -48,9 +48,7 @@ func TestShutdownOrder(t *testing.T) {
 		// the abort frame, then the drain channel closes with nothing else.
 		ab := h.await(protocol.TypeAbort)
 		abort, err := protocol.DecodePayload[protocol.Abort](ab)
-		if err != nil {
-			t.Fatalf("decode abort: %v", err)
-		}
+		testutil.Require(t, err, "decode abort")
 		if abort.Reason != "user_interrupt" || abort.Initiator != "pc1" {
 			t.Errorf("abort = %+v, want reason user_interrupt initiator pc1", abort)
 		}
@@ -116,9 +114,7 @@ func TestShutdownOrder(t *testing.T) {
 		}
 		ab := h.await(protocol.TypeAbort)
 		abort, err := protocol.DecodePayload[protocol.Abort](ab)
-		if err != nil {
-			t.Fatalf("decode abort: %v", err)
-		}
+		testutil.Require(t, err, "decode abort")
 		if abort.Reason != "user_interrupt" || abort.Stage != "block" || abort.Initiator != "pc2" {
 			t.Errorf("abort = %+v, want user_interrupt at stage block from pc2", abort)
 		}
@@ -182,9 +178,7 @@ func TestWorkerRejectsOverlappingOps(t *testing.T) {
 		t.Errorf("rejection InReplyTo = %q, want the second request %q", rej.InReplyTo, second)
 	}
 	rejRes, err := protocol.DecodePayload[protocol.TestResult](rej)
-	if err != nil {
-		t.Fatalf("decode rejection: %v", err)
-	}
+	testutil.Require(t, err, "decode rejection")
 	if rejRes.Status != "rejected" {
 		t.Errorf("second request status = %q, want rejected", rejRes.Status)
 	}
@@ -195,9 +189,7 @@ func TestWorkerRejectsOverlappingOps(t *testing.T) {
 		t.Errorf("result InReplyTo = %q, want the first request %q", done.InReplyTo, first)
 	}
 	doneRes, err := protocol.DecodePayload[protocol.TestResult](done)
-	if err != nil {
-		t.Fatalf("decode result: %v", err)
-	}
+	testutil.Require(t, err, "decode result")
 	if doneRes.Status != "ok" || string(doneRes.Result) != `{"ok":1}` {
 		t.Errorf("first op result = %+v, want ok/{\"ok\":1}", doneRes)
 	}
@@ -205,9 +197,7 @@ func TestWorkerRejectsOverlappingOps(t *testing.T) {
 	h.send(protocol.TypeComplete, "", protocol.Complete{Classification: "WARNING", ExitCode: 1})
 	comp := h.await(protocol.TypeComplete)
 	reply, err := protocol.DecodePayload[protocol.Complete](comp)
-	if err != nil {
-		t.Fatalf("decode complete reply: %v", err)
-	}
+	testutil.Require(t, err, "decode complete reply")
 	if reply.Classification != "GOOD" {
 		t.Errorf("complete reply = %+v, want the Config.Complete verdict", reply)
 	}

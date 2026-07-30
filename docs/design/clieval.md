@@ -543,12 +543,11 @@ Bands (clamp after deductions): FAILED ≤25, POOR 26–50, WARNING 51–79, GOO
 // Creates <base>/cablecheck-report-YYYY-MM-DD_HH-MM-SS (0700) and raw/ (0700).
 // Collision: -2, -3 ... -99 (os.Mkdir, not MkdirAll — EEXIST detection must be atomic), then error.
 func NewReportDir(base string, now time.Time) (dir string, err error)
-
-type RawStore struct { /* dir string; mu sync.Mutex; seq int */ }
-func NewRawStore(reportDir string) (*RawStore, error)
-func (s *RawStore) Create(side, tool, purpose, ext string) (*os.File, string, error) // returns file + relative name
-func (s *RawStore) Index() []model.RawFileRef // name, sha256, bytes, description — computed at close
 ```
+
+Raw artifacts are written by the testsuite's stdout tee (`teeRaw`, sequenced
+per directory) and indexed at report assembly by `app.indexRawFiles`, which
+hashes every raw file except the still-open debug log.
 
 Naming: `NN-side-tool-purpose.ext`, where NN is the two-digit creation sequence. Examples: `01-pc1-ethtool-link-before.txt`, `02-pc1-ip-stats-before.json`, `04-pc1-ping-stability.txt`, `06-pc1-iperf3-tcp-pc1-to-pc2.json`, `09-pc1-iperf3-udp-pc2-to-pc1.json`, `12-pc1-cablecheck-monitoring.jsonl`. A command's stderr, when non-empty, goes to `NN-...-stderr.txt` with the same NN. The protocol log has a fixed name outside the NN scheme, `raw/cablecheck-pc1.log`, created before any command runs.
 

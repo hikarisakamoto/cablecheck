@@ -552,7 +552,7 @@ func randomizedFacts(seed uint64) *Facts {
 		if rng.Intn(5) == 0 {
 			d.PingDuplicates = rng.Intn(4)
 			d.PingSpikes = rng.Intn(thresholds.PingSpikesWarningAbove + 4)
-			d.PingMaxGap = timeFromMillis(rng.Intn(1_501))
+			d.PingMaxGap = time.Duration(rng.Intn(1_501)) * time.Millisecond
 		}
 		d.FullSizeAvailable = rng.Intn(5) != 0
 		if d.FullSizeAvailable && rng.Intn(5) == 0 {
@@ -642,8 +642,4 @@ func randomizedFacts(seed uint64) *Facts {
 		f.CableTestPairs = []model.CablePairResult{{Pair: "A", Status: statuses[rng.Intn(len(statuses))]}}
 	}
 	return f
-}
-
-func timeFromMillis(milliseconds int) time.Duration {
-	return time.Duration(milliseconds) * time.Millisecond
 }
