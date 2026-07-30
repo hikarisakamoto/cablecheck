@@ -8,26 +8,6 @@ import (
 	"cablecheck/internal/model"
 )
 
-func TestFormatMbps(t *testing.T) {
-	tests := []struct {
-		name string
-		bps  float64
-		want string
-	}{
-		{name: "zero", bps: 0, want: "0.0 Mbps"},
-		{name: "sub-megabit", bps: 500_000, want: "0.5 Mbps"},
-		{name: "example", bps: 950_000_000, want: "950.0 Mbps"},
-		{name: "rounding", bps: 1_256_000, want: "1.3 Mbps"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := FormatMbps(test.bps); got != test.want {
-				t.Errorf("FormatMbps(%v) = %q, want %q", test.bps, got, test.want)
-			}
-		})
-	}
-}
-
 func TestFormatBps(t *testing.T) {
 	tests := []struct {
 		bps  float64

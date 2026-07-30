@@ -1,10 +1,10 @@
 package reporting
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -466,7 +466,7 @@ func tcpMetricsForDirection(report *model.Report, direction string) directionTCP
 	if incomplete || (expected > 0 && observed < expected) || len(bitrates) == 0 {
 		return directionTCPMetrics{}
 	}
-	sort.Float64s(bitrates)
+	slices.Sort(bitrates)
 	metrics := directionTCPMetrics{
 		throughput: measuredFloat{value: bitrates[(len(bitrates)-1)/2], ok: true},
 	}
@@ -505,20 +505,9 @@ func udpMetricKeys(a, b []model.UDPResult) []udpMetricKey {
 			}
 			return 1
 		}
-		return compareUint64(a.targetBps, b.targetBps)
+		return cmp.Compare(a.targetBps, b.targetBps)
 	})
 	return keys
-}
-
-func compareUint64(a, b uint64) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
-	}
 }
 
 func udpLoss(results []model.UDPResult, key udpMetricKey) measuredFloat {

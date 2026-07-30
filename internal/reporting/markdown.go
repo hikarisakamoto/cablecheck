@@ -350,17 +350,13 @@ func sectionTCP(b *md, r *model.Report, number int, direction, title string) {
 			})
 			continue
 		}
-		retrans := "not reported"
-		if tr.Retransmissions != nil {
-			retrans = fmt.Sprintf("%d", *tr.Retransmissions)
-		}
 		rows = append(rows, []string{
 			fmt.Sprintf("%d", i+1),
 			tr.Duration.String(),
 			fmt.Sprintf("%d", tr.ParallelStreams),
 			fmtBps(tr.SenderBitsPerSecond),
 			fmtBps(tr.ReceiverBitsPerSecond),
-			retrans,
+			optionalUint(tr.Retransmissions),
 			fmtPct(tr.ThroughputVariation * 100),
 			fmtBps(tr.MinimumIntervalBps),
 			fmtBps(tr.MaximumIntervalBps),
@@ -384,15 +380,11 @@ func sectionBidir(b *md, r *model.Report) {
 		{dirLabels[model.DirectionPC1ToPC2], bd.PC1ToPC2},
 		{dirLabels[model.DirectionPC2ToPC1], bd.PC2ToPC1},
 	} {
-		retrans := "not reported"
-		if side.dir.Retransmissions != nil {
-			retrans = fmt.Sprintf("%d", *side.dir.Retransmissions)
-		}
 		rows = append(rows, []string{
 			side.label,
 			fmtBps(side.dir.SenderBitsPerSecond),
 			fmtBps(side.dir.ReceiverBitsPerSecond),
-			retrans,
+			optionalUint(side.dir.Retransmissions),
 		})
 	}
 	b.table([]string{"Direction", "Sender", "Receiver", "Retransmits"}, rows)

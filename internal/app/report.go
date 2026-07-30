@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -236,7 +236,7 @@ func (a *App) assembleReport(pf *preflightInfo, results *testsuite.SessionResult
 		CounterDeltas:       deltas,
 		MonitoringEvents:    mergeMonitoringEvents(results.MonitoringEvents, a.monitoringEvents()),
 		Warnings:            warnings,
-		SkippedTests:        append(a.skippedTests(), results.SkippedTests...),
+		SkippedTests:        append([]model.SkippedTest(nil), results.SkippedTests...),
 		UDPRateAssumed:      results.UDPRateAssumed,
 		Partial:             partial,
 		SoakCyclesCompleted: results.CyclesCompleted,
@@ -266,12 +266,6 @@ func mergeMonitoringEvents(retained, monitored []model.MonitoringEvent) []model.
 		}
 	}
 	return out
-}
-
-// skippedTests returns app-level static skips. Runtime unavailable tests are
-// recorded by their result or the plan's SessionResults.
-func (a *App) skippedTests() []model.SkippedTest {
-	return nil
 }
 
 // peerReportFromCaps converts the handshake capabilities into the peer's
@@ -368,6 +362,6 @@ func indexRawFiles(dir, rawDir string) []model.RawFileRef {
 			Bytes:  n,
 		})
 	}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
+	slices.SortFunc(refs, func(a, b model.RawFileRef) int { return strings.Compare(a.Name, b.Name) })
 	return refs
 }

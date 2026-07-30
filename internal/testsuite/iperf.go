@@ -270,11 +270,12 @@ func (m *IperfManager) RunBidirClient(ctx context.Context, local, peer netip.Add
 	if parsed.Bidir == nil {
 		return partial, fmt.Errorf("testsuite: iperf3 bidir client: output carries no bidirectional streams")
 	}
+	ltp, ptl := parsed.Bidir.LocalToPeer, parsed.Bidir.PeerToLocal
 	out := model.BidirResult{
 		Duration:        model.Duration(dur),
 		ParallelStreams: streams,
-		PC1ToPC2:        bidirDirFromStats(parsed.Bidir.LocalToPeer),
-		PC2ToPC1:        bidirDirFromStats(parsed.Bidir.PeerToLocal),
+		PC1ToPC2:        bidirDirFrom(ltp.BitsPerSecond, ltp.ReceiverBitsPerSecond, ltp.Retransmits),
+		PC2ToPC1:        bidirDirFrom(ptl.BitsPerSecond, ptl.ReceiverBitsPerSecond, ptl.Retransmits),
 	}
 	out.CPUUtilization = cpuUsageFrom(parsed.CPU)
 	return &BidirRunResult{Bidir: out}, nil
@@ -291,22 +292,13 @@ func baseClientArgs(local, peer netip.Addr, port uint16, dur time.Duration) []st
 	}
 }
 
-// bidirDirFromStats maps one stream-derived direction onto the report model.
-func bidirDirFromStats(d parser.DirStats) model.BidirDirection {
+// bidirDirFrom maps one measured direction — stream-derived or a completed
+// one-way TCP phase of the two-phase fallback — onto the report model.
+func bidirDirFrom(sender, receiver float64, retrans *uint64) model.BidirDirection {
 	return model.BidirDirection{
-		SenderBitsPerSecond:   d.BitsPerSecond,
-		ReceiverBitsPerSecond: d.ReceiverBitsPerSecond,
-		Retransmissions:       d.Retransmits,
-	}
-}
-
-// bidirDirFromTCP maps one completed one-way TCP phase of the two-phase
-// fallback onto a bidir direction.
-func bidirDirFromTCP(tr model.TCPResult) model.BidirDirection {
-	return model.BidirDirection{
-		SenderBitsPerSecond:   tr.SenderBitsPerSecond,
-		ReceiverBitsPerSecond: tr.ReceiverBitsPerSecond,
-		Retransmissions:       tr.Retransmissions,
+		SenderBitsPerSecond:   sender,
+		ReceiverBitsPerSecond: receiver,
+		Retransmissions:       retrans,
 	}
 }
 

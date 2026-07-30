@@ -542,7 +542,7 @@ func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, not
 		Warnings:         []string{note},
 	}
 	if localRes != nil {
-		b.PC1ToPC2 = bidirDirFromTCP(localRes.TCP)
+		b.PC1ToPC2 = bidirDirFrom(localRes.TCP.SenderBitsPerSecond, localRes.TCP.ReceiverBitsPerSecond, localRes.TCP.Retransmissions)
 		if localRes.Incomplete {
 			q.Results.Incomplete = true
 		} else {
@@ -552,7 +552,7 @@ func (q *QuickPlan) bidirFallback(ctx context.Context, rc peer.RemoteCaller, not
 		}
 	}
 	if tr, ok := remoteOut.(*TCPRunResult); ok {
-		b.PC2ToPC1 = bidirDirFromTCP(tr.TCP)
+		b.PC2ToPC1 = bidirDirFrom(tr.TCP.SenderBitsPerSecond, tr.TCP.ReceiverBitsPerSecond, tr.TCP.Retransmissions)
 		if tr.Incomplete {
 			q.Results.Incomplete = true
 		}

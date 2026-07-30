@@ -39,15 +39,15 @@ func TestDurationJSON(t *testing.T) {
 			t.Errorf("Unmarshal(%s): %v", tc.in, err)
 			continue
 		}
-		if d.Std() != tc.want {
-			t.Errorf("Unmarshal(%s) = %v, want %v", tc.in, d.Std(), tc.want)
+		if time.Duration(d) != tc.want {
+			t.Errorf("Unmarshal(%s) = %v, want %v", tc.in, time.Duration(d), tc.want)
 		}
 	}
 
 	for _, bad := range []string{`"bogus"`, `"30"`, `true`, `{"text":"30s"}`, `[1]`} {
 		var d Duration
 		if err := json.Unmarshal([]byte(bad), &d); err == nil {
-			t.Errorf("Unmarshal(%s) = %v, want error", bad, d.Std())
+			t.Errorf("Unmarshal(%s) = %v, want error", bad, time.Duration(d))
 		}
 	}
 }

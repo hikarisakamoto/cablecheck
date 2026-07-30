@@ -74,6 +74,8 @@ func (a *App) stopLinkMonitor() {
 // chosen to equal model.MonitoringEvent.Type (snake_case, e.g. "renegotiation",
 // "speed_changed"), which is exactly what evaluate.renegotiations looks for, so
 // the mapping is a direct field copy. It returns nil when no monitor ran.
+// The soak plan calls it after each cycle so completed cycles retain their
+// disconnect/renegotiation events even if a later cycle is interrupted.
 func (a *App) monitoringEvents() []model.MonitoringEvent {
 	a.monitorMu.Lock()
 	m := a.monitor
