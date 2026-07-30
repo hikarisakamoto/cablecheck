@@ -1,10 +1,6 @@
 # CableCheck
 
 <p align="center">
-  <img src="docs/assets/hero.svg" width="100%" alt="CableCheck: evidence, not guesswork, for Ethernet links">
-</p>
-
-<p align="center">
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/hikarisakamoto/cablecheck?logo=go&logoColor=white&label=Go" alt="Go version"></a>
   <a href="https://github.com/hikarisakamoto/cablecheck/actions/workflows/main.yml"><img src="https://github.com/hikarisakamoto/cablecheck/actions/workflows/main.yml/badge.svg" alt="Main branch checks"></a>
   <a href="https://github.com/hikarisakamoto/cablecheck/stargazers"><img src="https://img.shields.io/github/stars/hikarisakamoto/cablecheck?style=flat" alt="GitHub stars"></a>
