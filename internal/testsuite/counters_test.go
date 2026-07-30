@@ -2,7 +2,9 @@ package testsuite
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -252,6 +254,55 @@ func TestCounterNormalization(t *testing.T) {
 		}
 		if _, ok := std["rx_length"]; ok {
 			t.Errorf("rx_length present from a zero ip counter; rtnetlink zeros are ambiguous and must stay absent")
+		}
+	})
+
+	t.Run("AggregateReceiveErrors", func(t *testing.T) {
+		// Realtek exposes no per-cause CRC counter: its hardware receive-error
+		// aggregate is the only corruption evidence the driver reports, so it
+		// must be normalized or the side is silently certified error-free.
+		r8169 := parser.ParseEthtoolStats(readFixture(t, "ethtool", "stats_r8169"))
+		if got, ok := NormalizeCounters(r8169, zeroIP, nil)["rx_errors_total"]; !ok || got != 184 {
+			t.Errorf("r8169 rx_errors_total = %d (present=%v), want 184 from rx_errors", got, ok)
+		}
+		e1000e := parser.ParseEthtoolStats(readFixture(t, "ethtool", "stats_e1000e_crc"))
+		if got, ok := NormalizeCounters(e1000e, zeroIP, nil)["rx_errors_total"]; !ok || got != 1561 {
+			t.Errorf("e1000e rx_errors_total = %d (present=%v), want 1561 from rx_errors", got, ok)
+		}
+		// No rtnetlink fallback on purpose: a nonzero-only fallback would make the
+		// key appear in the final capture but not the initial one the first time an
+		// error occurred, and a key present in only one capture marks the whole
+		// side unreliable, erasing its carrier and CRC evidence with it.
+		ip := model.IPStats64{}
+		ip.RX.Errors = 23
+		if got, ok := NormalizeCounters(nil, ip, nil)["rx_errors_total"]; ok {
+			t.Errorf("rx_errors_total = %d from the ip fallback, want absent: an appearing key poisons the side's delta set", got)
+		}
+	})
+
+	t.Run("KeySetIsStableAcrossCaptures", func(t *testing.T) {
+		// DeltaSet marks a side unreliable when a key is present in only one
+		// capture, which discards that side's carrier and CRC evidence with it. So
+		// the normalized key set must depend on the driver, never on whether a
+		// counter happened to be zero when the run started.
+		for _, driver := range []string{"e1000e", "r8169"} {
+			t.Run(driver, func(t *testing.T) {
+				clean := "stats_" + driver
+				if driver == "e1000e" {
+					clean = "stats_e1000e_clean"
+				}
+				dirty := "stats_" + driver
+				if driver == "e1000e" {
+					dirty = "stats_e1000e_crc"
+				}
+				zeroed := parser.ParseEthtoolStats(readFixture(t, "ethtool", clean))
+				moved := parser.ParseEthtoolStats(readFixture(t, "ethtool", dirty))
+				before := slices.Sorted(maps.Keys(NormalizeCounters(zeroed, zeroIP, nil)))
+				after := slices.Sorted(maps.Keys(NormalizeCounters(moved, zeroIP, nil)))
+				if !slices.Equal(before, after) {
+					t.Errorf("%s key set changed once counters moved:\nbefore %v\nafter  %v", driver, before, after)
+				}
+			})
 		}
 	})
 

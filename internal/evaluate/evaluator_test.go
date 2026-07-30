@@ -16,8 +16,8 @@ func cleanFacts() *Facts {
 		ExpectedSpeed:   1_000_000_000,
 		LinkUpAtEnd:     true,
 	}
-	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true}
-	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true}
+	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
+	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 	for i := range f.Dir {
 		f.Dir[i].TCPAvailable = true
 		f.Dir[i].TCPBitrate = 941_000_000
@@ -253,8 +253,8 @@ func TestEvaluateDeterministic(t *testing.T) {
 	if got := findingIDs(first); !reflect.DeepEqual(got, wantIDs) {
 		t.Errorf("finding order = %v, want %v (fixed Rules() order)", got, wantIDs)
 	}
-	if first.RulesVersion != "1.7.0" {
-		t.Errorf("RulesVersion = %q, want 1.7.0", first.RulesVersion)
+	if first.RulesVersion != "1.8.0" {
+		t.Errorf("RulesVersion = %q, want 1.8.0", first.RulesVersion)
 	}
 	if first.Score == nil {
 		t.Fatalf("score = nil, want a value for class %v", first.Class)

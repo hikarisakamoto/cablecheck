@@ -223,6 +223,10 @@ func comparisonMetrics(baseline, candidate *model.Report) []comparisonMetric {
 		keys []string
 	}{
 		{"CRC/framing errors", []string{"rx_crc", "rx_frame", "rx_align", "rx_symbol"}},
+		// Kept out of the per-cause row on purpose: drivers that report an error
+		// both ways would otherwise be counted twice. On Realtek NICs this is the
+		// only receive-error evidence there is.
+		{"Driver RX-error aggregate", []string{"rx_errors_total"}},
 		{"Frame-size errors", []string{"jabber", "oversize", "undersize", "rx_length"}},
 		{"FIFO overruns", []string{"rx_fifo"}},
 		{"Missed RX errors", []string{"rx_missed"}},
@@ -466,9 +470,12 @@ func tcpMetricsForDirection(report *model.Report, direction string) directionTCP
 	metrics := directionTCPMetrics{
 		throughput: measuredFloat{value: bitrates[(len(bitrates)-1)/2], ok: true},
 	}
+	// Retransmits report the worst trial, matching how ping loss is reduced here
+	// and how the evaluator reads a burst. A median would hide the single-trial
+	// burst that decides the verdict, leaving the table saying SAME while the two
+	// runs classify differently.
 	if !missingRetransmits && len(retransmits) == len(bitrates) {
-		slices.Sort(retransmits)
-		metrics.retransmits = measuredUint{value: retransmits[(len(retransmits)-1)/2], ok: true}
+		metrics.retransmits = measuredUint{value: slices.Max(retransmits), ok: true}
 	}
 	return metrics
 }

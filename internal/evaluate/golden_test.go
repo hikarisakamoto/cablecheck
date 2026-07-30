@@ -38,8 +38,8 @@ func factsHealthyGigabit() *Facts {
 		ExpectedSpeed:   1_000_000_000,
 		LinkUpAtEnd:     true,
 	}
-	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true}
-	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true}
+	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
+	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 	for i := range f.Dir {
 		f.Dir[i] = DirFacts{
 			TCPAvailable:     true,
@@ -61,8 +61,8 @@ func factsReducedSpeed() *Facts {
 		ExpectedSpeed:   1_000_000_000,
 		LinkUpAtEnd:     true,
 	}
-	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true}
-	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true}
+	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
+	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 	for i := range f.Dir {
 		f.Dir[i] = DirFacts{
 			TCPAvailable:     true,
@@ -83,8 +83,8 @@ func factsCRCErrors() *Facts {
 		ExpectedSpeed:   1_000_000_000,
 		LinkUpAtEnd:     true,
 	}
-	f.PC1 = SideFacts{CRCClassErrors: 42, DeltaOK: true, CountersAvailable: true}
-	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true}
+	f.PC1 = SideFacts{CRCClassErrors: 42, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
+	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 	for i := range f.Dir {
 		f.Dir[i] = DirFacts{
 			TCPAvailable:     true,
@@ -107,8 +107,8 @@ func factsHostLimited() *Facts {
 		LinkUpAtEnd:     true,
 		MaxCPUPct:       96,
 	}
-	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true}
-	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true}
+	f.PC1 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
+	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 	for i := range f.Dir {
 		f.Dir[i] = DirFacts{
 			TCPAvailable:     true,
@@ -128,8 +128,8 @@ func factsDisconnected() *Facts {
 		ExpectedSpeed:   1_000_000_000,
 		LinkUpAtEnd:     false,
 	}
-	f.PC1 = SideFacts{CarrierEvents: 4, DeltaOK: true, CountersAvailable: true}
-	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true}
+	f.PC1 = SideFacts{CarrierEvents: 4, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
+	f.PC2 = SideFacts{DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 	return f
 }
 
@@ -214,7 +214,7 @@ func TestRecommendationsDeduped(t *testing.T) {
 	t.Run("shared action collapses to one grounded line", func(t *testing.T) {
 		f := &Facts{LinkUpAtEnd: true}
 		// PHY-02 (crc-class) and PHY-09 (frame-size) both map to recCable.
-		f.PC1 = SideFacts{CRCClassErrors: 20, JabberSizeErrors: 20, DeltaOK: true, CountersAvailable: true}
+		f.PC1 = SideFacts{CRCClassErrors: 20, JabberSizeErrors: 20, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 		res := Evaluate(f)
 		want := recCable + " Evidence from this run: pc1: CRC-class error counters +20 during the test; frame-size error counters +20 across both sides."
 		count := 0
@@ -233,7 +233,7 @@ func TestRecommendationsDeduped(t *testing.T) {
 
 	t.Run("isolation line appended once for poor verdicts", func(t *testing.T) {
 		f := &Facts{LinkUpAtEnd: true}
-		f.PC1 = SideFacts{CRCClassErrors: 20, DeltaOK: true, CountersAvailable: true}
+		f.PC1 = SideFacts{CRCClassErrors: 20, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 		res := Evaluate(f)
 		if res.Class != model.HealthPoor {
 			t.Fatalf("class = %s, want POOR to trigger the isolation line", res.Class)
@@ -265,7 +265,7 @@ func TestRecommendationsDeduped(t *testing.T) {
 		// A rich failure with several distinct rules must still produce a
 		// duplicate-free list.
 		f := &Facts{LinkUpAtEnd: true, HalfDuplex: true}
-		f.PC1 = SideFacts{CRCClassErrors: 50, CarrierEvents: 2, DeltaOK: true, CountersAvailable: true}
+		f.PC1 = SideFacts{CRCClassErrors: 50, CarrierEvents: 2, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 		f.Dir[0] = DirFacts{PingLossPct: 2}
 		res := Evaluate(f)
 		seen := map[string]bool{}

@@ -3,6 +3,7 @@ package evaluate
 import (
 	"math"
 	"math/rand"
+	"slices"
 	"testing"
 	"testing/quick"
 	"time"
@@ -198,6 +199,42 @@ func TestNonCPUHostLimitSuppressesHostSensitivePerformanceDeductions(t *testing.
 			}
 		})
 	}
+}
+
+// TestNegligibleReceiveRingDropsDoNotSilenceThePerformanceScore is the field
+// regression behind a 100/100 verdict on a run that visibly collapsed: two
+// dropped frames out of 18.5 million raised HOST-04, and HOST-04 suppresses
+// every host-sensitive performance deduction.
+func TestNegligibleReceiveRingDropsDoNotSilenceThePerformanceScore(t *testing.T) {
+	thresholds := Default()
+	thresholds.WarningScoreBand = ScoreBand{Min: 0, Max: 100}
+	factsWithDrops := func(missed, frames uint64) *Facts {
+		f := cleanFacts()
+		f.PC2.MissedErrors = missed
+		f.PC2.FramesReceived = frames
+		f.Dir[0].TCPCollapses = 2
+		return f
+	}
+
+	t.Run("negligible drops leave the collapse deduction in place", func(t *testing.T) {
+		res := evaluate(factsWithDrops(2, 18_500_000), thresholds)
+		if slices.Contains(findingIDs(res), "HOST-04") {
+			t.Errorf("findings = %v, want no HOST-04 for 2 drops in 18.5M frames", findingIDs(res))
+		}
+		if res.Score == nil || *res.Score != 90 {
+			t.Errorf("score = %v, want 90 (two collapse intervals cost 10)", res.Score)
+		}
+	})
+
+	t.Run("drops above the rate still gate the deduction", func(t *testing.T) {
+		res := evaluate(factsWithDrops(2_000, 18_500_000), thresholds)
+		if !slices.Contains(findingIDs(res), "HOST-04") {
+			t.Errorf("findings = %v, want HOST-04 for a receive ring dropping 2000 frames", findingIDs(res))
+		}
+		if res.Score == nil || *res.Score != 100 {
+			t.Errorf("score = %v, want 100: a genuinely starved ring gates performance deductions", res.Score)
+		}
+	})
 }
 
 func TestCPUHostLimitGatesTCPDeductionsPerDirection(t *testing.T) {

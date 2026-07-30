@@ -21,6 +21,8 @@ Metric                              Baseline           Candidate          Change
 Negotiated speed                    1000 Mb/s          100 Mb/s           WORSE
 CRC/framing errors (pc1)            15                 0                  BETTER
 CRC/framing errors (pc2)            15                 0                  N/A
+Driver RX-error aggregate (pc1)     n/a                n/a                N/A
+Driver RX-error aggregate (pc2)     n/a                n/a                N/A
 Frame-size errors (pc1)             n/a                n/a                N/A
 Frame-size errors (pc2)             n/a                n/a                N/A
 FIFO overruns (pc1)                 0                  0                  SAME
@@ -34,16 +36,16 @@ Carrier/PHY errors (pc2)            3                  n/a                N/A
 Ping loss (pc1 -> pc2)              2.25%              0.00%              BETTER
 Full-size loss (pc1 -> pc2)         1.50%              0.00%              BETTER
 TCP throughput (pc1 -> pc2)         788.2 Mbps         938.2 Mbps         BETTER
-TCP retransmits (pc1 -> pc2)        9                  0                  BETTER
+TCP retransmits (pc1 -> pc2)        10                 0                  BETTER
 Ping loss (pc2 -> pc1)              1.00%              0.00%              BETTER
 Full-size loss (pc2 -> pc1)         0.00%              0.00%              SAME
 TCP throughput (pc2 -> pc1)         786.6 Mbps         936.6 Mbps         BETTER
-TCP retransmits (pc2 -> pc1)        11                 0                  BETTER
+TCP retransmits (pc2 -> pc1)        12                 0                  BETTER
 UDP loss (pc1 -> pc2, 800.0 Mbit/s) 1.25%              0.00%              BETTER
 UDP loss (pc2 -> pc1, 70.0 Mbit/s)  n/a                0.00%              N/A
 UDP loss (pc2 -> pc1, 800.0 Mbit/s) 0.75%              n/a                N/A
 
-Metric tally: BETTER 11 | WORSE 1 | SAME 5 | N/A 7
+Metric tally: BETTER 11 | WORSE 1 | SAME 5 | N/A 9
 
 Findings
 --------

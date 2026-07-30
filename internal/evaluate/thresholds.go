@@ -57,6 +57,8 @@ type Thresholds struct {
 	TCPAsymmetryWarnAbove float64
 
 	CPUHostLimitedAbove    float64
+	HostRingDropRateAbove  float64
+	HostRingDropFloor      uint64
 	UDPTargetReachedAt     float64
 	UDPNearSaturationAbove float64
 
@@ -83,7 +85,13 @@ func Default() Thresholds {
 		PingLossPoorAbove:      0.1,
 		PingSpikesWarningAbove: 5,
 		PingGapPoorAbove:       time.Second,
-		TCPRetransWarningAt:    0.001,
+		// A direct cable has no legitimate congestion source, so the expected
+		// retransmit count is zero. The old 0.1% warning boundary tolerated ~4800
+		// lost segments per 60 s gigabit trial before saying anything; 0.01% still
+		// absorbs slow-start and queue noise while catching a real burst. The poor
+		// boundary stays at 1%: retransmissions alone cannot distinguish wire
+		// corruption from local queue drops, which the tool does not yet measure.
+		TCPRetransWarningAt:    0.0001,
 		TCPRetransPoorAbove:    0.01,
 		UDPLossWarningAt:       0.5,
 		UDPLossPoorAbove:       2,
@@ -105,7 +113,23 @@ func Default() Thresholds {
 		TCPCollapsePoorAt:     3,
 		TCPAsymmetryWarnAbove: 0.30,
 
-		CPUHostLimitedAbove:    90,
+		CPUHostLimitedAbove: 90,
+		// Receive-ring drops gate the whole host-sensitive score, so they must be
+		// frequent enough to plausibly limit throughput before they do; below the
+		// boundary movement stays visible in the counter deltas but cannot excuse
+		// a performance symptom. One frame in a million is deliberately low: a
+		// ring overflow drops roughly one in-flight window and then stalls the
+		// sender for an RTO, so the TCP symptoms this gates (collapse intervals,
+		// retransmissions) are produced by tens to low hundreds of dropped frames
+		// out of ~18M received, not by thousands. A higher boundary would leave
+		// the POOR -> INCONCLUSIVE safeguard unreachable for TCP-only starvation
+		// and blame the cable for the host.
+		HostRingDropRateAbove: 0.000001,
+		// Absolute escape hatch for the rate above: counters bracket the whole
+		// run, so a burst inside one soak cycle is diluted by every clean cycle
+		// after it. Beyond this many dropped frames the ring was starved
+		// regardless of how much clean traffic followed.
+		HostRingDropFloor:      100,
 		UDPTargetReachedAt:     0.90,
 		UDPNearSaturationAbove: 0.95,
 

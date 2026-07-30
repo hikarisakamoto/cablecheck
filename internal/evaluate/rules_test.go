@@ -2,6 +2,7 @@ package evaluate
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,13 +29,13 @@ func evaluateRule(rule Rule, f *Facts) *model.Finding {
 // sideWithCRC builds SideFacts with reliable counters and the given CRC-class
 // error delta.
 func sideWithCRC(n uint64) SideFacts {
-	return SideFacts{CRCClassErrors: n, DeltaOK: true, CountersAvailable: true}
+	return SideFacts{CRCClassErrors: n, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 }
 
 // sideWithCarrierPHY builds reliable SideFacts with the given aggregate
 // transmit-carrier/PHY error delta.
 func sideWithCarrierPHY(n uint64) SideFacts {
-	return SideFacts{CarrierPHYErrors: n, DeltaOK: true, CountersAvailable: true}
+	return SideFacts{CarrierPHYErrors: n, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
 }
 
 func TestRulePHY02CRCBands(t *testing.T) {
@@ -85,6 +86,44 @@ func TestRulePHY02CRCBands(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRulePHY02UnclassifiedEvidenceIsNotAssertedAsCRC pins the ceiling on
+// ambiguous evidence. A driver's receive-error aggregate has driver-defined
+// semantics, so a remainder no per-cause counter explains is not proof of frame
+// corruption: it names itself honestly and cannot reach failed on count alone.
+func TestRulePHY02UnclassifiedEvidenceIsNotAssertedAsCRC(t *testing.T) {
+	rule := ruleByID(t, "PHY-02")
+	unclassified := func(n uint64) SideFacts {
+		return SideFacts{UnclassifiedRXErrors: n, DeltaOK: true, CountersAvailable: true, RXErrorEvidence: true}
+	}
+
+	t.Run("count alone cannot escalate past warning", func(t *testing.T) {
+		fd := evaluateRule(rule, &Facts{PC1: unclassified(2000)})
+		if fd == nil {
+			t.Fatal("PHY-02 = nil, want a finding")
+		}
+		if fd.Severity != model.SevWarning {
+			t.Errorf("PHY-02 severity = %v, want warning: an unexplained aggregate could be the driver's own ring drops", fd.Severity)
+		}
+		if strings.Contains(fd.Text, "CRC") {
+			t.Errorf("PHY-02 text = %q, want it to not claim CRC errors it never measured", fd.Text)
+		}
+	})
+
+	t.Run("independent packet loss still fails the run", func(t *testing.T) {
+		f := &Facts{PC1: unclassified(2000)}
+		f.Dir[0].PingLossPct = 2
+		if fd := evaluateRule(rule, f); fd == nil || fd.Severity != model.SevFailed {
+			t.Errorf("PHY-02 = %+v, want failed when ping loss corroborates the counter", fd)
+		}
+	})
+
+	t.Run("per-cause counters still fail the run on count", func(t *testing.T) {
+		if fd := evaluateRule(rule, &Facts{PC1: sideWithCRC(2000)}); fd == nil || fd.Severity != model.SevFailed {
+			t.Errorf("PHY-02 = %+v, want failed for a measured CRC count", fd)
+		}
+	})
 }
 
 func TestRulePHY11CarrierPHYBands(t *testing.T) {
@@ -140,6 +179,7 @@ func TestRuleHOST04ReceiveRingMarker(t *testing.T) {
 		name     string
 		pc1, pc2 SideFacts
 		wantText []string
+		notText  []string
 		none     bool
 	}{
 		{name: "zero movement passes", pc1: SideFacts{DeltaOK: true}, none: true},
@@ -154,6 +194,44 @@ func TestRuleHOST04ReceiveRingMarker(t *testing.T) {
 			name: "unreliable movement is ignored",
 			pc1:  SideFacts{FifoOverrun: 9, MissedErrors: 9, DeltaOK: false},
 			none: true,
+		},
+		{
+			// The field case: 2 dropped frames out of 18.5 million cannot limit
+			// throughput, and must not silence the performance score.
+			name: "movement far below the drop rate is not a host limitation",
+			pc1:  SideFacts{MissedErrors: 2, FramesReceived: 18_500_000, DeltaOK: true},
+			none: true,
+		},
+		{
+			name:     "movement above the drop rate marks the run",
+			pc1:      SideFacts{MissedErrors: 2_000, FramesReceived: 18_500_000, DeltaOK: true},
+			wantText: []string{"pc1", "rx_missed +2000"},
+		},
+		{
+			// The two registers are distinct on the mapped drivers, so the gate
+			// rates their combined volume; both are then reported separately.
+			name:     "both drop counters are rated on their combined volume",
+			pc1:      SideFacts{FifoOverrun: 100, MissedErrors: 100, FramesReceived: 18_500_000, DeltaOK: true},
+			wantText: []string{"rx_fifo +100", "rx_missed +100"},
+		},
+		{
+			name:    "a counter that did not move is not reported",
+			pc1:     SideFacts{FifoOverrun: 2_000, FramesReceived: 18_500_000, DeltaOK: true},
+			notText: []string{"rx_missed"},
+		},
+		{
+			// No traffic denominator means no rate; any movement still marks it.
+			name:     "movement without a frame count still marks the run",
+			pc2:      SideFacts{MissedErrors: 1, DeltaOK: true},
+			wantText: []string{"pc2", "rx_missed +1"},
+		},
+		{
+			// A long soak brackets its counters across the whole run, so a burst
+			// confined to one cycle is diluted below any rate. A large absolute
+			// count is host evidence regardless of how much clean traffic followed.
+			name:     "a large drop burst survives a diluted whole-run denominator",
+			pc1:      SideFacts{MissedErrors: 1_000, FramesReceived: 500_000_000, DeltaOK: true},
+			wantText: []string{"pc1", "rx_missed +1000"},
 		},
 	}
 	for _, tc := range cases {
@@ -175,6 +253,11 @@ func TestRuleHOST04ReceiveRingMarker(t *testing.T) {
 			for _, want := range tc.wantText {
 				if !strings.Contains(joined, want) {
 					t.Errorf("HOST-04 evidence = %q, want substring %q", joined, want)
+				}
+			}
+			for _, unwanted := range tc.notText {
+				if strings.Contains(joined, unwanted) {
+					t.Errorf("HOST-04 evidence = %q, want no substring %q", joined, unwanted)
 				}
 			}
 		})
@@ -335,6 +418,30 @@ func TestRuleTR06Retrans(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestTR06IsHostSensitive pins that a retransmission burst cannot outrank
+// measured host evidence. Retransmissions alone cannot separate wire corruption
+// from local queue drops, so a demonstrated receive-ring starvation must be able
+// to hold the verdict at INCONCLUSIVE instead of blaming the cable.
+func TestTR06IsHostSensitive(t *testing.T) {
+	if fd := evaluateRule(ruleByID(t, "TR-06"), &Facts{
+		Dir: [2]DirFacts{{TCPAvailable: true, TCPRetransRate: 0.02}},
+	}); fd == nil || !fd.HostSensitive {
+		t.Fatalf("TR-06 = %+v, want a host-sensitive finding", fd)
+	}
+
+	f := cleanFacts()
+	f.Dir[0].TCPRetransRate = 0.02 // poor tier
+	f.PC2.MissedErrors = 50_000
+	f.PC2.FramesReceived = 18_173_450
+	res := Evaluate(f)
+	if !slices.Contains(findingIDs(res), "HOST-04") {
+		t.Fatalf("findings = %v, want HOST-04 for a 0.27%% ring-drop rate", findingIDs(res))
+	}
+	if res.Class != model.HealthInconclusive {
+		t.Errorf("class = %v, want INCONCLUSIVE: the drop rate explains the retransmissions", res.Class)
+	}
 }
 
 func TestRuleTR07UDPGating(t *testing.T) {

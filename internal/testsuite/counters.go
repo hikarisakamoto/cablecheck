@@ -32,25 +32,39 @@ const queryToolTimeout = 10 * time.Second
 // `ethtool -S` output wins, even at value zero — a driver that exposes the
 // counter measured it. Keys with no matching candidate fall back to the
 // `ip -s -s` field (nonzero only; see NormalizeCounters), else stay absent.
+//
+// rx_errors_total is the driver's own receive-error aggregate rather than a
+// per-cause counter. Realtek (r8169/r8152) reports corruption ONLY through it,
+// so without this key those NICs look error-free; the evaluator subtracts the
+// per-cause counters from it to recover the unexplained remainder.
 var stdCounterSources = map[string][]string{
-	"rx_crc":     {"rx_crc_errors", "rx_fcs_errors"},
-	"rx_frame":   {"rx_frame_errors"},
-	"rx_align":   {"rx_align_errors", "align_errors"},
-	"rx_symbol":  {"rx_symbol_errors", "symbol_errors"},
-	"rx_missed":  {"rx_missed_errors", "rx_missed"},
-	"rx_fifo":    {"rx_fifo_errors", "rx_over_errors", "rx_no_buffer_count"},
-	"rx_length":  {"rx_length_errors"},
-	"undersize":  {"rx_undersize_packets", "rx_short_length_errors"},
-	"oversize":   {"rx_oversize_packets", "rx_long_length_errors"},
-	"jabber":     {"rx_jabbers", "rx_jabber_errors", "jabber"},
-	"tx_carrier": {"tx_carrier_errors"},
-	"phy_errors": {"phy_errors", "rx_phy_errors"},
+	"rx_errors_total": {"rx_errors"},
+	"rx_crc":          {"rx_crc_errors", "rx_fcs_errors"},
+	"rx_frame":        {"rx_frame_errors"},
+	"rx_align":        {"rx_align_errors", "align_errors"},
+	"rx_symbol":       {"rx_symbol_errors", "symbol_errors"},
+	"rx_missed":       {"rx_missed_errors", "rx_missed"},
+	"rx_fifo":         {"rx_fifo_errors", "rx_over_errors", "rx_no_buffer_count"},
+	"rx_length":       {"rx_length_errors"},
+	"undersize":       {"rx_undersize_packets", "rx_short_length_errors"},
+	"oversize":        {"rx_oversize_packets", "rx_long_length_errors"},
+	"jabber":          {"rx_jabbers", "rx_jabber_errors", "jabber"},
+	"tx_carrier":      {"tx_carrier_errors"},
+	"phy_errors":      {"phy_errors", "rx_phy_errors"},
 }
 
 // ipFallback extracts the `ip -j -s -s` value backing a standard key, when
 // rtnetlink carries one at all; ok=false means this key has no ip fallback.
 func ipFallback(key string, ip model.IPStats64) (uint64, bool) {
 	switch key {
+	// rx_errors_total deliberately has NO rtnetlink fallback. The nonzero-only
+	// fallback rule would make the key appear in the final snapshot the first
+	// time a receive error occurred while being absent from the initial one, and
+	// DeltaSet treats a key present in only one capture as making the whole side
+	// unreliable — silently erasing that side's carrier, CRC and jabber evidence
+	// too. The aggregate is also only meaningful as the driver's own tally:
+	// verified on r8169, `ethtool -S` reported rx_errors 493 while rtnetlink's
+	// rx.errors stayed 0, so the fallback would add no coverage there anyway.
 	case "rx_crc":
 		return ip.RX.CRCErrors, true
 	case "rx_frame":

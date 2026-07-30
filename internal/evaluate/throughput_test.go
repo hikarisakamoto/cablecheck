@@ -339,6 +339,12 @@ func TestPERF01OutlierCapRequiresCleanPhysicalEvidence(t *testing.T) {
 		{name: "pc2 counters unreliable", mutate: func(f *Facts) { f.PC2.DeltaOK = false }},
 		{name: "link down", mutate: func(f *Facts) { f.LinkUpAtEnd = false }},
 		{name: "CRC movement", mutate: func(f *Facts) { f.PC1.CRCClassErrors = 1 }},
+		{name: "unclassified receive errors", mutate: func(f *Facts) { f.PC1.UnclassifiedRXErrors = 1 }},
+		// The cap asserts a clean physical layer. A side that exposed no
+		// receive-error counter reports reliable, empty counters by construction,
+		// which cannot support that assertion.
+		{name: "pc1 never measured receive errors", mutate: func(f *Facts) { f.PC1.RXErrorEvidence = false }},
+		{name: "pc2 never measured receive errors", mutate: func(f *Facts) { f.PC2.RXErrorEvidence = false }},
 		{name: "carrier event", mutate: func(f *Facts) { f.PC1.CarrierEvents = 1 }},
 		{name: "renegotiation", mutate: func(f *Facts) { f.Renegotiations = 1 }},
 		{name: "half duplex", mutate: func(f *Facts) { f.HalfDuplex = true }},

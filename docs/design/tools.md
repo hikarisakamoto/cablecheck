@@ -403,6 +403,7 @@ Resolution order per key: driver-specific ethtool name → generic ethtool candi
 
 | StdKey | e1000e / igb (ethtool) | r8169 / r8152 (ethtool) | virtio_net | generic ethtool candidates | ip -s -s fallback |
 |---|---|---|---|---|---|
+| `rx_errors_total` | `rx_errors` | `rx_errors` | — | `rx_errors` | `rx.errors` |
 | `rx_crc` | `rx_crc_errors` | — (folded into `rx_errors`) | — | `rx_crc_errors`, `rx_fcs_errors` | `rx.crc_errors` |
 | `rx_frame` | `rx_frame_errors` | — | — | `rx_frame_errors` | `rx.frame_errors` |
 | `rx_align` | `rx_align_errors` | `align_errors` | — | `rx_align_errors`, `align_errors` | — |
@@ -417,7 +418,7 @@ Resolution order per key: driver-specific ethtool name → generic ethtool candi
 | `phy_errors` | — | — | — | `phy_errors`, `rx_phy_errors` | — |
 | `link_resets` | n/a | n/a | n/a | n/a | **sysfs** `carrier_changes` (documented exception) |
 
-Notes baked into the design: r8169/r8152 expose almost nothing named per-cause via `ethtool -S` (`tx_packets,rx_packets,tx_errors,rx_errors,rx_missed,align_errors,tx_single_collisions,tx_multi_collisions,tx_aborted,tx_underrun,…`), so on Realtek most physical evidence comes from the `ip -s -s` fallback and `align_errors`. virtio exposes only per-queue counters, so `Standard` is nearly empty and the evaluator correctly lands on "no physical-layer counters available" instead of "0 errors".
+Notes baked into the design: r8169/r8152 expose almost nothing named per-cause via `ethtool -S` (`tx_packets,rx_packets,tx_errors,rx_errors,rx_missed,align_errors,tx_single_collisions,tx_multi_collisions,tx_aborted,tx_underrun,…`), so on Realtek the corruption evidence is `align_errors` plus the `rx_errors` aggregate. The `ip -s -s` fallback does **not** cover Realtek here: verified live on r8169, `ethtool -S` reported `rx_errors: 493` while rtnetlink's `rx.errors` and `rx.crc_errors` both stayed at 0, and zero rtnetlink values are suppressed as ambiguous. That is why `rx_errors_total` is normalized as its own key — it is the only receive-error signal those NICs produce. The evaluator subtracts every per-cause receive counter from it (including the ring-drop counters, which some drivers fold in) and treats the clamped remainder as unclassified receive errors, so nothing is double-counted and a host-side drop is never recharged as corruption. virtio exposes only per-queue counters, so `Standard` carries no receive-error key at all and the evaluator lands on "corruption was never measured" instead of "0 errors".
 
 ```go
 type CounterCollector struct { R runner.Runner; IfName, Driver string; RawDir string }
