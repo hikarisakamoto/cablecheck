@@ -133,6 +133,7 @@ jobs:
           VERSION: ${{ needs.validate.outputs.version }}
           PRERELEASE: ${{ inputs.prerelease }}
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }} # no checkout here: gh cannot infer the repo from git
           SHA: ${{ github.sha }}
         run: |
           flags=(--title "$VERSION" --generate-notes --target "$SHA")
