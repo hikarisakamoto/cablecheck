@@ -34,6 +34,11 @@ var (
 	pingRTTRe      = regexp.MustCompile(`^rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms(, pipe \d+)?$`)
 	pingHeaderRe   = regexp.MustCompile(`^PING (\S+) \(([0-9a-fA-F:.]+)\) \d+\(\d+\) bytes of data\.$`)
 	pingFooterRe   = regexp.MustCompile(`^--- (\S+) ping statistics ---$`)
+	// fragNeededRe classifies an error message as a genuine fragmentation
+	// failure: ICMP "Frag needed and DF set (mtu = N)", IPv6 "Packet too
+	// big", or the local EMSGSIZE wording "message too long". Substring-based
+	// because the exact wording varies across iputils generations.
+	fragNeededRe = regexp.MustCompile(`(?i)frag needed|packet too big|message too long`)
 	// Busybox shapes, recognized only far enough to reject them.
 	busyboxReplyRe = regexp.MustCompile(`^\d+ bytes from \S+: seq=\d+ `)
 	busyboxRTTRe   = regexp.MustCompile(`^round-trip min/avg/max = `)
@@ -111,8 +116,14 @@ func ParsePing(stdout, stderr []byte, exitCode int) (model.PingResult, error) {
 			res.RTTMdevMs, _ = strconv.ParseFloat(m[4], 64)
 		case pingIcmpErrRe.MatchString(line):
 			res.IcmpErrors++
+			if fragNeededRe.MatchString(pingIcmpErrRe.FindStringSubmatch(line)[3]) {
+				res.FragNeededErrors++
+			}
 		case pingLocalErrRe.MatchString(line):
 			res.SendErrors++
+			if fragNeededRe.MatchString(pingLocalErrRe.FindStringSubmatch(line)[2]) {
+				res.FragNeededErrors++
+			}
 		case pingFooterRe.MatchString(line):
 			if res.Target == "" {
 				res.Target = pingFooterRe.FindStringSubmatch(line)[1]

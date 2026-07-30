@@ -120,6 +120,9 @@ func TestFullSizeFragErrors(t *testing.T) {
 	if res.SendErrors != 100 {
 		t.Errorf("SendErrors = %d, want 100 (one EMSGSIZE per probe)", res.SendErrors)
 	}
+	if res.FragNeededErrors != 100 {
+		t.Errorf("FragNeededErrors = %d, want 100 — EMSGSIZE is a genuine fragmentation failure", res.FragNeededErrors)
+	}
 	if res.IcmpErrors != 0 {
 		t.Errorf("IcmpErrors = %d, want 0 — local frag errors are not ICMP errors", res.IcmpErrors)
 	}

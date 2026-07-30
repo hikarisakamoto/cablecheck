@@ -129,9 +129,14 @@ type DirFacts struct {
 	// FullSizeAvailable reports whether the full-size ping test ran in this
 	// direction.
 	FullSizeAvailable bool
-	// FragErrors counts "-M do" fragmentation-needed failures (send errors
-	// plus ICMP errors of the full-size ping).
+	// FragErrors counts the full-size ping's classified fragmentation
+	// failures (ICMP frag-needed/packet-too-big plus local EMSGSIZE); other
+	// error responses never count as MTU evidence.
 	FragErrors int
+	// NonFragPingErrors counts ping send/ICMP errors that are NOT
+	// fragmentation failures — e.g. host-unreachable replies while the link
+	// was down. Loss-rule evidence, not an MTU signal.
+	NonFragPingErrors int
 }
 
 // Facts is the flat evidence model the rules evaluate. Every field is plain
@@ -155,6 +160,11 @@ type Facts struct {
 	// Renegotiations counts mid-test speed/duplex changes seen by the link
 	// monitor.
 	Renegotiations int
+	// MonitorCarrierTransitions counts non-self-inflicted carrier_lost and
+	// carrier_restored monitoring events — the same both-edges unit as the
+	// link_resets counter delta (one bounce = 2). Fallback evidence only:
+	// rules consult it when no side has reliable counter deltas.
+	MonitorCarrierTransitions uint64
 	// CableTestRan reports whether ethtool cable diagnostics produced pair
 	// results.
 	CableTestRan bool
@@ -255,6 +265,7 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 		d.PingDuplicates = max(d.PingDuplicates, p.Duplicates)
 		d.PingSpikes = max(d.PingSpikes, len(p.Spikes))
 		d.PingMaxGap = max(d.PingMaxGap, time.Duration(p.LongestGapMs*float64(time.Millisecond)))
+		d.NonFragPingErrors = max(d.NonFragPingErrors, nonFragErrors(p))
 	}
 	for _, p := range r.Tests.FullSizePing {
 		i := dirIndex(p.Direction)
@@ -264,7 +275,8 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 		d := &f.Dir[i]
 		d.FullSizeAvailable = true
 		d.FullSizeLossPct = max(d.FullSizeLossPct, p.LossPercent)
-		d.FragErrors = max(d.FragErrors, p.SendErrors+p.IcmpErrors)
+		d.FragErrors = max(d.FragErrors, p.FragNeededErrors)
+		d.NonFragPingErrors = max(d.NonFragPingErrors, nonFragErrors(p))
 	}
 
 	f.NegotiatedSpeed = negotiatedSpeed(r)
@@ -377,6 +389,7 @@ func factsFromReport(r *model.Report, thresholds Thresholds) *Facts {
 	f.HalfDuplex = halfDuplex(r)
 	f.LinkUpAtEnd = linkUpAtEnd(r)
 	f.Renegotiations = renegotiations(r)
+	f.MonitorCarrierTransitions = monitorCarrierTransitions(r)
 
 	if ct := r.Tests.CableTest; ct != nil && ct.Available {
 		f.CableTestRan = true
@@ -743,6 +756,31 @@ func renegotiations(r *model.Report) int {
 		}
 		switch ev.Type {
 		case "renegotiation", "speed_changed", "duplex_changed":
+			n++
+		}
+	}
+	return n
+}
+
+// nonFragErrors is the part of a ping run's send/ICMP errors that no
+// fragmentation failure explains, clamped at zero against inconsistent
+// records (an old report can carry error totals with the frag subset absent).
+func nonFragErrors(p model.PingResult) int {
+	return max(0, p.SendErrors+p.IcmpErrors-p.FragNeededErrors)
+}
+
+// monitorCarrierTransitions counts spontaneous carrier_lost/carrier_restored
+// monitoring events. operstate_changed is excluded as a derivative of the same
+// transition; renegotiation-class events are excluded because they are PHY-04's
+// evidence and counting them here would judge one observation twice.
+func monitorCarrierTransitions(r *model.Report) uint64 {
+	var n uint64
+	for _, ev := range r.MonitoringEvents {
+		if ev.SelfInflicted {
+			continue
+		}
+		switch ev.Type {
+		case "carrier_lost", "carrier_restored":
 			n++
 		}
 	}

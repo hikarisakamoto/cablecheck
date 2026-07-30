@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.8.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.9.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -42,7 +42,17 @@ drops against frames received before they gate the host-sensitive score, warns o
 the worst repeat trial's retransmission rate while still requiring the
 sustained rate to convict, marks `TR-06` host-sensitive so measured host evidence
 can hold a retransmission verdict at `INCONCLUSIVE`, and lowers the retransmit
-warning boundary to 0.01%.
+warning boundary to 0.01%. Version `1.9.0` lets `PHY-03` fall back to the link
+monitor's spontaneous carrier transitions when neither side has reliable
+counter deltas (an aborted run captures no final snapshots), with the same
+thresholds and the monitor named in the evidence — counters stay authoritative
+whenever any side has them, and sub-poll-interval flaps (surfaced as
+renegotiation events, `PHY-04`'s evidence) are deliberately not counted, so the
+fallback can only undercount; and restricts `TR-03` to classified
+fragmentation failures (ICMP frag-needed/packet-too-big replies and local
+EMSGSIZE send errors), so other ICMP errors — e.g. host-unreachable replies
+while the link is down — no longer masquerade as an MTU mismatch and instead
+surface as `TR-01` loss evidence.
 
 ### Reference conditions and status labels
 
@@ -133,8 +143,8 @@ but do not establish CableCheck's health boundary.
 | `PHY-02` | physical | CRC-class delta is 11–1000, with no standard-ping direction above 1% loss. | poor |
 | `PHY-02` | physical | CRC-class delta is greater than 1000 with at least one per-cause counter contributing, or is greater than 10 and any standard-ping direction has greater than 1% loss. | failed |
 | `PHY-02` | physical | The delta came entirely from driver receive-error aggregates and ping is clean. Severity stays at warning whatever the count, and the finding names the errors as unexplained rather than as CRC. | warning |
-| `PHY-03` | physical | Worst reliable per-side carrier-event delta is 1–2. The worse side is used rather than summing both observations of the same bounce. | poor |
-| `PHY-03` | physical | Worst reliable per-side carrier-event delta is at least 3. | failed |
+| `PHY-03` | physical | Worst reliable per-side carrier-event delta is 1–2. The worse side is used rather than summing both observations of the same bounce. When neither side has reliable deltas, the monitor's spontaneous carrier transitions are used instead (same both-edges unit; evidence names the monitor). | poor |
+| `PHY-03` | physical | Worst reliable per-side carrier-event delta (or the monitor fallback count) is at least 3. | failed |
 | `PHY-04` | physical | The monitor observes at least one mid-test speed/duplex renegotiation. | poor |
 | `PHY-05` | physical | Either side negotiates half duplex. | poor |
 | `PHY-06` | physical | Negotiated and expected speeds are known, and negotiated speed is below expected but above 50% of expected. | warning |
@@ -174,7 +184,7 @@ annotated separately and removed from the ordinary carrier-event evidence.
 | `TR-01` | transport | Any standard-ping direction has loss greater than 0% and at most 0.1%. | warning |
 | `TR-01` | transport | Any standard-ping direction has loss greater than 0.1%. | poor |
 | `TR-02` | transport | Full-size ping has any loss in a direction whose standard ping has exactly 0% loss. | poor |
-| `TR-03` | transport | At least one fragmentation-needed/full-size don't-fragment error occurs. | warning |
+| `TR-03` | transport | At least one classified fragmentation failure occurs during the full-size don't-fragment ping (ICMP frag-needed/packet-too-big reply or local EMSGSIZE send error). Other ICMP errors are not MTU evidence; they appear as `TR-01` loss evidence instead. | warning |
 | `TR-04` | transport | At least one duplicate ping reply occurs. | warning |
 | `TR-05` | transport | A direction has more than 5 parser-identified RTT spikes. | warning |
 | `TR-05` | transport | A direction's maximum reply gap is greater than 1 second. | poor |

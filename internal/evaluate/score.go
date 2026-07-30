@@ -18,7 +18,8 @@ func scoreFor(f *Facts, findings []model.Finding, class model.HealthClass, thres
 
 	// Physical counter movement.
 	s -= math.Min(40, 2*float64(crcTotal(f)))
-	s -= math.Min(45, 15*float64(carrierEvents(f)))
+	carrier, _ := carrierEvents(f)
+	s -= math.Min(45, 15*float64(carrier))
 	if f.Renegotiations > 0 {
 		s -= 10
 	}

@@ -19,7 +19,7 @@ func TestRenderComparisonGolden(t *testing.T) {
 	candidate.TestID = "candidate-suspect"
 	candidate.Classification = model.HealthWarning
 	candidate.Score = &candidateScore
-	candidate.SchemaVersion = "1.3.0"
+	candidate.SchemaVersion = "1.4.0"
 	candidate.ToolVersion = "1.1.0"
 	candidate.Configuration.Mode = "quick"
 	candidate.Configuration.TCPDuration = baseline.Configuration.TCPDuration / 2
