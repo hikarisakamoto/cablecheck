@@ -43,7 +43,8 @@ func TestLoggingTokenRedaction(t *testing.T) {
 	log.Info("run configuration", slog.Any("config", cfg))
 	log.Debug("debug-only line", "payload", token, "detail", "visible in file only")
 	log.Info("envelope", slog.Group("msg",
-		slog.String("dir", "send"), slog.String("id", "pc1-00000001"), slog.Int("bytes", 128)))
+		slog.String("dir", "send"), slog.String("type", "hello"),
+		slog.String("id", "pc1-00000001"), slog.Int("bytes", 128)))
 	// A secret riding under a group NAMED for the secret must also be redacted
 	// (redactSecrets checks the group path, not only the leaf key).
 	log.Info("grouped", slog.Group("token", slog.String("value", token)))
@@ -80,9 +81,9 @@ func TestLoggingTokenRedaction(t *testing.T) {
 		t.Errorf("file sink misses debug record:\n%s", fileOut)
 	}
 
-	// MsgAttrs logs metadata only.
+	// The envelope group logs metadata only.
 	if !strings.Contains(fileOut, "pc1-00000001") {
-		t.Errorf("file sink misses MsgAttrs message id:\n%s", fileOut)
+		t.Errorf("file sink misses the envelope message id:\n%s", fileOut)
 	}
 }
 
@@ -120,7 +121,8 @@ func TestConsoleHandlerFormat(t *testing.T) {
 	rec := slog.NewRecord(ts, slog.LevelInfo, "handshake", 0)
 	rec.Add("token", token, "peer", "pc2")
 	rec.AddAttrs(slog.Group("msg",
-		slog.String("dir", "send"), slog.String("id", "pc1-00000001"), slog.Int("bytes", 128)))
+		slog.String("dir", "send"), slog.String("type", "hello"),
+		slog.String("id", "pc1-00000001"), slog.Int("bytes", 128)))
 	rec.AddAttrs(slog.Any("config", config.RunConfig{
 		Role:    config.RolePC1,
 		LocalIP: netip.MustParseAddr("192.168.50.10"),
@@ -140,7 +142,7 @@ func TestConsoleHandlerFormat(t *testing.T) {
 		"peer=pc2",                // record attr
 		"token=[REDACTED]",        // secret leaf redacted
 		"msg.dir=send",            // dotted group prefix
-		"msg.id=pc1-00000001",     // MsgAttrs group
+		"msg.id=pc1-00000001",     // envelope group
 		"config.token=[REDACTED]", // LogValuer resolved + redacted
 	} {
 		if !strings.Contains(got, want) {

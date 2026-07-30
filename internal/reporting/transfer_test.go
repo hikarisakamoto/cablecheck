@@ -574,15 +574,3 @@ func (s *scriptedRecvChannel) SendAck(ctx context.Context, a AckFrame) error {
 	}
 	return nil
 }
-
-// assertNoPartFiles fails if any *.part scratch file survived in dir.
-func assertNoPartFiles(t *testing.T, dir string) {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	testutil.Require(t, err, "read dir %s", dir)
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".part") {
-			t.Errorf("leftover partial file %q in %s", e.Name(), dir)
-		}
-	}
-}

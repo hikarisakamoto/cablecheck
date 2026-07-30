@@ -8,6 +8,16 @@ import (
 	"cablecheck/internal/model"
 )
 
+func TestOptionalUint(t *testing.T) {
+	if got := optionalUint(nil); got != "not reported" {
+		t.Errorf("optionalUint(nil) = %q, want %q", got, "not reported")
+	}
+	v := uint64(42)
+	if got := optionalUint(&v); got != "42" {
+		t.Errorf("optionalUint(&42) = %q, want %q", got, "42")
+	}
+}
+
 func TestFormatBps(t *testing.T) {
 	tests := []struct {
 		bps  float64
