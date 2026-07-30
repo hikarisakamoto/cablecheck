@@ -204,9 +204,9 @@ var rawTeeSequence = struct {
 }{nextByDir: make(map[string]int)}
 
 // teeRaw points the spec's stdout tee at a unique NN-<label>.txt path when a
-// raw directory is configured. The per-directory sequence mirrors the report
-// RawStore naming convention and keeps repeated phases (including concurrent
-// bidirectional clients) from truncating an earlier artifact with O_TRUNC.
+// raw directory is configured. The per-directory NN- sequence keeps repeated
+// phases (including concurrent bidirectional clients) from truncating an
+// earlier artifact with O_TRUNC.
 func teeRaw(spec runner.CommandSpec, rawDir string) runner.CommandSpec {
 	if rawDir != "" && spec.Label != "" {
 		rawTeeSequence.Lock()
