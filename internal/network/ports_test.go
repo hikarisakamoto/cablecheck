@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"cablecheck/internal/testutil"
 )
 
 func TestProbePortFree(t *testing.T) {
@@ -13,9 +15,7 @@ func TestProbePortFree(t *testing.T) {
 
 	t.Run("free port passes", func(t *testing.T) {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("listen: %v", err)
-		}
+		testutil.Require(t, err, "listen")
 		port := uint16(l.Addr().(*net.TCPAddr).Port)
 		l.Close()
 
@@ -26,9 +26,7 @@ func TestProbePortFree(t *testing.T) {
 
 	t.Run("tcp occupied names the port", func(t *testing.T) {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("listen: %v", err)
-		}
+		testutil.Require(t, err, "listen")
 		defer l.Close()
 		port := l.Addr().(*net.TCPAddr).Port
 
@@ -46,9 +44,7 @@ func TestProbePortFree(t *testing.T) {
 
 	t.Run("udp occupied names the port", func(t *testing.T) {
 		pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("listen packet: %v", err)
-		}
+		testutil.Require(t, err, "listen packet")
 		defer pc.Close()
 		port := pc.LocalAddr().(*net.UDPAddr).Port
 

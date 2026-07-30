@@ -320,8 +320,6 @@ func awaitTestResult(t *testing.T, h *harness, wantReplyTo string) *protocol.Tes
 		t.Errorf("test_result InReplyTo = %q, want %q", env.InReplyTo, wantReplyTo)
 	}
 	res, err := protocol.DecodePayload[protocol.TestResult](env)
-	if err != nil {
-		t.Fatalf("decode test_result: %v", err)
-	}
+	testutil.Require(t, err, "decode test_result")
 	return res
 }

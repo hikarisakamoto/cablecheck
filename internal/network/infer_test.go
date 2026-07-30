@@ -8,6 +8,7 @@ import (
 
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 func TestInferInterfaceIPv4(t *testing.T) {
@@ -15,9 +16,7 @@ func TestInferInterfaceIPv4(t *testing.T) {
 		fr := runnertest.New(t)
 		scriptIPAddr(fr, "addr_multi.json")
 		got, err := InferInterfaceIPv4(t.Context(), fr, "enp3s0")
-		if err != nil {
-			t.Fatalf("InferInterfaceIPv4: %v", err)
-		}
+		testutil.Require(t, err, "InferInterfaceIPv4")
 		if got != netip.MustParseAddr("10.0.0.1") {
 			t.Errorf("got %v, want 10.0.0.1", got)
 		}

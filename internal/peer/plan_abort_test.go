@@ -35,9 +35,7 @@ func drivePlanFailure(t *testing.T, planErr error) (*protocol.Abort, sessionResu
 
 	ab := h.await(protocol.TypeAbort)
 	abort, err := protocol.DecodePayload[protocol.Abort](ab)
-	if err != nil {
-		t.Fatalf("decode abort: %v", err)
-	}
+	testutil.Require(t, err, "decode abort")
 	return abort, awaitResult(t, resCh)
 }
 

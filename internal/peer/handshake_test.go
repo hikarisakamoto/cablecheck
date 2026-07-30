@@ -152,9 +152,7 @@ func TestHandshakeHappyPath(t *testing.T) {
 	}()
 
 	nc, err := tr.Dial(ctx, cfg2.LocalIP, "192.168.1.1:8443")
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
+	testutil.Require(t, err, "Dial")
 	conn := protocol.NewConn(nc)
 	defer conn.Close()
 	res2, err2 := workerHandshake(conn, cfg2)
@@ -163,9 +161,7 @@ func TestHandshakeHappyPath(t *testing.T) {
 	if out1.err != nil {
 		t.Fatalf("coordinatorHandshake: %v", out1.err)
 	}
-	if err2 != nil {
-		t.Fatalf("workerHandshake: %v", err2)
-	}
+	testutil.Require(t, err2, "workerHandshake")
 	res1 := out1.res
 	if !testIDPattern.MatchString(res1.TestID) {
 		t.Errorf("coordinator TestID %q does not match %v", res1.TestID, testIDPattern)
@@ -256,9 +252,7 @@ func (c *scriptConn) SetWriteDeadline(time.Time) error { return nil }
 func encodeFrame(t *testing.T, env *protocol.Envelope) []byte {
 	t.Helper()
 	body, err := json.Marshal(env)
-	if err != nil {
-		t.Fatalf("encodeFrame: %v", err)
-	}
+	testutil.Require(t, err, "encodeFrame")
 	buf := make([]byte, 4+len(body))
 	binary.BigEndian.PutUint32(buf, uint32(len(body)))
 	copy(buf[4:], body)
@@ -291,9 +285,7 @@ func decodeFrames(t *testing.T, raw []byte) []*protocol.Envelope {
 func mustEnvelope(t *testing.T, typ protocol.MessageType, testID, msgID string, payload any) *protocol.Envelope {
 	t.Helper()
 	env, err := protocol.NewEnvelope(typ, testID, msgID, payload)
-	if err != nil {
-		t.Fatalf("NewEnvelope(%s): %v", typ, err)
-	}
+	testutil.Require(t, err, "NewEnvelope(%s)", typ)
 	return env
 }
 
@@ -424,9 +416,7 @@ func (tc hsCase) run(t *testing.T) {
 		t.Fatalf("no abort frame sent, want abort(%s)", tc.wantAbortReason)
 	}
 	ab, derr := protocol.DecodePayload[protocol.Abort](abort)
-	if derr != nil {
-		t.Fatalf("decode sent abort: %v", derr)
-	}
+	testutil.Require(t, derr, "decode sent abort")
 	if ab.Reason != tc.wantAbortReason {
 		t.Errorf("abort reason = %q, want %q", ab.Reason, tc.wantAbortReason)
 	}

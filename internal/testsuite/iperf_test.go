@@ -14,6 +14,7 @@ import (
 	"cablecheck/internal/parser"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // fakeRegistry records Register/unregister calls without touching /proc or
@@ -75,9 +76,7 @@ func TestTCPServerLifecycle(t *testing.T) {
 	peer := netip.MustParseAddr("10.0.0.2")
 
 	h, err := m.StartServer(ctx, local, 5201)
-	if err != nil {
-		t.Fatalf("StartServer: %v", err)
-	}
+	testutil.Require(t, err, "StartServer")
 	wantServer := []string{"-s", "-B", "10.0.0.1", "-p", "5201", "-1", "--forceflush"}
 	if got := fr.CallsFor("iperf3")[0].Args; !slices.Equal(got, wantServer) {
 		t.Errorf("server args = %q, want %q", got, wantServer)
@@ -87,9 +86,7 @@ func TestTCPServerLifecycle(t *testing.T) {
 	}
 
 	res, err := m.RunTCPClient(ctx, local, peer, 5201, 30*time.Second, 4, false)
-	if err != nil {
-		t.Fatalf("RunTCPClient: %v", err)
-	}
+	testutil.Require(t, err, "RunTCPClient")
 	calls := fr.CallsFor("iperf3")
 	wantClient := []string{"-c", "10.0.0.2", "-B", "10.0.0.1", "-p", "5201",
 		"-J", "--connect-timeout", "3000", "-t", "30", "-P", "4"}
@@ -138,9 +135,7 @@ func TestRunTCPClientPreservesCollapseEvents(t *testing.T) {
 	res, err := m.RunTCPClient(context.Background(),
 		netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"),
 		5201, 30*time.Second, 4, false)
-	if err != nil {
-		t.Fatalf("RunTCPClient: %v", err)
-	}
+	testutil.Require(t, err, "RunTCPClient")
 	if res.Incomplete {
 		t.Fatal("clean run marked incomplete")
 	}
@@ -224,9 +219,7 @@ func TestServerPortInUse(t *testing.T) {
 	m, _ := newTestManager(t, fr)
 
 	h, err := m.StartServer(ctx, netip.MustParseAddr("10.0.0.1"), 5201)
-	if err != nil {
-		t.Fatalf("StartServer: %v", err)
-	}
+	testutil.Require(t, err, "StartServer")
 	err = h.Ready(ctx)
 	if !errors.Is(err, ErrPortInUse) {
 		t.Errorf("Ready error = %v, want errors.Is ErrPortInUse", err)

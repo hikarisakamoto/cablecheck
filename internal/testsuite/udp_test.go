@@ -12,6 +12,7 @@ import (
 
 	"cablecheck/internal/model"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // TestUDPClientArgs pins the exact UDP client invocation from the tools.md §2
@@ -26,9 +27,7 @@ func TestUDPClientArgs(t *testing.T) {
 
 	res, err := m.RunUDPClient(ctx, netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"),
 		5201, 20*time.Second, 800000000, 1472)
-	if err != nil {
-		t.Fatalf("RunUDPClient: %v", err)
-	}
+	testutil.Require(t, err, "RunUDPClient")
 
 	call := fr.CallsFor("iperf3")[0]
 	want := []string{"-c", "10.0.0.2", "-B", "10.0.0.1", "-p", "5201",

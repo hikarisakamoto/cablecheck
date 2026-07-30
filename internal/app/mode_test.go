@@ -10,6 +10,7 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/model"
 	"cablecheck/internal/testsuite"
+	"cablecheck/internal/testutil"
 )
 
 // TestBuildSuiteSelectsPlanByMode pins that the run selects a real plan per
@@ -44,9 +45,7 @@ func TestBuildSuiteSelectsPlanByMode(t *testing.T) {
 				SoakLoad:        config.SoakLoadPeriodic,
 			}
 			a, err := New(cfg, Deps{StateDir: t.TempDir()})
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			testutil.Require(t, err, "New")
 			log := slog.New(slog.NewTextHandler(discardWriter{}, nil))
 			pf := &preflightInfo{}
 			pf.Iface.Name = "eth0"
@@ -125,9 +124,7 @@ func TestSoakReportReflectsModeAndCycles(t *testing.T) {
 		SoakLoad:     config.SoakLoadContinuous,
 	}
 	a, err := New(cfg, Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 
 	when := time.Date(2026, 7, 19, 10, 0, 0, 0, time.UTC)
 	cycleCounters := []model.PeerCounters{{

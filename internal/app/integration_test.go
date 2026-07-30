@@ -190,9 +190,7 @@ func newIntSide(t *testing.T, spec intSpec) *intSide {
 			mangleReportChunk: spec.mangleReportChunk,
 		},
 	})
-	if err != nil {
-		t.Fatalf("New(%s): %v", spec.role, err)
-	}
+	testutil.Require(t, err, "New(%s)", spec.role)
 	root := fakeSysfs(t, "e1000e")
 	if err := os.WriteFile(filepath.Join(root, "eth0", "carrier_changes"), []byte("1\n"), 0o644); err != nil {
 		t.Fatalf("write carrier_changes: %v", err)
@@ -238,9 +236,7 @@ func readReport(t *testing.T, outputDir string) (*model.Report, string) {
 	t.Helper()
 	dir := findReportDir(t, outputDir)
 	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
-	if err != nil {
-		t.Fatalf("read report.json: %v", err)
-	}
+	testutil.Require(t, err, "read report.json")
 	var rep model.Report
 	if err := json.Unmarshal(data, &rep); err != nil {
 		t.Fatalf("unmarshal report.json: %v", err)
@@ -316,18 +312,14 @@ func assertHealthyArtifacts(t *testing.T, pc1 *intSide) {
 			rep.Classification, rep.ClassificationReasons)
 	}
 	md, err := os.ReadFile(filepath.Join(dir, "report.md"))
-	if err != nil {
-		t.Fatalf("read report.md: %v", err)
-	}
+	testutil.Require(t, err, "read report.md")
 	for _, h := range markdownSectionHeaders {
 		if !strings.Contains(string(md), h) {
 			t.Errorf("report.md misses section header %q", h)
 		}
 	}
 	htmlReport, err := os.ReadFile(filepath.Join(dir, "report.html"))
-	if err != nil {
-		t.Fatalf("read report.html: %v", err)
-	}
+	testutil.Require(t, err, "read report.html")
 	if got := strings.Count(string(htmlReport), "<details open>"); got != len(markdownSectionHeaders) {
 		t.Errorf("report.html has %d open sections, want %d", got, len(markdownSectionHeaders))
 	}
@@ -351,9 +343,7 @@ func assertTransferredReportsMatch(t *testing.T, pc1, pc2 *intSide) {
 	dir2 := findReportDir(t, pc2.cfg.OutputDir)
 	for _, name := range []string{"report.json", "report.md", "summary.txt"} {
 		a, err := os.ReadFile(filepath.Join(dir1, name))
-		if err != nil {
-			t.Fatalf("read PC1 %s: %v", name, err)
-		}
+		testutil.Require(t, err, "read PC1 %s", name)
 		b, err := os.ReadFile(filepath.Join(dir2, name))
 		if err != nil {
 			t.Errorf("PC2 is missing transferred %s: %v", name, err)
@@ -366,21 +356,7 @@ func assertTransferredReportsMatch(t *testing.T, pc1, pc2 *intSide) {
 	if _, err := os.Stat(filepath.Join(dir2, "report.html")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("PC2 report.html should remain absent: %v", err)
 	}
-	assertNoPartFilesLeft(t, dir2)
-}
-
-// assertNoPartFilesLeft fails if any *.part scratch file survived in dir.
-func assertNoPartFilesLeft(t *testing.T, dir string) {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dir, err)
-	}
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".part") {
-			t.Errorf("leftover partial file %q in %s", e.Name(), dir)
-		}
-	}
+	testutil.AssertNoPartFiles(t, dir2)
 }
 
 // TestIntegration runs the in-process two-peer scenarios over a real TCP
@@ -619,9 +595,7 @@ func testSIGINTSimulation(t *testing.T) {
 func sendWrongTokenHello(t *testing.T, addr string) {
 	t.Helper()
 	nc, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial coordinator: %v", err)
-	}
+	testutil.Require(t, err, "dial coordinator")
 	defer nc.Close()
 	conn := protocol.NewConn(nc)
 	env, err := protocol.NewEnvelope(protocol.TypeHello, "", "pc2-00000001", protocol.Hello{
@@ -631,23 +605,17 @@ func sendWrongTokenHello(t *testing.T, addr string) {
 		LocalIP:           "127.0.0.1",
 		PeerIP:            "127.0.0.1",
 	})
-	if err != nil {
-		t.Fatalf("build hello: %v", err)
-	}
+	testutil.Require(t, err, "build hello")
 	if err := conn.WriteEnvelope(env); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
 	reply, err := conn.ReadEnvelope()
-	if err != nil {
-		t.Fatalf("read handshake reply: %v", err)
-	}
+	testutil.Require(t, err, "read handshake reply")
 	if reply.Type != protocol.TypeAbort {
 		t.Fatalf("handshake reply type = %s, want abort", reply.Type)
 	}
 	ab, err := protocol.DecodePayload[protocol.Abort](reply)
-	if err != nil {
-		t.Fatalf("decode abort: %v", err)
-	}
+	testutil.Require(t, err, "decode abort")
 	if ab.Reason != "auth_failed" || ab.Detail != "" {
 		t.Errorf("abort = reason %q detail %q, want auth_failed with no detail", ab.Reason, ab.Detail)
 	}
@@ -703,9 +671,7 @@ func testMalformedFrameInjection(t *testing.T) {
 	pc1, port := startCoordinator(t, ctx, intSpec{iperfPort: 45641, planGate: gate})
 
 	nc, err := net.Dial("tcp", pc1.app.ControlAddr().String())
-	if err != nil {
-		t.Fatalf("dial coordinator: %v", err)
-	}
+	testutil.Require(t, err, "dial coordinator")
 	if err := nc.SetDeadline(time.Now().Add(testutil.TestTimeout(t))); err != nil {
 		t.Fatalf("set deadline: %v", err)
 	}
@@ -777,7 +743,7 @@ func testReportTransferCorruption(t *testing.T) {
 	// was abandoned rather than committed. The one file PC2 legitimately has
 	// is its own locally-written fallback summary.txt.
 	dir2 := findReportDir(t, pc2.cfg.OutputDir)
-	assertNoPartFilesLeft(t, dir2)
+	testutil.AssertNoPartFiles(t, dir2)
 	if _, err := os.Stat(filepath.Join(dir2, "report.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("PC2 has a report.json after every chunk was corrupted: %v", err)
 	}
@@ -787,9 +753,7 @@ func testReportTransferCorruption(t *testing.T) {
 	// The fallback summary must be PC2's own (not PC1's transferred one), since
 	// no transfer landed.
 	sum, err := os.ReadFile(filepath.Join(dir2, "summary.txt"))
-	if err != nil {
-		t.Fatalf("read PC2 fallback summary.txt: %v", err)
-	}
+	testutil.Require(t, err, "read PC2 fallback summary.txt")
 	if !strings.Contains(string(sum), "worker") {
 		t.Errorf("PC2 summary.txt is not the local worker fallback:\n%s", sum)
 	}
@@ -822,16 +786,14 @@ func testNoReportTransferFlag(t *testing.T) {
 
 	// No transfer: PC2 has no report.json/report.md, only its own fallback.
 	dir2 := findReportDir(t, pc2.cfg.OutputDir)
-	assertNoPartFilesLeft(t, dir2)
+	testutil.AssertNoPartFiles(t, dir2)
 	for _, name := range []string{"report.json", "report.md"} {
 		if _, err := os.Stat(filepath.Join(dir2, name)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("PC2 has %s despite --no-report-transfer: %v", name, err)
 		}
 	}
 	sum, err := os.ReadFile(filepath.Join(dir2, "summary.txt"))
-	if err != nil {
-		t.Fatalf("read PC2 summary.txt: %v", err)
-	}
+	testutil.Require(t, err, "read PC2 summary.txt")
 	if !strings.Contains(string(sum), "worker") {
 		t.Errorf("PC2 summary.txt is not the local worker fallback:\n%s", sum)
 	}
@@ -926,9 +888,7 @@ func probedFreeIperfPort(t *testing.T) uint16 {
 	loopback := netip.MustParseAddr("127.0.0.1")
 	for range 100 {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("allocate ephemeral iperf port: %v", err)
-		}
+		testutil.Require(t, err, "allocate ephemeral iperf port")
 		port := uint16(listener.Addr().(*net.TCPAddr).Port)
 		if err := listener.Close(); err != nil {
 			t.Errorf("close ephemeral iperf port probe: %v", err)
@@ -971,13 +931,9 @@ func seedStalePidfile(t *testing.T, stateDir string) {
 		t.Fatalf("mkdir stale session dir: %v", err)
 	}
 	info, err := runner.NewProcessInfo(os.Getpid(), "iperf3-server", "stale-prior-session")
-	if err != nil {
-		t.Fatalf("NewProcessInfo(self): %v", err)
-	}
+	testutil.Require(t, err, "NewProcessInfo(self)")
 	data, err := json.Marshal(info)
-	if err != nil {
-		t.Fatalf("marshal pidfile: %v", err)
-	}
+	testutil.Require(t, err, "marshal pidfile")
 	path := filepath.Join(sessionDir, strconv.Itoa(info.PID)+".json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write stale pidfile: %v", err)

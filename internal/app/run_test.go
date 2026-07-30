@@ -51,35 +51,14 @@ func scriptQuickRun(fr *runnertest.FakeRunner) {
 		StdoutFile: fixture("iperf", "udp_316.json")})
 }
 
-// syncBuffer is a mutex-guarded bytes.Buffer safe for concurrent writers.
-// The run writes to Stdout via raw fmt from several goroutines (token banner
-// and summary on the app goroutine, countdown/status lines on the peer event
-// loop) while slog writes to Stderr under its own handler mutex — so the two
-// sinks must be independently synchronized and must never share a bare
-// bytes.Buffer.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-// Write implements io.Writer under the buffer's lock.
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-// String returns the accumulated contents under the buffer's lock.
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
 // runOutput collects one side's operator output and logging in separate,
-// concurrency-safe sinks.
+// concurrency-safe sinks. The run writes to Stdout via raw fmt from several
+// goroutines (token banner and summary on the app goroutine, countdown/status
+// lines on the peer event loop) while slog writes to Stderr under its own
+// handler mutex — so the two sinks must be independently synchronized and
+// must never share a bare bytes.Buffer.
 type runOutput struct {
-	stdout, stderr syncBuffer
+	stdout, stderr testutil.SyncBuffer
 }
 
 // dump renders both sinks for failure messages.
@@ -191,9 +170,7 @@ func newRunApp(t *testing.T, role config.Role, controlPort, iperfPort uint16,
 			}
 		}},
 	})
-	if err != nil {
-		t.Fatalf("New(%s): %v", role, err)
-	}
+	testutil.Require(t, err, "New(%s)", role)
 	root := fakeSysfs(t, "e1000e")
 	if err := os.WriteFile(filepath.Join(root, "eth0", "carrier_changes"), []byte("1\n"), 0o644); err != nil {
 		t.Fatalf("write carrier_changes: %v", err)
@@ -346,9 +323,7 @@ func TestRunQuickHappyPath(t *testing.T) {
 	// PC1 report files exist; report.json unmarshals and is complete.
 	dir1 := findReportDir(t, pc1.cfg.OutputDir)
 	data, err := os.ReadFile(filepath.Join(dir1, "report.json"))
-	if err != nil {
-		t.Fatalf("read pc1 report.json: %v", err)
-	}
+	testutil.Require(t, err, "read pc1 report.json")
 	var rep model.Report
 	if err := json.Unmarshal(data, &rep); err != nil {
 		t.Fatalf("unmarshal report.json: %v", err)
@@ -425,9 +400,7 @@ func TestRunQuickHappyPath(t *testing.T) {
 		t.Errorf("pc1 stdout misses the token banner:\n%s", out1.stdout.String())
 	}
 	logBytes, err := os.ReadFile(filepath.Join(dir1, "raw", "cablecheck-pc1.log"))
-	if err != nil {
-		t.Fatalf("read pc1 debug log: %v", err)
-	}
+	testutil.Require(t, err, "read pc1 debug log")
 	if strings.Contains(string(logBytes), "testtoken1234") {
 		t.Errorf("token leaked into the debug log")
 	}
@@ -438,9 +411,7 @@ func TestRunQuickHappyPath(t *testing.T) {
 	dir2 := findReportDir(t, pc2.cfg.OutputDir)
 	for _, name := range []string{"report.json", "report.md", "summary.txt"} {
 		a, err := os.ReadFile(filepath.Join(dir1, name))
-		if err != nil {
-			t.Fatalf("read pc1 %s: %v", name, err)
-		}
+		testutil.Require(t, err, "read pc1 %s", name)
 		b, err := os.ReadFile(filepath.Join(dir2, name))
 		if err != nil {
 			t.Errorf("pc2 is missing transferred %s: %v", name, err)
@@ -480,9 +451,7 @@ func TestTokenBannerUsesEffectivePC2Command(t *testing.T) {
 			gotToken, gotCommand, gotGenerated = token, command, generated
 		},
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	a.controlPort = 46234
 	a.printTokenBanner()
 
@@ -514,9 +483,7 @@ func TestTokenBannerPlainFallbackAndShellQuoting(t *testing.T) {
 		IperfPort: 44301, Token: "odd'$;token",
 	}
 	a, err := New(cfg, Deps{Stdout: &out})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	a.printTokenBanner()
 	got := out.String()
 	for _, want := range []string{
@@ -595,9 +562,7 @@ func TestRunNoReportTransferFinalizesPostCapsReportOnce(t *testing.T) {
 
 	dir1 := findReportDir(t, pc1.cfg.OutputDir)
 	data, err := os.ReadFile(filepath.Join(dir1, "report.json"))
-	if err != nil {
-		t.Fatalf("read pc1 report.json: %v", err)
-	}
+	testutil.Require(t, err, "read pc1 report.json")
 	var rep model.Report
 	if err := json.Unmarshal(data, &rep); err != nil {
 		t.Fatalf("unmarshal pc1 report.json: %v", err)
@@ -611,9 +576,7 @@ func TestRunNoReportTransferFinalizesPostCapsReportOnce(t *testing.T) {
 
 	dir2 := findReportDir(t, pc2.cfg.OutputDir)
 	summary, err := os.ReadFile(filepath.Join(dir2, "summary.txt"))
-	if err != nil {
-		t.Fatalf("read pc2 summary.txt: %v", err)
-	}
+	testutil.Require(t, err, "read pc2 summary.txt")
 	if !strings.Contains(string(summary), "INCONCLUSIVE") {
 		t.Errorf("pc2 summary does not contain the post-caps complete verdict:\n%s", summary)
 	}
@@ -626,9 +589,7 @@ func TestRunNoReportTransferFinalizesPostCapsReportOnce(t *testing.T) {
 func mustReadDir(t *testing.T, dir string) []os.DirEntry {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read dir %s: %v", dir, err)
-	}
+	testutil.Require(t, err, "read dir %s", dir)
 	return entries
 }
 
@@ -720,9 +681,7 @@ func TestRunInterruptProducesPartialReport(t *testing.T) {
 
 	dir1 := findReportDir(t, pc1.cfg.OutputDir)
 	data, err := os.ReadFile(filepath.Join(dir1, "report.json"))
-	if err != nil {
-		t.Fatalf("read partial report.json: %v", err)
-	}
+	testutil.Require(t, err, "read partial report.json")
 	var rep model.Report
 	if err := json.Unmarshal(data, &rep); err != nil {
 		t.Fatalf("unmarshal partial report: %v", err)
@@ -757,9 +716,7 @@ func TestBuildSuiteRegistryFailureWarns(t *testing.T) {
 	// StateDir stays empty: that is the production branch that creates the
 	// pidfile registry.
 	a, err := New(cfg, Deps{})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	var logBuf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logBuf, nil))
 	pf := &preflightInfo{}
@@ -778,9 +735,7 @@ func TestBuildSuiteRegistryFailureWarns(t *testing.T) {
 func findReportDir(t *testing.T, base string) string {
 	t.Helper()
 	entries, err := os.ReadDir(base)
-	if err != nil {
-		t.Fatalf("read %s: %v", base, err)
-	}
+	testutil.Require(t, err, "read %s", base)
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "cablecheck-report-") {
 			return filepath.Join(base, e.Name())

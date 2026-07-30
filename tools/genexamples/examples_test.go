@@ -8,6 +8,7 @@ import (
 
 	"cablecheck/internal/app"
 	"cablecheck/internal/model"
+	"cablecheck/internal/testutil"
 )
 
 // examplesDir is the committed examples/ tree, relative to this package.
@@ -114,17 +115,11 @@ func TestExamplesRegenerate(t *testing.T) {
 			jsonPath := filepath.Join(dir, "report.json")
 
 			wantMD, err := os.ReadFile(filepath.Join(dir, "report.md"))
-			if err != nil {
-				t.Fatalf("read committed report.md: %v", err)
-			}
+			testutil.Require(t, err, "read committed report.md")
 			wantSummary, err := os.ReadFile(filepath.Join(dir, "summary.txt"))
-			if err != nil {
-				t.Fatalf("read committed summary.txt: %v", err)
-			}
+			testutil.Require(t, err, "read committed summary.txt")
 			wantHTML, err := os.ReadFile(filepath.Join(dir, "report.html"))
-			if err != nil {
-				t.Fatalf("read committed report.html: %v", err)
-			}
+			testutil.Require(t, err, "read committed report.html")
 
 			out := t.TempDir()
 			var buf bytes.Buffer
@@ -132,17 +127,11 @@ func TestExamplesRegenerate(t *testing.T) {
 				t.Fatalf("app.Regenerate: %v", err)
 			}
 			gotMD, err := os.ReadFile(filepath.Join(out, "report.md"))
-			if err != nil {
-				t.Fatalf("read regenerated report.md: %v", err)
-			}
+			testutil.Require(t, err, "read regenerated report.md")
 			gotSummary, err := os.ReadFile(filepath.Join(out, "summary.txt"))
-			if err != nil {
-				t.Fatalf("read regenerated summary.txt: %v", err)
-			}
+			testutil.Require(t, err, "read regenerated summary.txt")
 			gotHTML, err := os.ReadFile(filepath.Join(out, "report.html"))
-			if err != nil {
-				t.Fatalf("read regenerated report.html: %v", err)
-			}
+			testutil.Require(t, err, "read regenerated report.html")
 			if !bytes.Equal(gotMD, wantMD) {
 				t.Errorf("regenerated report.md differs from committed copy")
 			}

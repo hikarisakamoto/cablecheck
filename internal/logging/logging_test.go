@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cablecheck/internal/config"
+	"cablecheck/internal/testutil"
 )
 
 // TestLoggingTokenRedaction drives log traffic through both handlers (stderr
@@ -28,9 +29,7 @@ func TestLoggingTokenRedaction(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cablecheck-pc1.log")
 	log, closer, err := AttachDebugFile(base, path)
-	if err != nil {
-		t.Fatalf("AttachDebugFile: %v", err)
-	}
+	testutil.Require(t, err, "AttachDebugFile")
 
 	cfg := config.RunConfig{
 		Role:    config.RolePC1,
@@ -53,9 +52,7 @@ func TestLoggingTokenRedaction(t *testing.T) {
 		t.Fatalf("close debug file: %v", err)
 	}
 	fileBytes, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read debug file: %v", err)
-	}
+	testutil.Require(t, err, "read debug file")
 
 	stderrOut := stderrBuf.String()
 	fileOut := string(fileBytes)
@@ -355,9 +352,7 @@ func TestAttachDebugFileExclusive(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log.json")
 	base := NewStderr(&bytes.Buffer{}, false, false)
 	_, closer, err := AttachDebugFile(base, path)
-	if err != nil {
-		t.Fatalf("first AttachDebugFile: %v", err)
-	}
+	testutil.Require(t, err, "first AttachDebugFile")
 	defer closer.Close()
 	if _, _, err := AttachDebugFile(base, path); err == nil {
 		t.Errorf("second AttachDebugFile on the same path succeeded; want O_EXCL failure")

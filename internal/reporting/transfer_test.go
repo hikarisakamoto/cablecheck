@@ -161,24 +161,18 @@ func TestTransferSHA256HappyPath(t *testing.T) {
 
 	p := newPipeChannel()
 	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
-	if sendErr != nil {
-		t.Fatalf("SendReports: %v", sendErr)
-	}
-	if recvErr != nil {
-		t.Fatalf("ReceiveReports: %v", recvErr)
-	}
+	testutil.Require(t, sendErr, "SendReports")
+	testutil.Require(t, recvErr, "ReceiveReports")
 
 	for name, want := range digests {
 		got, err := os.ReadFile(filepath.Join(dstDir, name))
-		if err != nil {
-			t.Fatalf("read received %s: %v", name, err)
-		}
+		testutil.Require(t, err, "read received %s", name)
 		sum := sha256.Sum256(got)
 		if hex.EncodeToString(sum[:]) != want {
 			t.Errorf("received %s digest mismatch", name)
 		}
 	}
-	assertNoPartFiles(t, dstDir)
+	testutil.AssertNoPartFiles(t, dstDir)
 }
 
 // TestTransferCorruptedChunk flips a byte in one chunk. The receiver keeps
@@ -204,23 +198,17 @@ func TestTransferCorruptedChunk(t *testing.T) {
 	}
 
 	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
-	if sendErr != nil {
-		t.Fatalf("SendReports: %v", sendErr)
-	}
-	if recvErr != nil {
-		t.Fatalf("ReceiveReports: %v", recvErr)
-	}
+	testutil.Require(t, sendErr, "SendReports")
+	testutil.Require(t, recvErr, "ReceiveReports")
 
 	// The retry landed the intact file.
 	got, err := os.ReadFile(filepath.Join(dstDir, "report.json"))
-	if err != nil {
-		t.Fatalf("read received report.json: %v", err)
-	}
+	testutil.Require(t, err, "read received report.json")
 	sum := sha256.Sum256(got)
 	if hex.EncodeToString(sum[:]) != digests["report.json"] {
 		t.Errorf("report.json not intact after retry")
 	}
-	assertNoPartFiles(t, dstDir)
+	testutil.AssertNoPartFiles(t, dstDir)
 }
 
 // TestTransferDroppedChunkRetries drops one middle chunk of a multi-chunk
@@ -250,22 +238,16 @@ func TestTransferDroppedChunkRetries(t *testing.T) {
 	}
 
 	sendErr, recvErr := runTransferBounded(t, p, srcDir, dstDir)
-	if sendErr != nil {
-		t.Fatalf("SendReports: %v", sendErr)
-	}
-	if recvErr != nil {
-		t.Fatalf("ReceiveReports: %v", recvErr)
-	}
+	testutil.Require(t, sendErr, "SendReports")
+	testutil.Require(t, recvErr, "ReceiveReports")
 
 	got, err := os.ReadFile(filepath.Join(dstDir, "report.json"))
-	if err != nil {
-		t.Fatalf("read received report.json: %v", err)
-	}
+	testutil.Require(t, err, "read received report.json")
 	sum := sha256.Sum256(got)
 	if hex.EncodeToString(sum[:]) != digests["report.json"] {
 		t.Errorf("report.json not intact after a dropped-chunk retry")
 	}
-	assertNoPartFiles(t, dstDir)
+	testutil.AssertNoPartFiles(t, dstDir)
 }
 
 // TestTransferCorruptedChunkNoRetryLandsNothing corrupts every attempt: after
@@ -289,13 +271,11 @@ func TestTransferCorruptedChunkNoRetryLandsNothing(t *testing.T) {
 	if sendErr == nil {
 		t.Errorf("SendReports err = nil, want a transfer failure after the retry")
 	}
-	if recvErr != nil {
-		t.Fatalf("ReceiveReports: %v", recvErr)
-	}
+	testutil.Require(t, recvErr, "ReceiveReports")
 	if _, err := os.Stat(filepath.Join(dstDir, "report.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("report.json exists after two failed transfers, want nothing kept")
 	}
-	assertNoPartFiles(t, dstDir)
+	testutil.AssertNoPartFiles(t, dstDir)
 }
 
 // TestTransferOversizeRejected rejects a file over the per-file cap and a
@@ -406,7 +386,7 @@ func TestTransferReceiverLocalFailureDoesNotHang(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dstDir, "report.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("report.json exists after a receiver local failure, want nothing kept")
 	}
-	assertNoPartFiles(t, dstDir)
+	testutil.AssertNoPartFiles(t, dstDir)
 }
 
 // TestTransferOversizeChunkRejectedMidStream pins T1a: a manifest declaring a
@@ -492,7 +472,7 @@ func TestTransferOversizeChunkRejectedMidStream(t *testing.T) {
 	if maxPart > declared {
 		t.Errorf("receiver flushed %d bytes to disk, over the declared %d-byte size", maxPart, declared)
 	}
-	assertNoPartFiles(t, dstDir)
+	testutil.AssertNoPartFiles(t, dstDir)
 }
 
 // TestTransferUnexpectedChunkNameFatal pins T1b: a manifest naming report.json
@@ -535,7 +515,7 @@ func TestTransferUnexpectedChunkNameFatal(t *testing.T) {
 			t.Errorf("%s exists after an unexpected-name chunk, want nothing kept", name)
 		}
 	}
-	assertNoPartFiles(t, dstDir)
+	testutil.AssertNoPartFiles(t, dstDir)
 }
 
 // runTransferBounded runs both transfer halves concurrently and fails the test
@@ -603,9 +583,7 @@ func (s *scriptedRecvChannel) SendAck(ctx context.Context, a AckFrame) error {
 func assertNoPartFiles(t *testing.T, dir string) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read dir %s: %v", dir, err)
-	}
+	testutil.Require(t, err, "read dir %s", dir)
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".part") {
 			t.Errorf("leftover partial file %q in %s", e.Name(), dir)

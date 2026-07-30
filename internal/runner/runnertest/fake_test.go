@@ -94,9 +94,7 @@ func TestCustomMatcherRanksBelowBuiltins(t *testing.T) {
 	run := func(args ...string) string {
 		t.Helper()
 		res, err := f.Run(t.Context(), runSpec("tool", args...))
-		if err != nil {
-			t.Fatalf("Run(%q): %v", args, err)
-		}
+		testutil.Require(t, err, "Run(%q)", args)
 		return string(res.Stdout)
 	}
 	if got := run("run", "now"); got != "exact" {
@@ -124,9 +122,7 @@ func TestScriptMatchingSpecificity(t *testing.T) {
 	run := func(args ...string) string {
 		t.Helper()
 		res, err := f.Run(t.Context(), runSpec("ethtool", args...))
-		if err != nil {
-			t.Fatalf("Run(%q): %v", args, err)
-		}
+		testutil.Require(t, err, "Run(%q)", args)
 		return string(res.Stdout)
 	}
 
@@ -169,9 +165,7 @@ func TestScriptTimesConsumedFIFO(t *testing.T) {
 
 	for i, want := range []string{"before", "after", "steady", "steady"} {
 		res, err := f.Run(t.Context(), runSpec("ethtool", "-S", "eth0"))
-		if err != nil {
-			t.Fatalf("call %d: %v", i, err)
-		}
+		testutil.Require(t, err, "call %d", i)
 		if got := string(res.Stdout); got != want {
 			t.Errorf("call %d got %q, want %q", i, got, want)
 		}
@@ -350,9 +344,7 @@ func TestFakeStartCtxCancelSynthesizesDeath(t *testing.T) {
 		Result: runner.CommandResult{Stdout: banner}})
 	ctx, cancel := context.WithCancel(t.Context())
 	p, err := f.Start(ctx, runSpec("iperf3", "-s"))
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	testutil.Require(t, err, "Start")
 	cancel()
 	// In production, canceling the Start ctx kills the process group, so a
 	// Wait with a FRESH context must return promptly with a SIGTERM death.
@@ -464,25 +456,19 @@ func TestFromFixture(t *testing.T) {
 	write("badexit.exit", "not-a-number")
 
 	res, err := runnertest.FromFixture(dir, "simple")
-	if err != nil {
-		t.Fatalf("FromFixture(simple): %v", err)
-	}
+	testutil.Require(t, err, "FromFixture(simple)")
 	if string(res.Stdout) != "plain stdout fixture\n" || res.ExitCode != 0 {
 		t.Errorf("simple = %+v, want stdout-only, exit 0", res)
 	}
 
 	res, err = runnertest.FromFixture(dir, "trio")
-	if err != nil {
-		t.Fatalf("FromFixture(trio): %v", err)
-	}
+	testutil.Require(t, err, "FromFixture(trio)")
 	if string(res.Stdout) != "out\n" || string(res.Stderr) != "err\n" || res.ExitCode != 2 {
 		t.Errorf("trio = %+v, want out/err/exit-2 triplet", res)
 	}
 
 	res, err = runnertest.FromFixture(dir, "erronly")
-	if err != nil {
-		t.Fatalf("FromFixture(erronly): %v", err)
-	}
+	testutil.Require(t, err, "FromFixture(erronly)")
 	if len(res.Stdout) != 0 || string(res.Stderr) != "boom\n" || res.ExitCode != 1 {
 		t.Errorf("erronly = %+v, want empty stdout, stderr, exit 1", res)
 	}

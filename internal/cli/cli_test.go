@@ -16,6 +16,7 @@ import (
 	"cablecheck/internal/config"
 	"cablecheck/internal/model"
 	"cablecheck/internal/reporting"
+	"cablecheck/internal/testutil"
 )
 
 // testBuild is the injected build identity used across the cli tests.
@@ -332,9 +333,7 @@ func cliReportJSON(t *testing.T, testID string, class model.HealthClass) []byte 
 		ClassificationReasons: []string{"all measured tests passed"},
 	}
 	data, err := reporting.RenderJSON(rep)
-	if err != nil {
-		t.Fatalf("RenderJSON: %v", err)
-	}
+	testutil.Require(t, err, "RenderJSON")
 	return data
 }
 

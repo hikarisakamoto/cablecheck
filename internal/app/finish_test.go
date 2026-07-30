@@ -20,6 +20,7 @@ import (
 	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/testsuite"
+	"cablecheck/internal/testutil"
 )
 
 // TestFinishCoordinatorRefreshesVerdictAfterPeerCapabilities pins that the
@@ -35,9 +36,7 @@ func TestFinishCoordinatorRefreshesVerdictAfterPeerCapabilities(t *testing.T) {
 		Token:   "testtoken1234",
 	}
 	a, err := New(cfg, Deps{Stdout: &out, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	dir := t.TempDir()
 	rawDir := filepath.Join(dir, "raw")
 	if err := os.MkdirAll(rawDir, 0o700); err != nil {
@@ -75,9 +74,7 @@ func TestFinishCoordinatorRefreshesVerdictAfterPeerCapabilities(t *testing.T) {
 	}
 
 	code, err := a.finishCoordinator(dir, rawDir, pf, results, v, startedAt, outcome, nil, log)
-	if err != nil {
-		t.Fatalf("finishCoordinator: %v", err)
-	}
+	testutil.Require(t, err, "finishCoordinator")
 	if code != ExitCodeFor(fresh.Class) {
 		t.Errorf("exit code = %d, want %d for refreshed class %s", code, ExitCodeFor(fresh.Class), fresh.Class)
 	}
@@ -85,9 +82,7 @@ func TestFinishCoordinatorRefreshesVerdictAfterPeerCapabilities(t *testing.T) {
 		t.Errorf("stored verdict was not refreshed:\nprovisional: %+v\nafter:       %+v", exchanged, after)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
-	if err != nil {
-		t.Fatalf("read report.json: %v", err)
-	}
+	testutil.Require(t, err, "read report.json")
 	var got model.Report
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal report.json: %v", err)
@@ -108,9 +103,7 @@ func TestFinishCoordinatorReevaluatesAfterPeerCapabilities(t *testing.T) {
 		PeerIP: netip.MustParseAddr("127.0.0.1"), Mode: config.ModeQuick, Token: "testtoken1234",
 	}
 	a, err := New(cfg, Deps{Stdout: &out, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	dir := t.TempDir()
 	rawDir := filepath.Join(dir, "raw")
 	if err := os.MkdirAll(rawDir, 0o700); err != nil {
@@ -143,16 +136,12 @@ func TestFinishCoordinatorReevaluatesAfterPeerCapabilities(t *testing.T) {
 		NIC: protocol.NICInfo{Name: "veth0", Driver: "", SpeedMbps: 1000, Duplex: "full", MTU: 1500},
 	}}
 	code, err := a.finishCoordinator(dir, rawDir, pf, results, v, startedAt, outcome, nil, log)
-	if err != nil {
-		t.Fatalf("finishCoordinator: %v", err)
-	}
+	testutil.Require(t, err, "finishCoordinator")
 	if code != ExitInconclusive {
 		t.Errorf("exit code = %d, want %d", code, ExitInconclusive)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
-	if err != nil {
-		t.Fatalf("read report.json: %v", err)
-	}
+	testutil.Require(t, err, "read report.json")
 	var rep model.Report
 	if err := json.Unmarshal(data, &rep); err != nil {
 		t.Fatalf("unmarshal report.json: %v", err)
@@ -177,9 +166,7 @@ func TestFinishCoordinatorQuietUsesCompactFallback(t *testing.T) {
 		Stdout: &out, StateDir: t.TempDir(),
 		OnSummary: func(*model.Report, string) { summaryCalls++ },
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	dir := t.TempDir()
 	rawDir := filepath.Join(dir, "raw")
 	if err := os.MkdirAll(rawDir, 0o700); err != nil {
@@ -222,9 +209,7 @@ func TestFinishCoordinatorPartialUsesSummaryHook(t *testing.T) {
 			presented, presentedDir = rep, dir
 		},
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	dir := t.TempDir()
 	rawDir := filepath.Join(dir, "raw")
 	if err := os.MkdirAll(rawDir, 0o700); err != nil {
@@ -263,9 +248,7 @@ func TestFinishCoordinatorPartialQuietUsesCompactFallback(t *testing.T) {
 		Stdout: &out, StateDir: t.TempDir(),
 		OnSummary: func(*model.Report, string) { summaryCalls++ },
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	dir := t.TempDir()
 	rawDir := filepath.Join(dir, "raw")
 	if err := os.MkdirAll(rawDir, 0o700); err != nil {
@@ -304,9 +287,7 @@ func TestFinishCoordinatorPresentsLastSuccessfulReportAfterEnrichmentWriteFailur
 			presented = rep
 		},
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	dir := t.TempDir()
 	rawDir := filepath.Join(dir, "raw")
 	if err := os.MkdirAll(rawDir, 0o700); err != nil {
@@ -319,9 +300,7 @@ func TestFinishCoordinatorPresentsLastSuccessfulReportAfterEnrichmentWriteFailur
 	startedAt := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	provisional, err := a.finalize(dir, rawDir, pf, results, v, startedAt, nil, nil, log)
-	if err != nil {
-		t.Fatalf("provisional finalize: %v", err)
-	}
+	testutil.Require(t, err, "provisional finalize")
 	_, _, provisionalCode, _ := v.get()
 
 	// Turn report.md into a directory so both enrichment attempts fail after
@@ -336,9 +315,7 @@ func TestFinishCoordinatorPresentsLastSuccessfulReportAfterEnrichmentWriteFailur
 		NIC: protocol.NICInfo{Name: "eth0", SpeedMbps: 1000, Duplex: "half"},
 	}}
 	code, err := a.finishCoordinator(dir, rawDir, pf, results, v, startedAt, outcome, nil, log)
-	if err != nil {
-		t.Fatalf("finishCoordinator: %v", err)
-	}
+	testutil.Require(t, err, "finishCoordinator")
 	if code != provisionalCode {
 		t.Errorf("exit code = %d, want provisional %d", code, provisionalCode)
 	}
@@ -361,9 +338,7 @@ func findingRuleIDs(findings []model.Finding) []string {
 func TestCapabilitiesExchangePropagatesPeerUSB(t *testing.T) {
 	cfg := &config.RunConfig{Role: config.RolePC1}
 	a, err := New(cfg, Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	pf := &preflightInfo{}
 	results := &testsuite.SessionResults{}
 	when := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
@@ -371,9 +346,7 @@ func TestCapabilitiesExchangePropagatesPeerUSB(t *testing.T) {
 		NIC: protocol.NICInfo{Name: "enx001122334455", Driver: "r8152", USB: true},
 	}
 	wire, err := json.Marshal(workerCaps)
-	if err != nil {
-		t.Fatalf("marshal worker capabilities: %v", err)
-	}
+	testutil.Require(t, err, "marshal worker capabilities")
 	var exchanged protocol.Capabilities
 	if err := json.Unmarshal(wire, &exchanged); err != nil {
 		t.Fatalf("unmarshal exchanged capabilities: %v", err)
@@ -392,9 +365,7 @@ func TestCapabilitiesExchangePropagatesPeerUSB(t *testing.T) {
 func TestRuntimeSkippedPingCapsEvaluationAtGood(t *testing.T) {
 	cfg := &config.RunConfig{Role: config.RolePC1}
 	a, err := New(cfg, Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	pf := &preflightInfo{}
 	pf.Iface.Name = "eth0"
 	pf.Iface.Class.Driver = "e1000e"
@@ -432,9 +403,7 @@ func TestRuntimeSkippedPingCapsEvaluationAtGood(t *testing.T) {
 func TestAssembleReportPropagatesAssumedUDPRate(t *testing.T) {
 	cfg := &config.RunConfig{Role: config.RolePC1}
 	a, err := New(cfg, Deps{StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	when := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 	rep := a.assembleReport(&preflightInfo{}, &testsuite.SessionResults{UDPRateAssumed: true},
 		when, when, nil, nil)
@@ -470,9 +439,7 @@ func newWorkerApp(t *testing.T, out *bytes.Buffer) *App {
 		Token:   "testtoken1234",
 	}
 	a, err := New(cfg, Deps{Stdout: out, StateDir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	testutil.Require(t, err, "New")
 	return a
 }
 
@@ -503,9 +470,7 @@ func TestFinishWorkerPreservesTransferredSummaryOnRunErr(t *testing.T) {
 		t.Fatalf("finishWorker err = nil, want the run error propagated")
 	}
 	got, rerr := os.ReadFile(filepath.Join(dir, "summary.txt"))
-	if rerr != nil {
-		t.Fatalf("read summary.txt: %v", rerr)
-	}
+	testutil.Require(t, rerr, "read summary.txt")
 	if string(got) != "PC1 summary.txt\n" {
 		t.Errorf("transferred summary.txt was clobbered on the runErr path:\ngot: %q", got)
 	}
@@ -525,9 +490,7 @@ func TestFinishWorkerFallbackWhenSummaryMissing(t *testing.T) {
 
 	comp := &protocol.Complete{Classification: "EXCELLENT", Summary: "cable healthy", ExitCode: 0}
 	code, err := a.finishWorker(dir, filepath.Join(dir, "raw"), &peer.Outcome{PeerComplete: comp}, nil, log)
-	if err != nil {
-		t.Fatalf("finishWorker: %v", err)
-	}
+	testutil.Require(t, err, "finishWorker")
 	if code != ExitOK {
 		t.Errorf("exit code = %d, want %d", code, ExitOK)
 	}
@@ -546,13 +509,9 @@ func TestFinishWorkerFallbackUsesCoordinatorMode(t *testing.T) {
 	comp := &protocol.Complete{Classification: "EXCELLENT", Summary: "cable healthy", ExitCode: 0}
 
 	_, err := a.finishWorker(dir, filepath.Join(dir, "raw"), &peer.Outcome{PeerComplete: comp, Mode: "soak"}, nil, log)
-	if err != nil {
-		t.Fatalf("finishWorker: %v", err)
-	}
+	testutil.Require(t, err, "finishWorker")
 	summary, err := os.ReadFile(filepath.Join(dir, "summary.txt"))
-	if err != nil {
-		t.Fatalf("read summary.txt: %v", err)
-	}
+	testutil.Require(t, err, "read summary.txt")
 	if !bytes.Contains(summary, []byte("mode:      soak")) {
 		t.Errorf("PC2 fallback summary does not use PC1's announced mode:\n%s", summary)
 	}
@@ -602,9 +561,7 @@ func TestWorkerDiagnosticAlwaysWritten(t *testing.T) {
 	readDiag := func(t *testing.T, dir string) map[string]any {
 		t.Helper()
 		b, err := os.ReadFile(filepath.Join(dir, "diagnostic.json"))
-		if err != nil {
-			t.Fatalf("diagnostic.json missing: %v", err)
-		}
+		testutil.Require(t, err, "diagnostic.json missing")
 		var m map[string]any
 		if err := json.Unmarshal(b, &m); err != nil {
 			t.Fatalf("diagnostic.json is not valid JSON: %v", err)

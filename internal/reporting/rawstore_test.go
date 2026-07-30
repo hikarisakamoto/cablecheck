@@ -7,19 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"cablecheck/internal/testutil"
 )
 
 func TestRawStorePaths(t *testing.T) {
 	reportDir := t.TempDir()
 	store, err := NewRawStore(reportDir)
-	if err != nil {
-		t.Fatalf("NewRawStore: %v", err)
-	}
+	testutil.Require(t, err, "NewRawStore")
 
 	f1, name1, err := store.Create("pc1", "ethtool", "link-before", "txt")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	testutil.Require(t, err, "Create")
 	if want := filepath.Join("raw", "01-pc1-ethtool-link-before.txt"); name1 != want {
 		t.Errorf("first name = %q, want %q", name1, want)
 	}
@@ -31,9 +29,7 @@ func TestRawStorePaths(t *testing.T) {
 	}
 
 	f2, name2, err := store.Create("pc2", "iperf3", "tcp-pc1-to-pc2", "json")
-	if err != nil {
-		t.Fatalf("Create (second): %v", err)
-	}
+	testutil.Require(t, err, "Create (second)")
 	if want := filepath.Join("raw", "02-pc2-iperf3-tcp-pc1-to-pc2.json"); name2 != want {
 		t.Errorf("second name = %q, want %q", name2, want)
 	}

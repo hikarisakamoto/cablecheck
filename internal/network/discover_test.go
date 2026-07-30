@@ -9,6 +9,7 @@ import (
 
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // scriptIPAddr scripts `ip -j addr show` to return the named testdata/ip
@@ -28,9 +29,7 @@ func TestDiscoverByIP(t *testing.T) {
 	setDevice(t, root, "enp3s0", "pci0000:00/0000:00:1f.6", "e1000e")
 
 	got, err := Discover(t.Context(), fr, netip.MustParseAddr("10.0.0.1"), DiscoverOptions{SysfsRoot: root})
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
+	testutil.Require(t, err, "Discover")
 	want := Iface{
 		Name:      "enp3s0",
 		Index:     2,
@@ -91,9 +90,7 @@ func TestLoopbackAllowedWithFlag(t *testing.T) {
 
 			got, err := Discover(t.Context(), fr, netip.MustParseAddr(tc.ip),
 				DiscoverOptions{SysfsRoot: newSysfs(t), AllowVirtual: true})
-			if err != nil {
-				t.Fatalf("Discover: %v", err)
-			}
+			testutil.Require(t, err, "Discover")
 			if got.Name != "lo" {
 				t.Errorf("Name = %q, want lo", got.Name)
 			}
@@ -146,9 +143,7 @@ func TestVirtualPatternsRejected(t *testing.T) {
 
 		got, err := Discover(t.Context(), fr, netip.MustParseAddr("10.100.0.2"),
 			DiscoverOptions{SysfsRoot: newSysfs(t), AllowVirtual: true})
-		if err != nil {
-			t.Fatalf("Discover: %v", err)
-		}
+		testutil.Require(t, err, "Discover")
 		if got.Name != "wg0" || !got.Class.Virtual {
 			t.Errorf("got %+v, want wg0 with Class.Virtual=true", got)
 		}
@@ -182,9 +177,7 @@ func TestExplicitInterfaceOverride(t *testing.T) {
 
 		got, err := Discover(t.Context(), fr, netip.MustParseAddr("10.0.0.1"),
 			DiscoverOptions{Interface: "enp3s0", SysfsRoot: root})
-		if err != nil {
-			t.Fatalf("Discover: %v", err)
-		}
+		testutil.Require(t, err, "Discover")
 		if got.Name != "enp3s0" || got.PrefixLen != 24 {
 			t.Errorf("got %+v, want enp3s0/24", got)
 		}
@@ -198,9 +191,7 @@ func TestExplicitInterfaceOverride(t *testing.T) {
 
 		got, err := Discover(t.Context(), fr, netip.MustParseAddr("192.168.50.2"),
 			DiscoverOptions{Interface: "eth-lab-25g", SysfsRoot: root})
-		if err != nil {
-			t.Fatalf("Discover: %v", err)
-		}
+		testutil.Require(t, err, "Discover")
 		if got.Name != "enp5s0" {
 			t.Errorf("Name = %q, want enp5s0", got.Name)
 		}

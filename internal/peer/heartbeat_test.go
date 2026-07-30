@@ -64,9 +64,7 @@ func TestHeartbeatScheduling(t *testing.T) {
 
 	// A frame is written now: the session's last-send timestamp is t0.
 	warn, err := protocol.NewEnvelope(protocol.TypeWarning, s.testID, s.ids.Next(), protocol.Warning{Code: "traffic"})
-	if err != nil {
-		t.Fatalf("NewEnvelope: %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope")
 	writeDone := make(chan error, 1)
 	go func() { writeDone <- s.write(warn) }()
 	if env, rerr := far.ReadEnvelope(); rerr != nil || env.Type != protocol.TypeWarning {
@@ -99,9 +97,7 @@ func TestHeartbeatScheduling(t *testing.T) {
 		t.Fatalf("far read = %v, want a heartbeat frame", env)
 	}
 	hb, err := protocol.DecodePayload[protocol.Heartbeat](env)
-	if err != nil {
-		t.Fatalf("decode heartbeat: %v", err)
-	}
+	testutil.Require(t, err, "decode heartbeat")
 	if hb.Seq != 1 || hb.State != string(StateTesting) {
 		t.Errorf("heartbeat = %+v, want seq 1 state testing", hb)
 	}
@@ -140,9 +136,7 @@ func TestHeartbeatScheduling(t *testing.T) {
 		t.Fatalf("far read = %v, want the second heartbeat", env)
 	}
 	hb, err = protocol.DecodePayload[protocol.Heartbeat](env)
-	if err != nil {
-		t.Fatalf("decode heartbeat: %v", err)
-	}
+	testutil.Require(t, err, "decode heartbeat")
 	if hb.Seq != 2 {
 		t.Errorf("heartbeat seq = %d, want 2 (exactly two heartbeats total)", hb.Seq)
 	}
@@ -152,9 +146,7 @@ func TestHeartbeatScheduling(t *testing.T) {
 func warn2(t *testing.T, s *session) *protocol.Envelope {
 	t.Helper()
 	env, err := protocol.NewEnvelope(protocol.TypeWarning, s.testID, s.ids.Next(), protocol.Warning{Code: "traffic"})
-	if err != nil {
-		t.Fatalf("NewEnvelope: %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope")
 	return env
 }
 

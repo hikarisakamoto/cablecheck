@@ -12,6 +12,7 @@ import (
 	"cablecheck/internal/model"
 	"cablecheck/internal/parser"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // TestCounterSnapshotsUseDistinctRawTeeFiles ensures before/after snapshots
@@ -80,14 +81,10 @@ func TestCounterSnapshotsBeforeAfter(t *testing.T) {
 		c := &CounterCollector{R: fr, Clock: clk, IfName: "eth0", SysfsRoot: root}
 
 		before, err := c.Snapshot(ctx)
-		if err != nil {
-			t.Fatalf("before snapshot: %v", err)
-		}
+		testutil.Require(t, err, "before snapshot")
 		writeSysfs(t, root, "eth0", "carrier_changes", "4\n")
 		after, err := c.Snapshot(ctx)
-		if err != nil {
-			t.Fatalf("after snapshot: %v", err)
-		}
+		testutil.Require(t, err, "after snapshot")
 
 		if before.Raw == "" || len(before.Driver) == 0 {
 			t.Errorf("before snapshot lost the raw ethtool view: raw %d bytes, %d driver counters",
@@ -134,9 +131,7 @@ func TestCounterSnapshotsBeforeAfter(t *testing.T) {
 		c := &CounterCollector{R: fr, Clock: clk, IfName: "eth0", SysfsRoot: root}
 
 		snap, err := c.Snapshot(ctx)
-		if err != nil {
-			t.Fatalf("snapshot with ethtool missing must still be valid, got error: %v", err)
-		}
+		testutil.Require(t, err, "snapshot with ethtool missing must still be valid, got error")
 		if snap.Raw != "" || len(snap.Driver) != 0 {
 			t.Errorf("ethtool absent: raw/driver views must be empty, got raw %d bytes, %d counters",
 				len(snap.Raw), len(snap.Driver))

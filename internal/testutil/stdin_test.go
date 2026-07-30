@@ -19,9 +19,7 @@ func TestScriptStdinDeliversLinesThenEOFAfterCleanup(t *testing.T) {
 		br := bufio.NewReader(r)
 		for _, want := range []string{"start\n", "quit\n"} {
 			line, err := br.ReadString('\n')
-			if err != nil {
-				t.Fatalf("ReadString: %v", err)
-			}
+			testutil.Require(t, err, "ReadString")
 			if line != want {
 				t.Fatalf("read %q, want %q", line, want)
 			}

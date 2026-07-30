@@ -8,15 +8,14 @@ import (
 	"testing"
 
 	"cablecheck/internal/protocol"
+	"cablecheck/internal/testutil"
 )
 
 // TestEnvelopeVersionMismatch checks CheckVersion: match passes, any other
 // version yields a typed *VersionMismatchError carrying got and want.
 func TestEnvelopeVersionMismatch(t *testing.T) {
 	env, err := protocol.NewEnvelope(protocol.TypeHello, "", "pc2-00000001", nil)
-	if err != nil {
-		t.Fatalf("NewEnvelope: %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope")
 	if env.ProtocolVersion != protocol.Version {
 		t.Fatalf("NewEnvelope protocolVersion = %q, want %q", env.ProtocolVersion, protocol.Version)
 	}
@@ -51,30 +50,22 @@ func TestEnvelopeVersionMismatch(t *testing.T) {
 func TestDecodePayloadExplicitTypes(t *testing.T) {
 	want := protocol.Hello{Token: "secret", Role: "pc2", CablecheckVersion: "1.0.0", LocalIP: "10.0.0.2", PeerIP: "10.0.0.1"}
 	env, err := protocol.NewEnvelope(protocol.TypeHello, "", "pc2-00000001", want)
-	if err != nil {
-		t.Fatalf("NewEnvelope: %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope")
 	got, err := protocol.DecodePayload[protocol.Hello](env)
-	if err != nil {
-		t.Fatalf("DecodePayload[Hello]: %v", err)
-	}
+	testutil.Require(t, err, "DecodePayload[Hello]")
 	if *got != want {
 		t.Errorf("DecodePayload[Hello] = %+v, want %+v", *got, want)
 	}
 
 	bare, err := protocol.NewEnvelope(protocol.TypeReady, "ct-x", "pc1-00000001", nil)
-	if err != nil {
-		t.Fatalf("NewEnvelope(nil payload): %v", err)
-	}
+	testutil.Require(t, err, "NewEnvelope(nil payload)")
 	if _, err := protocol.DecodePayload[protocol.Ready](bare); !errors.Is(err, protocol.ErrNoPayload) {
 		t.Fatalf("DecodePayload on absent payload = %v, want ErrNoPayload", err)
 	}
 
 	fwd := &protocol.Envelope{Payload: json.RawMessage(`{"code":"slow_link","text":"link slow","stage":"testing","futureField":42}`)}
 	w, err := protocol.DecodePayload[protocol.Warning](fwd)
-	if err != nil {
-		t.Fatalf("DecodePayload with unknown payload field: %v", err)
-	}
+	testutil.Require(t, err, "DecodePayload with unknown payload field")
 	if w.Code != "slow_link" || w.Text != "link slow" || w.Stage != "testing" {
 		t.Errorf("Warning payload = %+v", *w)
 	}

@@ -140,9 +140,7 @@ func TestHandshakeWrongPeerIP(t *testing.T) {
 func reserveClosedPort(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
-	}
+	testutil.Require(t, err, "reserve port")
 	addr := ln.Addr().String()
 	if err := ln.Close(); err != nil {
 		t.Fatalf("release reserved port: %v", err)
@@ -166,9 +164,7 @@ func TestTCPTransportListenAndAccept(t *testing.T) {
 
 	t.Run("accept-configures-conn", func(t *testing.T) {
 		ln, err := tr.Listen(ctx, "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("Listen: %v", err)
-		}
+		testutil.Require(t, err, "Listen")
 		defer ln.Close()
 		accepted := make(chan dialOut, 1)
 		go func() {
@@ -176,9 +172,7 @@ func TestTCPTransportListenAndAccept(t *testing.T) {
 			accepted <- dialOut{conn: c, err: aerr}
 		}()
 		client, err := net.Dial("tcp", ln.Addr().String())
-		if err != nil {
-			t.Fatalf("dial listener: %v", err)
-		}
+		testutil.Require(t, err, "dial listener")
 		defer client.Close()
 		out := <-accepted
 		if out.err != nil {
@@ -211,9 +205,7 @@ func TestTCPTransportListenAndAccept(t *testing.T) {
 
 	t.Run("accept-after-close", func(t *testing.T) {
 		ln, err := tr.Listen(ctx, "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("Listen: %v", err)
-		}
+		testutil.Require(t, err, "Listen")
 		if err := ln.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -244,9 +236,7 @@ func TestTCPTransportDialRetryThenSuccess(t *testing.T) {
 	// The retry timer registering proves the first attempt already failed.
 	fc.BlockUntilWaiters(1)
 	ln, err := tr.Listen(ctx, addr)
-	if err != nil {
-		t.Fatalf("Listen on reserved port: %v", err)
-	}
+	testutil.Require(t, err, "Listen on reserved port")
 	defer ln.Close()
 	accepted := make(chan dialOut, 1)
 	go func() {

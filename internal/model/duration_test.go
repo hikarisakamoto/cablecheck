@@ -4,21 +4,19 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"cablecheck/internal/testutil"
 )
 
 func TestDurationJSON(t *testing.T) {
 	data, err := json.Marshal(Duration(30 * time.Second))
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	testutil.Require(t, err, "Marshal")
 	if string(data) != `{"ms":30000,"text":"30s"}` {
 		t.Errorf("Marshal = %s, want {\"ms\":30000,\"text\":\"30s\"}", data)
 	}
 
 	data, err = json.Marshal(Duration(90 * time.Second))
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	testutil.Require(t, err, "Marshal")
 	if string(data) != `{"ms":90000,"text":"1m30s"}` {
 		t.Errorf("Marshal = %s, want {\"ms\":90000,\"text\":\"1m30s\"}", data)
 	}

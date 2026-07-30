@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cablecheck/internal/model"
+	"cablecheck/internal/testutil"
 )
 
 func TestRenderComparisonGolden(t *testing.T) {
@@ -216,13 +217,9 @@ func TestRenderComparisonPureAndDoesNotMutateInputs(t *testing.T) {
 	baseline := goldenReport()
 	candidate := cloneComparisonReport(t, baseline)
 	beforeBaseline, err := json.Marshal(baseline)
-	if err != nil {
-		t.Fatalf("marshal baseline: %v", err)
-	}
+	testutil.Require(t, err, "marshal baseline")
 	beforeCandidate, err := json.Marshal(candidate)
-	if err != nil {
-		t.Fatalf("marshal candidate: %v", err)
-	}
+	testutil.Require(t, err, "marshal candidate")
 
 	first := RenderComparison(baseline, candidate)
 	second := RenderComparison(baseline, candidate)
@@ -239,9 +236,7 @@ func TestRenderComparisonPureAndDoesNotMutateInputs(t *testing.T) {
 func cloneComparisonReport(t *testing.T, report *model.Report) *model.Report {
 	t.Helper()
 	data, err := json.Marshal(report)
-	if err != nil {
-		t.Fatalf("marshal report clone: %v", err)
-	}
+	testutil.Require(t, err, "marshal report clone")
 	var clone model.Report
 	if err := json.Unmarshal(data, &clone); err != nil {
 		t.Fatalf("unmarshal report clone: %v", err)

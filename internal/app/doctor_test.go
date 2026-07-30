@@ -10,6 +10,7 @@ import (
 
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // doctorDeps builds a Deps for a doctor run over the given FakeRunner, with a
@@ -76,9 +77,7 @@ func TestDoctorChecks(t *testing.T) {
 		deps, outDir := doctorDeps(t, fr)
 		checks, err := Doctor(context.Background(), deps, DoctorOptions{
 			OutputDir: outDir, SysfsRoot: root, AllowVirtual: true})
-		if err != nil {
-			t.Fatalf("Doctor returned error on an all-present run: %v", err)
-		}
+		testutil.Require(t, err, "Doctor returned error on an all-present run")
 		if n := countStatus(checks, CheckFail); n != 0 {
 			t.Errorf("all-present run has %d FAIL checks, want 0:\n%s", n, dumpChecks(checks))
 		}
@@ -148,9 +147,7 @@ func TestDoctorChecks(t *testing.T) {
 		deps, outDir := doctorDeps(t, fr)
 		checks, err := Doctor(context.Background(), deps, DoctorOptions{
 			OutputDir: outDir, SysfsRoot: root, AllowVirtual: true})
-		if err != nil {
-			t.Fatalf("a denied sudo probe must WARN, not fail the run: %v", err)
-		}
+		testutil.Require(t, err, "a denied sudo probe must WARN, not fail the run")
 		c, ok := checkByPrefix(checks, "sudo")
 		if !ok || c.Status != CheckWarn {
 			t.Errorf("sudo check = %+v, want a WARN", c)
@@ -165,9 +162,7 @@ func TestDoctorChecks(t *testing.T) {
 		emptyRoot := t.TempDir()
 		checks, err := Doctor(context.Background(), deps, DoctorOptions{
 			OutputDir: outDir, SysfsRoot: emptyRoot, AllowVirtual: true})
-		if err != nil {
-			t.Fatalf("no physical interfaces must WARN, not fail: %v", err)
-		}
+		testutil.Require(t, err, "no physical interfaces must WARN, not fail")
 		c, ok := checkByPrefix(checks, "interface")
 		if !ok || c.Status != CheckWarn {
 			t.Errorf("interface check = %+v, want a WARN when no physical NIC is found", c)
