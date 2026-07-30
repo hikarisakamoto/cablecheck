@@ -617,8 +617,4 @@ func TestWorkerDiagnosticAlwaysWritten(t *testing.T) {
 }
 
 // errPeerLost is a stand-in run error for the worker finish tests.
-var errPeerLost = errPeerLostSentinel{}
-
-type errPeerLostSentinel struct{}
-
-func (errPeerLostSentinel) Error() string { return "peer lost" }
+var errPeerLost = errors.New("peer lost")

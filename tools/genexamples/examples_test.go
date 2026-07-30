@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"cablecheck/internal/app"
@@ -68,7 +69,7 @@ func TestExampleClassifications(t *testing.T) {
 			if !ok {
 				t.Fatalf("no seed named %q", name)
 			}
-			if !containsClass(want.wantClasses, rep.Classification) {
+			if !slices.Contains(want.wantClasses, rep.Classification) {
 				t.Fatalf("class = %s, want one of %v", rep.Classification, want.wantClasses)
 			}
 			if want.wantNilScore {
@@ -143,14 +144,4 @@ func TestExamplesRegenerate(t *testing.T) {
 			}
 		})
 	}
-}
-
-// containsClass reports whether want contains class.
-func containsClass(want []model.HealthClass, class model.HealthClass) bool {
-	for _, w := range want {
-		if w == class {
-			return true
-		}
-	}
-	return false
 }

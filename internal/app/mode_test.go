@@ -1,6 +1,7 @@
 package app
 
 import (
+	"io"
 	"log/slog"
 	"net/netip"
 	"slices"
@@ -46,7 +47,7 @@ func TestBuildSuiteSelectsPlanByMode(t *testing.T) {
 			}
 			a, err := New(cfg, Deps{StateDir: t.TempDir()})
 			testutil.Require(t, err, "New")
-			log := slog.New(slog.NewTextHandler(discardWriter{}, nil))
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 			pf := &preflightInfo{}
 			pf.Iface.Name = "eth0"
 
@@ -147,9 +148,3 @@ func TestSoakReportReflectsModeAndCycles(t *testing.T) {
 		t.Errorf("report CycleCounters = %+v, want the soak plan's per-cycle snapshots", rep.CycleCounters)
 	}
 }
-
-// discardWriter drops all writes; used for a throwaway slog logger.
-type discardWriter struct{}
-
-// Write implements io.Writer, discarding everything.
-func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }

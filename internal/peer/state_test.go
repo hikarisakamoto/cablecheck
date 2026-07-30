@@ -2,6 +2,7 @@ package peer
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -40,15 +41,6 @@ var expectedTransitions = map[State][]State{
 	StateFailed:               {},
 }
 
-func containsState(list []State, s State) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
 // TestTransitionTable walks the full (from, to) matrix and asserts every pair
 // is allowed or denied exactly per the design table, including that all three
 // terminal states reject every outgoing transition.
@@ -58,7 +50,7 @@ func TestTransitionTable(t *testing.T) {
 	}
 	for _, from := range allStates {
 		for _, to := range allStates {
-			want := containsState(expectedTransitions[from], to)
+			want := slices.Contains(expectedTransitions[from], to)
 			sm := NewStateMachine(from, nil)
 			err := sm.Transition(to)
 			if want {

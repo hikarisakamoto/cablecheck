@@ -190,9 +190,7 @@ func TestTransferCorruptedChunk(t *testing.T) {
 	p.mangle = func(seq int, data []byte) []byte {
 		// Corrupt only the very first chunk sent, once: the retry is clean.
 		if seq == 0 && len(data) > 0 {
-			var did bool
-			once.Do(func() { data[0] ^= 0xFF; did = true })
-			_ = did
+			once.Do(func() { data[0] ^= 0xFF })
 		}
 		return data
 	}
@@ -294,7 +292,6 @@ func TestTransferOversizeRejected(t *testing.T) {
 	})
 
 	t.Run("per-file-at-receive", func(t *testing.T) {
-		dstDir := t.TempDir()
 		m := Manifest{
 			Files:     []TransferFile{{Name: "report.json", Size: MaxTransferFileSize + 1, SHA256: "00"}},
 			TotalSize: MaxTransferFileSize + 1,
@@ -302,7 +299,6 @@ func TestTransferOversizeRejected(t *testing.T) {
 		if err := validateManifest(m); err == nil {
 			t.Errorf("validateManifest err = nil, want a per-file cap rejection")
 		}
-		_ = dstDir
 	})
 
 	t.Run("total-at-receive", func(t *testing.T) {
