@@ -153,7 +153,8 @@ type QuickPlan struct {
 
 // Run executes the quick plan; it satisfies peer.PlanFunc. On error the
 // accumulated Results are preserved and marked Incomplete.
-func (q *QuickPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
+func (q *QuickPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error) {
+	defer func() { runErr = q.salvageFinalCounters(ctx, runErr) }()
 	steps := []func(context.Context, peer.RemoteCaller) error{
 		q.stepLink,
 		q.stepInitialCounters,
@@ -276,6 +277,38 @@ func (q *QuickPlan) stepInitialCounters(ctx context.Context, rc peer.RemoteCalle
 // stepFinalCounters snapshots both sides' counters after all tests.
 func (q *QuickPlan) stepFinalCounters(ctx context.Context, rc peer.RemoteCaller) error {
 	return q.snapshotCounters(ctx, rc, &q.Results.FinalCounters)
+}
+
+// salvageFinalCounters is the abort path's best-effort final boundary: an
+// aborted run skipped stepFinalCounters, losing the counter deltas that the
+// physical-layer evidence is built from even when the fault was recorded in
+// the baseline↔abort window. It captures the local side only. A remote call
+// here would ride the abort's teardown: its request-timeout expiry preempts
+// the plan-done event and replaces the real abort cause in the session
+// outcome, and its ErrSessionClosed/context.Canceled failure joined onto a
+// substantive plan error would make the whole error read as pure teardown
+// (peer.isCancellation). The capture context must not inherit the abort's
+// cancellation, only its values, like the soak plan's deferred boundary.
+func (q *QuickPlan) salvageFinalCounters(ctx context.Context, runErr error) error {
+	if runErr == nil {
+		return nil
+	}
+	if q.Results.FinalCounters.PC1 != nil || q.Results.FinalCounters.PC2 != nil {
+		// stepFinalCounters already began; a re-run would overwrite that
+		// capture with a later one.
+		return runErr
+	}
+	if q.Results.InitialCounters.PC1 == nil || len(q.Results.InitialCounters.PC1.Standard) == 0 {
+		// Without a local baseline the local final snapshot can never yield
+		// a delta.
+		return runErr
+	}
+	snap, err := q.Ops.Counters.Snapshot(context.WithoutCancel(ctx))
+	if err != nil {
+		return errors.Join(runErr, fmt.Errorf("testsuite: final counters after abort: %w", err))
+	}
+	q.Results.FinalCounters.PC1 = &snap
+	return runErr
 }
 
 // snapshotCounters fills one PeerCounters pair, local side first so both

@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"cablecheck/internal/evaluate"
 	"cablecheck/internal/model"
 	"cablecheck/internal/parser"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
+	"cablecheck/internal/testutil"
 )
 
 // fakeCaller is a scripted peer.RemoteCaller: it records op order and params
@@ -365,6 +367,12 @@ func TestQuickPlanPreservesPartialTCPForward(t *testing.T) {
 	if !results.Incomplete {
 		t.Errorf("aborted run not marked Incomplete")
 	}
+	if results.FinalCounters.PC1 == nil {
+		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
+	}
+	if results.FinalCounters.PC2 != nil {
+		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	}
 	if len(results.TCP) != 1 {
 		t.Fatalf("results.TCP has %d entries %+v, want the 1 partial forward result", len(results.TCP), results.TCP)
 	}
@@ -401,6 +409,12 @@ func TestQuickPlanAbortsOnMissingTCPSummary(t *testing.T) {
 	var parseErr *parser.ParseError
 	if !errors.As(err, &parseErr) {
 		t.Fatalf("plan.Run error = %T %v, want wrapped *parser.ParseError", err, err)
+	}
+	if results.FinalCounters.PC1 == nil {
+		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
+	}
+	if results.FinalCounters.PC2 != nil {
+		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
 	}
 	if !results.Incomplete {
 		t.Error("Results.Incomplete = false, want true")
@@ -446,6 +460,12 @@ func TestQuickPlanPreservesPartialTCPReverse(t *testing.T) {
 	if !results.Incomplete {
 		t.Errorf("aborted run not marked Incomplete")
 	}
+	if results.FinalCounters.PC1 == nil {
+		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
+	}
+	if results.FinalCounters.PC2 != nil {
+		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	}
 	if len(results.TCP) != 2 {
 		t.Fatalf("results.TCP has %d entries %+v, want forward + partial reverse", len(results.TCP), results.TCP)
 	}
@@ -459,6 +479,169 @@ func TestQuickPlanPreservesPartialTCPReverse(t *testing.T) {
 	if partial.Duration != model.Duration(30*time.Second) || partial.ParallelStreams != 4 {
 		t.Errorf("partial result lost its run parameters: %+v, want 30s / 4 streams", partial)
 	}
+}
+
+// TestQuickPlanAbortSalvagesLocalFinalCounters models the peer session being
+// torn down mid-TCP (the shape of a real peer-lost abort). The deferred final
+// capture uses WithoutCancel, so PC1's counters still land and yield deltas
+// against the baseline; the salvage is deliberately local-only, so the dead
+// peer is never called and PC2 stays absent.
+func TestQuickPlanAbortSalvagesLocalFinalCounters(t *testing.T) {
+	testutil.LeakCheck(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fr := runnertest.New(t)
+	rc := newFakeCallerWithSession(t, ctx)
+	scriptPreTCPSteps(t, fr, rc)
+	started := make(chan struct{})
+	hang := make(chan struct{})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_39_fwd.json"), Delay: hang, Started: started})
+	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+
+	results := &SessionResults{}
+	plan := newQuickPlan(newTestOps(t, fr), results)
+	done := make(chan error, 1)
+	go func() { done <- plan.Run(ctx, rc) }()
+	testutil.WaitFor(t, started, "forward TCP client never started")
+	cancel()
+
+	err := <-done
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled quick Run error = %v, want context cancellation", err)
+	}
+	if !results.Incomplete {
+		t.Errorf("aborted run not marked Incomplete")
+	}
+	if results.FinalCounters.PC1 == nil {
+		t.Fatal("final PC1 counter snapshot missing after abort")
+	}
+	if results.FinalCounters.PC2 != nil {
+		t.Fatalf("final PC2 counter snapshot = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	}
+	if n := opCount(rc.ops, OpCountersSnapshot); n != 1 {
+		t.Errorf("remote saw %d %s ops %q, want only the initial snapshot", n, OpCountersSnapshot, rc.ops)
+	}
+	if _, ok := evaluate.DeltaSet(results.InitialCounters.PC1, results.FinalCounters.PC1); !ok {
+		t.Errorf("PC1 baseline/final pair does not yield deltas")
+	}
+}
+
+// TestQuickPlanAbortWithoutBaselineSkipsSalvage aborts before initial counters
+// were ever taken: a lone final snapshot can produce no delta, so the salvage
+// must not capture anything.
+func TestQuickPlanAbortWithoutBaselineSkipsSalvage(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
+		Result: fixture(t, "ethtool", "settings_e1000e_1g")})
+	rc := newFakeCaller(t)
+	rc.replyStatus(OpLinkSettings, StatusFailed, "peer gone", nil)
+
+	results := &SessionResults{}
+	plan := newQuickPlan(newTestOps(t, fr), results)
+	if err := plan.Run(context.Background(), rc); err == nil {
+		t.Fatalf("plan.Run succeeded despite the link step failure")
+	}
+	if n := opCount(rc.ops, OpCountersSnapshot); n != 0 {
+		t.Errorf("remote saw %d %s ops, want none without a baseline", n, OpCountersSnapshot)
+	}
+	if results.FinalCounters.PC1 != nil || results.FinalCounters.PC2 != nil {
+		t.Errorf("final counters = %+v, want empty without a baseline", results.FinalCounters)
+	}
+}
+
+// TestSalvageFinalCountersGuards pins the salvage no-op conditions directly:
+// a clean run, an already-started final capture, and a missing or empty local
+// baseline must all leave FinalCounters untouched and return the original
+// error unchanged. Ops is nil, so any capture attempt panics loudly.
+func TestSalvageFinalCountersGuards(t *testing.T) {
+	abort := errors.New("boom")
+	withCounters := func() *model.CounterSnapshot {
+		return &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 1}}
+	}
+	cases := []struct {
+		name   string
+		mutate func(*SessionResults)
+		runErr error
+	}{
+		{"clean run", func(r *SessionResults) { r.InitialCounters.PC1 = withCounters() }, nil},
+		{"final capture already started", func(r *SessionResults) {
+			r.InitialCounters.PC1 = withCounters()
+			r.FinalCounters.PC2 = withCounters()
+		}, abort},
+		{"no local baseline", func(r *SessionResults) { r.InitialCounters.PC2 = withCounters() }, abort},
+		{"empty local baseline", func(r *SessionResults) {
+			r.InitialCounters.PC1 = &model.CounterSnapshot{Standard: map[string]uint64{}}
+		}, abort},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			results := &SessionResults{}
+			tc.mutate(results)
+			pc2Before := results.FinalCounters.PC2
+			q := &QuickPlan{Results: results}
+			if err := q.salvageFinalCounters(context.Background(), tc.runErr); !errors.Is(err, tc.runErr) {
+				t.Errorf("salvage error = %v, want the original %v unchanged", err, tc.runErr)
+			}
+			if results.FinalCounters.PC1 != nil || results.FinalCounters.PC2 != pc2Before {
+				t.Errorf("final counters = %+v, want untouched", results.FinalCounters)
+			}
+		})
+	}
+}
+
+// TestQuickPlanFinalStepPartialFailureDoesNotResnapshot fails stepFinalCounters
+// after its local capture (remote reports failure): the salvage must not
+// overwrite the already-taken PC1 snapshot with a later one or re-issue the
+// RPC — exactly two snapshot ops total, initial and final.
+func TestQuickPlanFinalStepPartialFailureDoesNotResnapshot(t *testing.T) {
+	fr := runnertest.New(t)
+	rc := newFakeCaller(t)
+	scriptPreTCPSteps(t, fr, rc)
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-c"),
+		StdoutFile: fixturePath("iperf", "tcp_39_fwd.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("--bidir"),
+		StdoutFile: fixturePath("iperf", "bidir_314.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-u"),
+		StdoutFile: fixturePath("iperf", "udp_316.json")})
+	fr.Script(runnertest.Script{Name: "iperf3", Match: runnertest.ArgsContain("-s"),
+		StdoutFile: fixturePath("iperf", "server_listening.txt")})
+	rc.reply(OpIperfCaps, &model.Iperf3Caps{Version: "3.16", JSON: true, UDP: true, Bidir: true})
+	for range 3 {
+		rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
+		rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+	}
+	rc.reply(OpIperfClientRun, &TCPRunResult{TCP: model.TCPResult{SenderBitsPerSecond: 5e8, ReceiverBitsPerSecond: 4.9e8}})
+	rc.reply(OpIperfUDPRun, &UDPRunResult{UDP: model.UDPResult{
+		TargetBps: 800000000, ActualSenderBps: 799958000, JitterMs: 0.02}})
+	rc.replyStatus(OpCountersSnapshot, StatusFailed, "worker died during final capture", nil)
+
+	results := &SessionResults{}
+	plan := newQuickPlan(newTestOps(t, fr), results)
+	if err := plan.Run(context.Background(), rc); err == nil {
+		t.Fatalf("plan.Run succeeded despite the final counters failure")
+	}
+	if n := opCount(rc.ops, OpCountersSnapshot); n != 2 {
+		t.Errorf("remote saw %d %s ops %q, want exactly initial + final", n, OpCountersSnapshot, rc.ops)
+	}
+	if results.FinalCounters.PC1 == nil {
+		t.Error("final PC1 counter snapshot missing, want the capture taken before the remote failure")
+	}
+	if results.FinalCounters.PC2 != nil {
+		t.Errorf("final PC2 counter snapshot = %+v, want absent after the remote failure", results.FinalCounters.PC2)
+	}
+}
+
+// opCount counts occurrences of op in the recorded remote op order.
+func opCount(ops []string, op string) int {
+	n := 0
+	for _, o := range ops {
+		if o == op {
+			n++
+		}
+	}
+	return n
 }
 
 func TestQuickPlanRecordsUnavailableRemotePing(t *testing.T) {

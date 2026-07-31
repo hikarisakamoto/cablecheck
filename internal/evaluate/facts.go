@@ -64,6 +64,11 @@ type SideFacts struct {
 	// CountersAvailable reports whether both snapshots carried at least one
 	// normalized counter (absence is not zero).
 	CountersAvailable bool
+	// BaselineCaptured reports whether the initial snapshot carried at least
+	// one normalized counter. Alongside CountersAvailable=false it
+	// distinguishes "final snapshot missing after an interrupted run" from
+	// "counters never available at all".
+	BaselineCaptured bool
 }
 
 // DirFacts holds the per-direction transport and performance evidence for one
@@ -425,8 +430,8 @@ func expectedTCPTrials(r *model.Report) int {
 // sideFacts folds a snapshot pair into per-side counter facts.
 func sideFacts(before, after *model.CounterSnapshot, selfInflictedCarrier uint64) SideFacts {
 	set, ok := DeltaSet(before, after)
-	available := before != nil && after != nil &&
-		len(before.Standard) > 0 && len(after.Standard) > 0
+	baseline := before != nil && len(before.Standard) > 0
+	available := baseline && after != nil && len(after.Standard) > 0
 	sum := func(keys ...string) uint64 {
 		var total uint64
 		for _, k := range keys {
@@ -461,6 +466,7 @@ func sideFacts(before, after *model.CounterSnapshot, selfInflictedCarrier uint64
 		CarrierPHYErrors:     sum("tx_carrier", "phy_errors"),
 		DeltaOK:              ok && available,
 		CountersAvailable:    available,
+		BaselineCaptured:     baseline,
 		RXErrorEvidence:      present(rxErrorEvidenceKeys...),
 	}
 }

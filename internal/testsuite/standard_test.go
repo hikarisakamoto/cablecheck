@@ -234,4 +234,10 @@ func TestStandardPlanPreservesPartialOnError(t *testing.T) {
 	if results.TCP[0].Duration != model.Duration(60*time.Second) {
 		t.Errorf("partial TCP result duration = %v, want the 60s standard duration", results.TCP[0].Duration)
 	}
+	if results.FinalCounters.PC1 == nil {
+		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
+	}
+	if results.FinalCounters.PC2 != nil {
+		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	}
 }

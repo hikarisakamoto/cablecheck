@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.9.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.10.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -52,7 +52,15 @@ fallback can only undercount; and restricts `TR-03` to classified
 fragmentation failures (ICMP frag-needed/packet-too-big replies and local
 EMSGSIZE send errors), so other ICMP errors — e.g. host-unreachable replies
 while the link is down — no longer masquerade as an MTU mismatch and instead
-surface as `TR-01` loss evidence.
+surface as `TR-01` loss evidence. Version `1.10.0` makes the limitation
+markers name the actual counter gap on interrupted runs: when a side captured
+a counter baseline but the run was interrupted before its final snapshot,
+`LIM-01` (both sides affected) and `LIM-02` (one side affected) say the final
+snapshot is missing instead of claiming the NIC never exposed error counters —
+the old wordings remain for completed runs and for NICs where no counters were
+ever readable. Interrupted quick/standard runs also salvage a best-effort
+local final counter snapshot at the abort boundary, so the coordinator side's
+deltas survive a lost peer and the physical rules keep their primary evidence.
 
 ### Reference conditions and status labels
 

@@ -19,6 +19,108 @@ func TestRuleLIM05(t *testing.T) {
 	}
 }
 
+// TestRuleLIM01NamesTheActualCounterGap pins the two counter-evidence wordings:
+// an interrupted run that captured a baseline but no final snapshot must say
+// so, not claim the NICs never exposed counters at all — and only an
+// interrupted run may make that claim.
+func TestRuleLIM01NamesTheActualCounterGap(t *testing.T) {
+	rule := ruleByID(t, "LIM-01")
+
+	t.Run("interrupted run with a baseline names the missing final snapshot", func(t *testing.T) {
+		f := &Facts{Partial: true}
+		f.PC1.BaselineCaptured = true
+		f.PC2.BaselineCaptured = true
+		fd := evaluateRule(rule, f)
+		if fd == nil || fd.Severity != model.SevMarker {
+			t.Fatalf("LIM-01 on an aborted run = %+v, want one SevMarker finding", fd)
+		}
+		joined := strings.Join(fd.Evidence, "; ")
+		if !strings.Contains(joined, "final NIC counter snapshot missing") {
+			t.Errorf("evidence = %q, want the missing-final-snapshot wording", joined)
+		}
+		if strings.Contains(joined, "NIC error counters unavailable on both sides") {
+			t.Errorf("evidence = %q, must not claim counters were never available", joined)
+		}
+	})
+
+	t.Run("counters never available", func(t *testing.T) {
+		fd := evaluateRule(rule, &Facts{Partial: true})
+		if fd == nil || fd.Severity != model.SevMarker {
+			t.Fatalf("LIM-01 without any counters = %+v, want one SevMarker finding", fd)
+		}
+		if joined := strings.Join(fd.Evidence, "; "); !strings.Contains(joined, "NIC error counters unavailable on both sides") {
+			t.Errorf("evidence = %q, want the never-available wording", joined)
+		}
+	})
+
+	t.Run("one side's baseline is enough to name the interruption", func(t *testing.T) {
+		f := &Facts{Partial: true}
+		f.PC1.BaselineCaptured = true
+		fd := evaluateRule(rule, f)
+		if fd == nil {
+			t.Fatal("LIM-01 = nil, want a finding")
+		}
+		if joined := strings.Join(fd.Evidence, "; "); !strings.Contains(joined, "final NIC counter snapshot missing") {
+			t.Errorf("evidence = %q, want the missing-final-snapshot wording", joined)
+		}
+	})
+
+	t.Run("a completed run never claims interruption", func(t *testing.T) {
+		f := &Facts{}
+		f.PC1.BaselineCaptured = true
+		f.PC2.BaselineCaptured = true
+		fd := evaluateRule(rule, f)
+		if fd == nil {
+			t.Fatal("LIM-01 = nil, want a finding")
+		}
+		joined := strings.Join(fd.Evidence, "; ")
+		if strings.Contains(joined, "interrupted") {
+			t.Errorf("evidence = %q, must not claim interruption on a completed run", joined)
+		}
+		if !strings.Contains(joined, "NIC error counters unavailable on both sides") {
+			t.Errorf("evidence = %q, want the never-available wording", joined)
+		}
+	})
+}
+
+// TestRuleLIM02NamesInterruptedSide pins the one-sided variant of the same
+// truthfulness fix: after an aborted run the peer side often holds only a
+// baseline (the local side salvaged its final snapshot), and LIM-02 must name
+// the interruption instead of claiming that NIC exposes no receive-error
+// counter.
+func TestRuleLIM02NamesInterruptedSide(t *testing.T) {
+	rule := ruleByID(t, "LIM-02")
+
+	t.Run("interrupted baseline-only side", func(t *testing.T) {
+		f := &Facts{Partial: true}
+		f.PC1.RXErrorEvidence = true
+		f.PC2.BaselineCaptured = true
+		fd := evaluateRule(rule, f)
+		if fd == nil {
+			t.Fatal("LIM-02 = nil, want a finding")
+		}
+		joined := strings.Join(fd.Evidence, "; ")
+		if !strings.Contains(joined, "pc2") || !strings.Contains(joined, "final counter snapshot is missing") {
+			t.Errorf("evidence = %q, want pc2's missing-final-snapshot wording", joined)
+		}
+		if strings.Contains(joined, "exposes no receive-error counter") {
+			t.Errorf("evidence = %q, must not claim the NIC exposes no counter", joined)
+		}
+	})
+
+	t.Run("genuinely counterless side keeps the exposure wording", func(t *testing.T) {
+		f := &Facts{}
+		f.PC1.RXErrorEvidence = true
+		fd := evaluateRule(rule, f)
+		if fd == nil {
+			t.Fatal("LIM-02 = nil, want a finding")
+		}
+		if joined := strings.Join(fd.Evidence, "; "); !strings.Contains(joined, "pc2 exposes no receive-error counter") {
+			t.Errorf("evidence = %q, want the exposure wording", joined)
+		}
+	})
+}
+
 // TestReceiveErrorEvidenceGapIsALimitation pins the blind-side guard: a side
 // whose driver exposes no receive-error counter never measured corruption, so a
 // clean-looking verdict must be downgraded rather than certified.

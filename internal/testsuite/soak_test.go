@@ -97,7 +97,7 @@ func replySoakCycle(rc *fakeCaller) {
 // each with its own counter snapshot, and that the periodic idle gap is
 // honored between cycles (a clock waiter appears after each cycle).
 func TestSoakPeriodicCycles(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	scriptSoakCycle(fr)
@@ -166,7 +166,7 @@ func TestSoakPeriodicCycles(t *testing.T) {
 // timer between cycles; advancing the one whole-run budget timer then cancels
 // and discards the in-flight cycle at the exact deadline.
 func TestSoakContinuousRunsBackToBackAndHonorsBudget(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	scriptSoakCycle(fr)
@@ -210,7 +210,7 @@ func TestSoakContinuousRunsBackToBackAndHonorsBudget(t *testing.T) {
 // first TCP pass is starting. The completed first cycle remains intact and no
 // measurement from the uncommitted second cycle leaks into the session.
 func TestSoakCancelDiscardsPartialCycle(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
@@ -281,7 +281,7 @@ func TestSoakCancelDiscardsPartialCycle(t *testing.T) {
 // boundary uses WithoutCancel, so PC1 can still capture locally, but the
 // RemoteCaller must reject PC2's snapshot once its session context is done.
 func TestSoakCancelFinalCountersRetainLocalAndLeaveRemoteUnavailable(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
@@ -384,7 +384,7 @@ func (c *recordingSoakClock) After(d time.Duration) <-chan time.Time {
 // while fake wall-clock time advances. The whole-run budget timer must have
 // been registered at plan entry, not after link and counter setup finish.
 func TestSoakDurationStartsBeforeInitialSetup(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	scriptSoakCycle(fr)
@@ -427,7 +427,7 @@ func TestSoakDurationStartsBeforeInitialSetup(t *testing.T) {
 }
 
 func TestSoakFinalCountersIncludeLastCycle(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	scriptSoakCycle(fr)
@@ -474,7 +474,7 @@ func TestSoakFinalCountersIncludeLastCycle(t *testing.T) {
 // traffic stays transactional, but independent before/after counter captures
 // must still bound counter movement caused by that discarded load.
 func TestSoakDeadlineDuringFirstCycleStillBoundsWholeRunCounters(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"),
@@ -540,7 +540,7 @@ func counterDeltaForTest(before, after *model.CounterSnapshot, name string) (uin
 // the plan records the monitor's events in the session results timeline so the
 // report reflects mid-soak link disturbances.
 func TestSoakEventLog(t *testing.T) {
-	defer testutil.LeakCheck(t)
+	testutil.LeakCheck(t)
 
 	fr := runnertest.New(t)
 	scriptSoakCycle(fr)
