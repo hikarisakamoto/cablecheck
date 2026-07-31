@@ -2,7 +2,7 @@
 
 ## 1. Overall Result
 
-**FAILED** — The cable failed critical tests and must be replaced.
+**FAILED** — The link failed critical physical tests. Replace the cable first; if the fault persists, suspect connectors or the NIC port.
 
 ## 2. Score & Rule Evidence
 

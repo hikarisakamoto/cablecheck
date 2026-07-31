@@ -81,8 +81,8 @@ func TestHealthFormatting(t *testing.T) {
 		{model.HealthExcellent, "excellent", "Excellent", "The cable passed every test with no anomalies."},
 		{model.HealthGood, "good", "Good", "The cable is healthy; only minor deviations were observed."},
 		{model.HealthWarning, "warning", "Warning", "The cable works but shows signs that deserve attention."},
-		{model.HealthPoor, "poor", "Poor", "The cable exhibits significant problems and should be replaced."},
-		{model.HealthFailed, "failed", "Failed", "The cable failed critical tests and must be replaced."},
+		{model.HealthPoor, "poor", "Poor", "The link shows significant physical problems — the cable or its connectors are the leading suspect; confirm by substitution."},
+		{model.HealthFailed, "failed", "Failed", "The link failed critical physical tests. Replace the cable first; if the fault persists, suspect connectors or the NIC port."},
 		{model.HealthInconclusive, "inconclusive", "Inconclusive", "The collected evidence does not support a verdict about the cable."},
 	}
 	for _, test := range tests {

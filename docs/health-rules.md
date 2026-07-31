@@ -1,6 +1,6 @@
 # Health classification rules
 
-CableCheck runs a fixed, deterministic rule set (`1.10.0`) once the test plan
+CableCheck runs a fixed, deterministic rule set (`1.11.0`) once the test plan
 finishes. Rules inspect physical, transport, performance, host, and coverage
 evidence. The final class isn't a simple average. Credible physical fault
 evidence dominates host-sensitive performance symptoms.
@@ -61,7 +61,9 @@ the old wordings remain for completed runs and for NICs where no counters were
 ever readable. Interrupted quick/standard runs also salvage a best-effort
 local final counter snapshot at the abort boundary and request the peer's final
 snapshot through a short, non-arming RPC when it remains responsive. The local
-deltas still survive a lost peer.
+deltas still survive a lost peer. Version `1.11.0` makes verdict prose distinguish
+link-level evidence from component isolation and describes `PHY-03` values as
+carrier state changes rather than bounces. Thresholds are unchanged.
 
 ### Reference conditions and status labels
 
@@ -115,7 +117,7 @@ but do not establish CableCheck's health boundary.
 | CRC warning/poor | Poor when reliable aggregate CRC-class movement is `> 10`; 1–10 warns. CRC-class movement includes the unexplained remainder of the driver's receive-error aggregate. | Any movement is anomalous on a direct link; the first band avoids escalating a small absolute count immediately. Counting the remainder is what makes NICs with no per-cause counter (Realtek) contribute evidence at all instead of a silent zero. | Conservative policy |
 | CRC failed | Failed when reliable aggregate movement is `> 1000`, unless every counted error came from a driver receive-error aggregate rather than a per-cause counter. | A large absolute error count is treated as independently compelling physical evidence. An unexplained aggregate is not: those counters have driver-defined semantics and a driver could fold its own receive-ring drops into them, so on count alone such evidence never escalates past warning and reaches failed only with corroborating ping loss. That ceiling is what stops a host-side drop from being scored as a cable fault. | Conservative policy |
 | CRC + ping corroboration | CRC movement `> 10` fails when any standard-ping direction is also `> 1%` loss. | Independent counter and packet-loss signals increase confidence that corruption is observable in traffic. | Conservative policy |
-| Carrier events | Failed at `>= 3` events on the worse reliable side; 1–2 is poor. | The worse side avoids double-counting one physical bounce observed by both peers; repeated bounces are decisive. | Conservative policy |
+| Carrier events | Failed at `>= 3` state changes on the worse reliable side; 1–2 is poor. | The worse side avoids double-counting the same carrier transition observed by both peers; at least three transitions are decisive. Each down and up edge counts separately. | Conservative policy |
 | Frame-size errors | Poor when reliable aggregate movement is `> 10`; 1–10 warns. | Jabber, oversize, undersize, and length movement is abnormal, with a small-count warning band. | Conservative policy |
 | Transmit-carrier/PHY errors | Poor when reliable aggregate `tx_carrier` and `phy_errors` movement is `> 10`; failed when it is `> 1000`; 1–10 warns. | These counters are near-direct physical-layer evidence. They use an independent policy with the same conservative count bands as CRC-class errors, without CRC-specific ping-loss corroboration. | Conservative policy |
 | Negotiated-speed reduction | Poor when negotiated speed is `<= 50%` of expected speed; a smaller reduction warns. | A large capability loss, such as 100 Mbit/s on a 1 Gbit/s-capable pair, is strong physical evidence even when traffic fills the reduced link. | Conservative policy |
@@ -152,8 +154,8 @@ but do not establish CableCheck's health boundary.
 | `PHY-02` | physical | CRC-class delta is 11–1000, with no standard-ping direction above 1% loss. | poor |
 | `PHY-02` | physical | CRC-class delta is greater than 1000 with at least one per-cause counter contributing, or is greater than 10 and any standard-ping direction has greater than 1% loss. | failed |
 | `PHY-02` | physical | The delta came entirely from driver receive-error aggregates and ping is clean. Severity stays at warning whatever the count, and the finding names the errors as unexplained rather than as CRC. | warning |
-| `PHY-03` | physical | Worst reliable per-side carrier-event delta is 1–2. The worse side is used rather than summing both observations of the same bounce. When neither side has reliable deltas, the monitor's spontaneous carrier transitions are used instead (same both-edges unit; evidence names the monitor). | poor |
-| `PHY-03` | physical | Worst reliable per-side carrier-event delta (or the monitor fallback count) is at least 3. | failed |
+| `PHY-03` | physical | Worst reliable per-side carrier-state-change delta is 1–2. The worse side is used rather than summing both observations of the same transition. When neither side has reliable deltas, the monitor's spontaneous carrier transitions are used instead (same both-edges unit; evidence names the monitor). | poor |
+| `PHY-03` | physical | Worst reliable per-side carrier-state-change delta (or the monitor fallback count) is at least 3. | failed |
 | `PHY-04` | physical | The monitor observes at least one mid-test speed/duplex renegotiation. | poor |
 | `PHY-05` | physical | Either side negotiates half duplex. | poor |
 | `PHY-06` | physical | Negotiated and expected speeds are known, and negotiated speed is below expected but above 50% of expected. | warning |

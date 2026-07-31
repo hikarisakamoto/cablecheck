@@ -104,7 +104,7 @@ func unclassifiedRXTotal(f *Facts) uint64 {
 
 // carrierEvents returns the worst per-side carrier event count among the
 // reliable sides (both sides observe the same physical link, so summing would
-// double-count one bounce). When no side has reliable deltas — an aborted run
+// double-count the same transition). When no side has reliable deltas — an aborted run
 // never captures final snapshots — it falls back to the monitor's transition
 // count and reports the switch via fromMonitor. Counters stay authoritative:
 // PC1's link_resets is the same sysfs counter the monitor polls.
@@ -237,7 +237,7 @@ func rulePHY03(f *Facts, thresholds Thresholds) *model.Finding {
 		RuleID:   "PHY-03",
 		Category: model.CategoryPhysical,
 		Severity: sev,
-		Text:     fmt.Sprintf("The link bounced %d time(s) during the test.", events),
+		Text:     fmt.Sprintf("The link carrier changed state %d time(s) during the test.", events),
 		Evidence: []string{evidence},
 	}
 }

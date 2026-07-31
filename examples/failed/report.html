@@ -55,7 +55,7 @@
     <div class="hero-grid">
       <div>
         <h1>Failed</h1>
-        <p>The cable failed critical tests and must be replaced.</p>
+        <p>The link failed critical physical tests. Replace the cable first; if the fault persists, suspect connectors or the NIC port.</p>
       </div>
       <div class="score">25/100</div>
     </div>
@@ -64,13 +64,13 @@
 
   <div class="sections">
     <details open><summary>1. Overall Result</summary><div class="content">
-      <p><strong>FAILED</strong> — The cable failed critical tests and must be replaced.</p>
+      <p><strong>FAILED</strong> — The link failed critical physical tests. Replace the cable first; if the fault persists, suspect connectors or the NIC port.</p>
     </div></details>
 
     <details open><summary>2. Score &amp; Rule Evidence</summary><div class="content">
       
-      <dl><dt>Score</dt><dd>25/100</dd><dt>Reason</dt><dd>The link was down when testing ended.</dd><dt>Reason</dt><dd>The link bounced 4 time(s) during the test.</dd><dt>Reason</dt><dd>Critical evidence is missing — a clean-looking result would not be trustworthy.</dd><dt>Reason</dt><dd>The run was interrupted — the report covers only the tests that completed.</dd></dl>
-      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody><tr><td>PHY-01</td><td>physical</td><td><span class="chip severity-failed">Failed</span></td><td>The link was down when testing ended.</td></tr><tr><td>PHY-03</td><td>physical</td><td><span class="chip severity-failed">Failed</span></td><td>The link bounced 4 time(s) during the test.</td></tr><tr><td>LIM-01</td><td>limitation</td><td><span class="chip severity-marker">Marker</span></td><td>Critical evidence is missing — a clean-looking result would not be trustworthy.</td></tr><tr><td>LIM-03</td><td>limitation</td><td><span class="chip severity-marker">Marker</span></td><td>The run was interrupted — the report covers only the tests that completed.</td></tr></tbody></table></div>
+      <dl><dt>Score</dt><dd>25/100</dd><dt>Reason</dt><dd>The link was down when testing ended.</dd><dt>Reason</dt><dd>The link carrier changed state 4 time(s) during the test.</dd><dt>Reason</dt><dd>Critical evidence is missing — a clean-looking result would not be trustworthy.</dd><dt>Reason</dt><dd>The run was interrupted — the report covers only the tests that completed.</dd></dl>
+      <div class="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Severity</th><th>Finding</th></tr></thead><tbody><tr><td>PHY-01</td><td>physical</td><td><span class="chip severity-failed">Failed</span></td><td>The link was down when testing ended.</td></tr><tr><td>PHY-03</td><td>physical</td><td><span class="chip severity-failed">Failed</span></td><td>The link carrier changed state 4 time(s) during the test.</td></tr><tr><td>LIM-01</td><td>limitation</td><td><span class="chip severity-marker">Marker</span></td><td>Critical evidence is missing — a clean-looking result would not be trustworthy.</td></tr><tr><td>LIM-03</td><td>limitation</td><td><span class="chip severity-marker">Marker</span></td><td>The run was interrupted — the report covers only the tests that completed.</td></tr></tbody></table></div>
       
     </div></details>
 
@@ -138,7 +138,7 @@
     </div></details>
 
     <details open><summary>18. Findings Detail</summary><div class="content">
-      <article class="finding"><div class="finding-head"><strong>PHY-01</strong><span class="chip severity-failed">Failed</span><span>physical</span></div><p>The link was down when testing ended.</p><ul><li>post-test link state reports no carrier on at least one side</li></ul></article><article class="finding"><div class="finding-head"><strong>PHY-03</strong><span class="chip severity-failed">Failed</span><span>physical</span></div><p>The link bounced 4 time(s) during the test.</p><ul><li>carrier change counter advanced by 4 on the worse side</li></ul></article><article class="finding"><div class="finding-head"><strong>LIM-01</strong><span class="chip severity-marker">Marker</span><span>limitation</span></div><p>Critical evidence is missing — a clean-looking result would not be trustworthy.</p><ul><li>no TCP throughput result in either direction</li></ul></article><article class="finding"><div class="finding-head"><strong>LIM-03</strong><span class="chip severity-marker">Marker</span><span>limitation</span></div><p>The run was interrupted — the report covers only the tests that completed.</p><ul><li>partial run (interrupt or abort)</li></ul></article>
+      <article class="finding"><div class="finding-head"><strong>PHY-01</strong><span class="chip severity-failed">Failed</span><span>physical</span></div><p>The link was down when testing ended.</p><ul><li>post-test link state reports no carrier on at least one side</li></ul></article><article class="finding"><div class="finding-head"><strong>PHY-03</strong><span class="chip severity-failed">Failed</span><span>physical</span></div><p>The link carrier changed state 4 time(s) during the test.</p><ul><li>carrier change counter advanced by 4 on the worse side</li></ul></article><article class="finding"><div class="finding-head"><strong>LIM-01</strong><span class="chip severity-marker">Marker</span><span>limitation</span></div><p>Critical evidence is missing — a clean-looking result would not be trustworthy.</p><ul><li>no TCP throughput result in either direction</li></ul></article><article class="finding"><div class="finding-head"><strong>LIM-03</strong><span class="chip severity-marker">Marker</span><span>limitation</span></div><p>The run was interrupted — the report covers only the tests that completed.</p><ul><li>partial run (interrupt or abort)</li></ul></article>
     </div></details>
 
     <details open><summary>19. Recommendations</summary><div class="content">

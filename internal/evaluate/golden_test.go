@@ -121,7 +121,7 @@ func factsHostLimited() *Facts {
 }
 
 // factsDisconnected: the link was down when testing ended (PHY-01 FAILED) and
-// it bounced repeatedly (PHY-03 ≥3 → FAILED). No traffic completed. → FAILED.
+// changed carrier state repeatedly (PHY-03 ≥3 → FAILED). No traffic completed. → FAILED.
 func factsDisconnected() *Facts {
 	f := &Facts{
 		NegotiatedSpeed: 1_000_000_000,
