@@ -158,8 +158,27 @@ func TestCounterDelta(t *testing.T) {
 		if f.PC1.CountersAvailable {
 			t.Errorf("PC1.CountersAvailable = true, want false for empty counter maps")
 		}
+		if f.PC1.BaselineCaptured {
+			t.Errorf("PC1.BaselineCaptured = true, want false for an empty baseline map")
+		}
 		if f.PC2.CountersAvailable || f.PC2.DeltaOK {
 			t.Errorf("PC2 = %+v, want zero facts for missing snapshots", f.PC2)
+		}
+	})
+
+	t.Run("baseline without a final snapshot marks the interruption", func(t *testing.T) {
+		before := snap(map[string]uint64{"rx_crc": 10})
+		r := &model.Report{
+			InitialCounters: model.PeerCounters{PC1: &before, PC2: &before},
+		}
+		f := FactsFromReport(r)
+		for side, sf := range map[string]SideFacts{"PC1": f.PC1, "PC2": f.PC2} {
+			if sf.CountersAvailable || sf.DeltaOK {
+				t.Errorf("%s = %+v, want counters unavailable without a final snapshot", side, sf)
+			}
+			if !sf.BaselineCaptured {
+				t.Errorf("%s.BaselineCaptured = false, want true when the initial snapshot has counters", side)
+			}
 		}
 	})
 }

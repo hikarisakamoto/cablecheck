@@ -844,7 +844,14 @@ func ruleLIM01(f *Facts, _ Thresholds) *model.Finding {
 		ev = append(ev, "no TCP throughput result in either direction")
 	}
 	if noCounters {
-		ev = append(ev, "NIC error counters unavailable on both sides")
+		// Only an interrupted run may blame the missing final snapshot on the
+		// interruption; a completed run reaching this branch genuinely had no
+		// usable counters (e.g. a final capture that came back empty).
+		if f.Partial && (f.PC1.BaselineCaptured || f.PC2.BaselineCaptured) {
+			ev = append(ev, "final NIC counter snapshot missing — a counter baseline was captured but the run was interrupted before counter deltas could be computed")
+		} else {
+			ev = append(ev, "NIC error counters unavailable on both sides")
+		}
 	}
 	if noRXEvidence && !noCounters {
 		ev = append(ev, "neither NIC exposes a receive-error counter, so frame corruption was never measured")
@@ -886,13 +893,19 @@ func ruleLIM02(f *Facts, _ Thresholds) *model.Finding {
 		}
 	}
 	// One side measuring receive errors leaves that direction's receive path
-	// unverified; the other side's clean counters say nothing about it.
+	// unverified; the other side's clean counters say nothing about it. When
+	// the unmeasured side holds a baseline and the run was interrupted, the
+	// gap is the missing final snapshot, not the NIC's counter exposure.
 	if f.PC1.RXErrorEvidence != f.PC2.RXErrorEvidence {
-		unmeasured := "pc1"
+		unmeasured, side := "pc1", f.PC1
 		if f.PC1.RXErrorEvidence {
-			unmeasured = "pc2"
+			unmeasured, side = "pc2", f.PC2
 		}
-		ev = append(ev, fmt.Sprintf("%s exposes no receive-error counter, so corruption arriving there was never measured", unmeasured))
+		if f.Partial && side.BaselineCaptured && !side.CountersAvailable {
+			ev = append(ev, fmt.Sprintf("%s's final counter snapshot is missing — the run was interrupted, so receive errors arriving there after the baseline went unmeasured", unmeasured))
+		} else {
+			ev = append(ev, fmt.Sprintf("%s exposes no receive-error counter, so corruption arriving there was never measured", unmeasured))
+		}
 	}
 	if len(ev) == 0 {
 		return nil

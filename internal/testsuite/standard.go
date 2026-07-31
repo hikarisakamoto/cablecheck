@@ -125,8 +125,9 @@ func (p *StandardPlan) engine() *QuickPlan {
 // Run executes the standard plan; it satisfies peer.PlanFunc. On error the
 // accumulated Results are preserved and marked Incomplete, exactly as the
 // quick plan does — partial per-repeat and per-direction results survive.
-func (p *StandardPlan) Run(ctx context.Context, rc peer.RemoteCaller) error {
+func (p *StandardPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error) {
 	q := p.engine()
+	defer func() { runErr = q.salvageFinalCounters(ctx, runErr) }()
 	reps := repeats(p.TCPRepeats)
 	steps := []func(context.Context, peer.RemoteCaller) error{
 		q.stepLink,

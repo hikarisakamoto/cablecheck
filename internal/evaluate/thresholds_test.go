@@ -46,7 +46,7 @@ func TestDefaultThresholdsForRulesVersion180(t *testing.T) {
 		GoodScoreBand:                 ScoreBand{Min: 80, Max: 94},
 		ExcellentScoreBand:            ScoreBand{Min: 95, Max: 100},
 	}
-	if RulesVersion != "1.9.0" {
+	if RulesVersion != "1.10.0" {
 		t.Fatalf("RulesVersion = %q; review the pinned default thresholds before updating this test", RulesVersion)
 	}
 	if got := Default(); !reflect.DeepEqual(got, want) {
