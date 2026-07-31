@@ -72,7 +72,7 @@ initializing -> preflight -> listening (PC1) / connecting (PC2)
 Any nonterminal state can end in aborted or failed.
 ```
 
-On PC1, entering `testing` starts the plan driver and the application-owned sysfs monitor. The plan runs local operations directly and remote operations through `RemoteCaller.Call`. On success, PC1 freezes monitoring data, assembles and evaluates the report, writes all rendered outputs, optionally transfers the JSON/Markdown/text core (the self-contained HTML stays on PC1), exchanges `complete`, and maps the classification to an exit code. If the run ends abnormally, completed measurements are kept in a partial report when possible.
+On PC1, entering `testing` starts the plan driver and the application-owned sysfs monitor. The plan runs local operations directly and ordinary remote operations through `RemoteCaller.Call`; bounded final-counter cleanup uses `CallDetached` so its expiry cannot replace the real plan failure. On success, PC1 freezes monitoring data, assembles and evaluates the report, writes all rendered outputs, optionally transfers the JSON/Markdown/text core (the self-contained HTML stays on PC1), exchanges `complete`, and maps the classification to an exit code. If the run ends abnormally, completed measurements are kept in a partial report when possible.
 
 PC2 runs the same preflight and peer machinery but supplies an `OpHandler` instead of a plan. It executes one operation at a time until report/complete or abort. On every exit it writes a local `diagnostic.json` covering its role, test ID, mode, IPs, final state, any error, the reason and detail of a peer abort, PC1's verdict, and an index of its raw files. The diagnostic isn't a `model.Report`, since PC2 runs no evaluation, and it's never transferred. It exists to make a failed run debuggable from PC2 alone.
 
@@ -102,7 +102,7 @@ reader ------------ evFrame / evConnErr --------+
 stdin ------------- evStdin / evStdinEOF -------+
 op executor -------- evOpProgress / evOpDone ----+--> session event loop
 plan driver -------- evPlanDone -----------------+        |
-RPC timer ---------- evCallExpired --------------+        +--> state transitions
+normal RPC timer --- evCallExpired --------------+        +--> state transitions
 transfer callback -- evTransferDone -------------+        +--> protocol responses
 ```
 

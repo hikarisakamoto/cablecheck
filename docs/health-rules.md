@@ -44,7 +44,7 @@ sustained rate to convict, marks `TR-06` host-sensitive so measured host evidenc
 can hold a retransmission verdict at `INCONCLUSIVE`, and lowers the retransmit
 warning boundary to 0.01%. Version `1.9.0` lets `PHY-03` fall back to the link
 monitor's spontaneous carrier transitions when neither side has reliable
-counter deltas (an aborted run captures no final snapshots), with the same
+counter deltas, with the same
 thresholds and the monitor named in the evidence — counters stay authoritative
 whenever any side has them, and sub-poll-interval flaps (surfaced as
 renegotiation events, `PHY-04`'s evidence) are deliberately not counted, so the
@@ -59,8 +59,9 @@ a counter baseline but the run was interrupted before its final snapshot,
 snapshot is missing instead of claiming the NIC never exposed error counters —
 the old wordings remain for completed runs and for NICs where no counters were
 ever readable. Interrupted quick/standard runs also salvage a best-effort
-local final counter snapshot at the abort boundary, so the coordinator side's
-deltas survive a lost peer and the physical rules keep their primary evidence.
+local final counter snapshot at the abort boundary and request the peer's final
+snapshot through a short, non-arming RPC when it remains responsive. The local
+deltas still survive a lost peer.
 
 ### Reference conditions and status labels
 

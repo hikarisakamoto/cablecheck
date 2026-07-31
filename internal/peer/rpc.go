@@ -13,14 +13,12 @@ import (
 
 // RPC-surface errors of the coordinator session.
 var (
-	// ErrSessionClosed is returned by Call when the session tears down
-	// before the result arrives (or a Call is attempted afterwards).
+	// ErrSessionClosed is returned by a call when the session tears down
+	// before the result arrives (or a call is attempted afterwards).
 	ErrSessionClosed = errors.New("peer: session closed")
-	// ErrRequestTimeout is returned by Call — and wrapped in Run's error —
-	// when a test_request got no test_result within TimeoutMs plus the call
-	// grace. The coordinator aborts the session: a worker that heartbeats
-	// but cannot answer is not trustworthy for the remaining steps
-	// (docs/design/proto.md §6).
+	// ErrRequestTimeout is returned when a test_request gets no test_result
+	// within its coordinator-side wait budget. A normal Call also aborts the
+	// session; CallDetached deliberately does not (docs/design/proto.md §6).
 	ErrRequestTimeout = errors.New("peer: request timed out waiting for test_result")
 )
 
@@ -114,6 +112,25 @@ func (rc *remoteCaller) currentStep() planStep {
 // session with reason request_timeout.
 func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout time.Duration,
 	onProgress func(protocol.TestProgress)) (*protocol.TestResult, error) {
+	return rc.call(ctx, op, params, timeout, onProgress, true)
+}
+
+// CallDetached implements RemoteCaller without arming a terminal
+// evCallExpired. It is reserved for bounded cleanup work whose failure must not
+// replace the plan error that caused cleanup to run.
+func (rc *remoteCaller) CallDetached(ctx context.Context, op string, params any,
+	timeout time.Duration) (*protocol.TestResult, error) {
+	if rc.s.ctx.Err() != nil {
+		return nil, ErrSessionClosed
+	}
+	return rc.call(ctx, op, params, timeout, nil, false)
+}
+
+// call contains the shared request registration, write and correlation path.
+// armExpiry selects normal RPC semantics (call grace plus a terminal session
+// event) versus detached cleanup semantics (the supplied timeout only).
+func (rc *remoteCaller) call(ctx context.Context, op string, params any, timeout time.Duration,
+	onProgress func(protocol.TestProgress), armExpiry bool) (*protocol.TestResult, error) {
 	s := rc.s
 	step := rc.currentStep()
 	stepName := step.name
@@ -129,6 +146,11 @@ func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout
 	msgID, err := s.mintAndWrite(func(msgID string) (*protocol.Envelope, error) {
 		// Registration must precede the write (a fast result would find no
 		// pending call), and mint+write must be atomic (mintAndWrite doc).
+		// Recheck detached calls under the write lock so cleanup that started
+		// concurrently with teardown does not write after observing cancellation.
+		if !armExpiry && s.ctx.Err() != nil {
+			return nil, ErrSessionClosed
+		}
 		if !s.registerCall(msgID, pc) {
 			return nil, ErrSessionClosed
 		}
@@ -152,7 +174,10 @@ func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout
 		return nil, fmt.Errorf("peer: send test_request for op %q: %w", op, err)
 	}
 
-	budget := timeout + s.cfg.callGrace()
+	budget := timeout
+	if armExpiry {
+		budget += s.cfg.callGrace()
+	}
 	select {
 	case res, ok := <-pc.done:
 		if !ok {
@@ -164,7 +189,11 @@ func (rc *remoteCaller) Call(ctx context.Context, op string, params any, timeout
 	case <-s.ctx.Done():
 		return nil, ErrSessionClosed
 	case <-s.clk.After(budget):
-		s.sendEvent(evCallExpired{msgID: msgID, op: op})
+		if armExpiry {
+			s.sendEvent(evCallExpired{msgID: msgID, op: op})
+		} else {
+			s.log.Warn("detached test_request expired without a test_result", "op", op, "messageId", msgID)
+		}
 		return nil, fmt.Errorf("%w: op %q after %s", ErrRequestTimeout, op, budget)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"cablecheck/internal/evaluate"
 	"cablecheck/internal/model"
 	"cablecheck/internal/parser"
+	"cablecheck/internal/peer"
 	"cablecheck/internal/runner/runnertest"
 	"cablecheck/internal/testutil"
 )
@@ -325,6 +326,9 @@ func TestSoakCancelFinalCountersRetainLocalAndLeaveRemoteUnavailable(t *testing.
 	if results.FinalCounters.PC2 != nil {
 		t.Fatalf("final PC2 counter snapshot = %+v, want absent after session cancellation", results.FinalCounters.PC2)
 	}
+	if n := detachedCallCount(rc.calls, OpCountersSnapshot); n != 1 {
+		t.Errorf("detached final counter attempts = %d, want one", n)
+	}
 	deltas, deltaOK := evaluate.DeltaSet(results.InitialCounters.PC2, results.FinalCounters.PC2)
 	if deltaOK || len(deltas) != 0 {
 		t.Errorf("PC2 deltas = (%v, %v), want unavailable empty set", deltas, deltaOK)
@@ -340,6 +344,38 @@ func TestSoakCancelFinalCountersRetainLocalAndLeaveRemoteUnavailable(t *testing.
 	}
 	if !results.Incomplete || !facts.Partial {
 		t.Errorf("cancelled run markers: Incomplete=%v Partial=%v, want both true", results.Incomplete, facts.Partial)
+	}
+}
+
+func TestSoakWedgedFinalCountersDoNotMaskPlanError(t *testing.T) {
+	testutil.LeakCheck(t)
+	fr := runnertest.New(t)
+	linkErr := errors.New("local link inspection failed")
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsExact("eth0"), Err: linkErr})
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsPrefix("-S"),
+		StdoutFile: fixturePath("ethtool", "stats_e1000e_clean.txt")})
+	fr.Script(runnertest.Script{Name: "ip", StdoutFile: fixturePath("ip", "linkstats_clean.json")})
+	rc := newFakeCaller(t)
+	started := make(chan struct{})
+	expire := make(chan struct{})
+	rc.replyHang(OpCountersSnapshot, started, expire, peer.ErrRequestTimeout)
+	results := &SessionResults{}
+	plan := newSoakPlan(newTestOps(t, fr), results,
+		clocktest.New(time.Unix(1_700_000_000, 0)), time.Hour, config.SoakLoadContinuous)
+
+	done := make(chan error, 1)
+	go func() { done <- plan.Run(context.Background(), rc) }()
+	testutil.WaitFor(t, started, "soak detached final counter snapshot")
+	if got := rc.calls[len(rc.calls)-1]; !got.detached || got.timeout != detachedCounterTimeout {
+		t.Errorf("detached call = %+v, want timeout %s", got, detachedCounterTimeout)
+	}
+	close(expire)
+	err := <-done
+	if !errors.Is(err, linkErr) || errors.Is(err, peer.ErrRequestTimeout) {
+		t.Errorf("soak error = %v, want original link failure without detached timeout", err)
+	}
+	if results.FinalCounters.PC1 == nil || results.FinalCounters.PC2 != nil {
+		t.Errorf("final counters = %+v, want local-only after wedged peer", results.FinalCounters)
 	}
 }
 
@@ -467,6 +503,9 @@ func TestSoakFinalCountersIncludeLastCycle(t *testing.T) {
 	if !ok || delta != 1 {
 		t.Errorf("whole-run PC2 rx_crc delta = (%d, %v), want (1, true)", delta, ok)
 	}
+	if n := detachedCallCount(rc.calls, OpCountersSnapshot); n != 1 {
+		t.Errorf("detached final counter calls = %d, want one", n)
+	}
 }
 
 // TestSoakDeadlineDuringFirstCycleStillBoundsWholeRunCounters advances the
@@ -521,6 +560,9 @@ func TestSoakDeadlineDuringFirstCycleStillBoundsWholeRunCounters(t *testing.T) {
 	delta, ok := counterDeltaForTest(results.InitialCounters.PC2, results.FinalCounters.PC2, "rx_crc")
 	if !ok || delta != 3 {
 		t.Errorf("whole-run PC2 rx_crc delta = (%d, %v), want (3, true)", delta, ok)
+	}
+	if n := detachedCallCount(rc.calls, OpCountersSnapshot); n != 1 {
+		t.Errorf("detached final counter calls = %d, want one", n)
 	}
 }
 

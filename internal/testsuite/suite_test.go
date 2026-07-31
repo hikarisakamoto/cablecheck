@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"cablecheck/internal/evaluate"
 	"cablecheck/internal/model"
 	"cablecheck/internal/parser"
+	"cablecheck/internal/peer"
 	"cablecheck/internal/protocol"
 	"cablecheck/internal/runner"
 	"cablecheck/internal/runner/runnertest"
@@ -27,6 +29,7 @@ type fakeCaller struct {
 	sessionCtx context.Context
 	mu         sync.Mutex
 	ops        []string
+	calls      []fakeCall
 	params     map[string][]json.RawMessage
 	replies    map[string][]any
 	step       fakeStep
@@ -37,6 +40,12 @@ type fakeStep struct {
 	step  int
 	total int
 	name  string
+}
+
+type fakeCall struct {
+	op       string
+	timeout  time.Duration
+	detached bool
 }
 
 func newFakeCaller(t *testing.T) *fakeCaller {
@@ -66,39 +75,85 @@ type scriptedResult struct {
 	payload any
 }
 
+// scriptedCallError makes a fake RPC wait at a test-owned synchronization
+// point before returning err. A nil wait returns immediately.
+type scriptedCallError struct {
+	err     error
+	started chan<- struct{}
+	wait    <-chan struct{}
+}
+
 // replyStatus queues one canned reply for op with an explicit status.
 func (f *fakeCaller) replyStatus(op, status, errText string, payload any) {
 	f.replies[op] = append(f.replies[op], scriptedResult{status: status, errText: errText, payload: payload})
 }
 
+func (f *fakeCaller) replyError(op string, err error) {
+	f.replies[op] = append(f.replies[op], scriptedCallError{err: err})
+}
+
+func (f *fakeCaller) replyHang(op string, started chan<- struct{}, until <-chan struct{}, err error) {
+	f.replies[op] = append(f.replies[op], scriptedCallError{err: err, started: started, wait: until})
+}
+
 func (f *fakeCaller) Call(ctx context.Context, op string, params any, timeout time.Duration,
 	onProgress func(protocol.TestProgress)) (*protocol.TestResult, error) {
+	return f.call(ctx, op, params, timeout, onProgress, false)
+}
+
+func (f *fakeCaller) CallDetached(ctx context.Context, op string, params any,
+	timeout time.Duration) (*protocol.TestResult, error) {
+	return f.call(ctx, op, params, timeout, nil, true)
+}
+
+func (f *fakeCaller) call(ctx context.Context, op string, params any, timeout time.Duration,
+	onProgress func(protocol.TestProgress), detached bool) (*protocol.TestResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeCall{op: op, timeout: timeout, detached: detached})
+	f.mu.Unlock()
 	if err := f.sessionCtx.Err(); err != nil {
-		return nil, err
+		return nil, peer.ErrSessionClosed
 	}
 	if onProgress != nil {
 		onProgress(protocol.TestProgress{Stage: op, Percent: -1, Text: "running " + op})
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.ops = append(f.ops, op)
 	raw, err := json.Marshal(params)
 	if err != nil {
+		f.mu.Unlock()
 		f.t.Errorf("marshal params for %s: %v", op, err)
 		return nil, err
 	}
 	f.params[op] = append(f.params[op], raw)
 	queue := f.replies[op]
 	if len(queue) == 0 {
+		f.mu.Unlock()
 		err := fmt.Errorf("fakeCaller: no scripted reply for op %s", op)
 		f.t.Errorf("%v", err)
 		return nil, err
 	}
 	payload := queue[0]
 	f.replies[op] = queue[1:]
+	f.mu.Unlock()
+	if scripted, ok := payload.(scriptedCallError); ok {
+		if scripted.started != nil {
+			close(scripted.started)
+		}
+		if scripted.wait != nil {
+			select {
+			case <-scripted.wait:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-f.sessionCtx.Done():
+				return nil, peer.ErrSessionClosed
+			}
+		}
+		return nil, scripted.err
+	}
 	status, errText := StatusOK, ""
 	if sr, ok := payload.(scriptedResult); ok {
 		status, errText, payload = sr.status, sr.errText, sr.payload
@@ -358,6 +413,7 @@ func TestQuickPlanPreservesPartialTCPForward(t *testing.T) {
 		Result: runner.CommandResult{TimedOut: true, ExitCode: -1, Signal: "SIGKILL"}})
 	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
 	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 1}})
 
 	results := &SessionResults{}
 	plan := newQuickPlan(newTestOps(t, fr), results)
@@ -370,8 +426,8 @@ func TestQuickPlanPreservesPartialTCPForward(t *testing.T) {
 	if results.FinalCounters.PC1 == nil {
 		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
 	}
-	if results.FinalCounters.PC2 != nil {
-		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	if results.FinalCounters.PC2 == nil {
+		t.Errorf("final counters = %+v, want the responsive peer salvaged after the abort", results.FinalCounters)
 	}
 	if len(results.TCP) != 1 {
 		t.Fatalf("results.TCP has %d entries %+v, want the 1 partial forward result", len(results.TCP), results.TCP)
@@ -402,6 +458,7 @@ func TestQuickPlanAbortsOnMissingTCPSummary(t *testing.T) {
 		StdoutFile: fixturePath("iperf", "tcp_no_summary.json")})
 	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
 	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 1}})
 
 	results := &SessionResults{}
 	plan := newQuickPlan(newTestOps(t, fr), results)
@@ -413,8 +470,8 @@ func TestQuickPlanAbortsOnMissingTCPSummary(t *testing.T) {
 	if results.FinalCounters.PC1 == nil {
 		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
 	}
-	if results.FinalCounters.PC2 != nil {
-		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	if results.FinalCounters.PC2 == nil {
+		t.Errorf("final counters = %+v, want the responsive peer salvaged after the abort", results.FinalCounters)
 	}
 	if !results.Incomplete {
 		t.Error("Results.Incomplete = false, want true")
@@ -451,6 +508,7 @@ func TestQuickPlanPreservesPartialTCPReverse(t *testing.T) {
 	rc.replyStatus(OpIperfClientRun, StatusFailed, "iperf3 client aborted mid-test",
 		&TCPRunResult{Incomplete: true, TCP: model.TCPResult{
 			Duration: model.Duration(30 * time.Second), ParallelStreams: 4}})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 1}})
 
 	results := &SessionResults{}
 	plan := newQuickPlan(newTestOps(t, fr), results)
@@ -463,8 +521,8 @@ func TestQuickPlanPreservesPartialTCPReverse(t *testing.T) {
 	if results.FinalCounters.PC1 == nil {
 		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
 	}
-	if results.FinalCounters.PC2 != nil {
-		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	if results.FinalCounters.PC2 == nil {
+		t.Errorf("final counters = %+v, want the responsive peer salvaged after the abort", results.FinalCounters)
 	}
 	if len(results.TCP) != 2 {
 		t.Fatalf("results.TCP has %d entries %+v, want forward + partial reverse", len(results.TCP), results.TCP)
@@ -484,8 +542,8 @@ func TestQuickPlanPreservesPartialTCPReverse(t *testing.T) {
 // TestQuickPlanAbortSalvagesLocalFinalCounters models the peer session being
 // torn down mid-TCP (the shape of a real peer-lost abort). The deferred final
 // capture uses WithoutCancel, so PC1's counters still land and yield deltas
-// against the baseline; the salvage is deliberately local-only, so the dead
-// peer is never called and PC2 stays absent.
+// against the baseline; the detached remote attempt sees the dead session and
+// is dropped without contaminating the cancellation error.
 func TestQuickPlanAbortSalvagesLocalFinalCounters(t *testing.T) {
 	testutil.LeakCheck(t)
 
@@ -523,8 +581,69 @@ func TestQuickPlanAbortSalvagesLocalFinalCounters(t *testing.T) {
 	if n := opCount(rc.ops, OpCountersSnapshot); n != 1 {
 		t.Errorf("remote saw %d %s ops %q, want only the initial snapshot", n, OpCountersSnapshot, rc.ops)
 	}
+	if n := detachedCallCount(rc.calls, OpCountersSnapshot); n != 1 {
+		t.Errorf("detached counter attempts = %d, want one bounded salvage attempt", n)
+	}
 	if _, ok := evaluate.DeltaSet(results.InitialCounters.PC1, results.FinalCounters.PC1); !ok {
 		t.Errorf("PC1 baseline/final pair does not yield deltas")
+	}
+}
+
+func TestAbortSalvageDropsWedgedPeerTimeout(t *testing.T) {
+	testutil.LeakCheck(t)
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsPrefix("-S"),
+		Result: fixture(t, "ethtool", "stats_e1000e_clean")})
+	fr.Script(runnertest.Script{Name: "ip", Result: fixture(t, "ip", "linkstats_clean")})
+	rc := newFakeCaller(t)
+	started := make(chan struct{})
+	expire := make(chan struct{})
+	rc.replyHang(OpCountersSnapshot, started, expire, peer.ErrRequestTimeout)
+	original := errors.New("local parse failure")
+	baseline := func() *model.CounterSnapshot {
+		return &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	}
+	results := &SessionResults{InitialCounters: model.PeerCounters{PC1: baseline(), PC2: baseline()}}
+	q := &QuickPlan{Ops: newTestOps(t, fr), Results: results}
+	done := make(chan error, 1)
+	go func() { done <- q.salvageFinalCounters(context.Background(), rc, original) }()
+	testutil.WaitFor(t, started, "detached counter salvage to start")
+	select {
+	case err := <-done:
+		t.Fatalf("salvage returned before detached timeout: %v", err)
+	default:
+	}
+	if got := rc.calls[len(rc.calls)-1]; !got.detached || got.timeout != detachedCounterTimeout {
+		t.Errorf("detached call = %+v, want timeout %s", got, detachedCounterTimeout)
+	}
+	close(expire)
+	err := <-done
+	if !errors.Is(err, original) || errors.Is(err, peer.ErrRequestTimeout) {
+		t.Errorf("salvage error = %v, want only original failure", err)
+	}
+	if results.FinalCounters.PC1 == nil || results.FinalCounters.PC2 != nil {
+		t.Errorf("final counters = %+v, want local-only after wedged peer", results.FinalCounters)
+	}
+}
+
+func TestAbortSalvageJoinsSubstantivePeerFailure(t *testing.T) {
+	fr := runnertest.New(t)
+	fr.Script(runnertest.Script{Name: "ethtool", Match: runnertest.ArgsPrefix("-S"),
+		Result: fixture(t, "ethtool", "stats_e1000e_clean")})
+	fr.Script(runnertest.Script{Name: "ip", Result: fixture(t, "ip", "linkstats_clean")})
+	rc := newFakeCaller(t)
+	rc.replyStatus(OpCountersSnapshot, StatusFailed, "counter parser failed", nil)
+	original := errors.New("local parse failure")
+	baseline := &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 0}}
+	results := &SessionResults{InitialCounters: model.PeerCounters{PC1: baseline, PC2: baseline}}
+	q := &QuickPlan{Ops: newTestOps(t, fr), Results: results}
+
+	err := q.salvageFinalCounters(context.Background(), rc, original)
+	if !errors.Is(err, original) || !strings.Contains(err.Error(), "counter parser failed") {
+		t.Errorf("salvage error = %v, want original joined with substantive peer failure", err)
+	}
+	if results.FinalCounters.PC1 == nil || results.FinalCounters.PC2 != nil {
+		t.Errorf("final counters = %+v, want local snapshot retained", results.FinalCounters)
 	}
 }
 
@@ -581,7 +700,7 @@ func TestSalvageFinalCountersGuards(t *testing.T) {
 			tc.mutate(results)
 			pc2Before := results.FinalCounters.PC2
 			q := &QuickPlan{Results: results}
-			if err := q.salvageFinalCounters(context.Background(), tc.runErr); !errors.Is(err, tc.runErr) {
+			if err := q.salvageFinalCounters(context.Background(), newFakeCaller(t), tc.runErr); !errors.Is(err, tc.runErr) {
 				t.Errorf("salvage error = %v, want the original %v unchanged", err, tc.runErr)
 			}
 			if results.FinalCounters.PC1 != nil || results.FinalCounters.PC2 != pc2Before {
@@ -638,6 +757,16 @@ func opCount(ops []string, op string) int {
 	n := 0
 	for _, o := range ops {
 		if o == op {
+			n++
+		}
+	}
+	return n
+}
+
+func detachedCallCount(calls []fakeCall, op string) int {
+	n := 0
+	for _, call := range calls {
+		if call.detached && call.op == op {
 			n++
 		}
 	}

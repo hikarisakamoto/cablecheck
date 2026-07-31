@@ -219,6 +219,7 @@ func TestStandardPlanPreservesPartialOnError(t *testing.T) {
 		Result: runner.CommandResult{TimedOut: true, ExitCode: -1, Signal: "SIGKILL"}})
 	rc.reply(OpIperfServerStart, &ServerStartResult{Port: 5201})
 	rc.reply(OpIperfServerStop, &ServerStopResult{Stopped: true})
+	rc.reply(OpCountersSnapshot, &model.CounterSnapshot{Standard: map[string]uint64{"rx_crc": 1}})
 
 	results := &SessionResults{}
 	plan := newStandardPlan(newTestOps(t, fr), results)
@@ -237,7 +238,10 @@ func TestStandardPlanPreservesPartialOnError(t *testing.T) {
 	if results.FinalCounters.PC1 == nil {
 		t.Errorf("final counters = %+v, want the local side salvaged after the abort", results.FinalCounters)
 	}
-	if results.FinalCounters.PC2 != nil {
-		t.Errorf("final PC2 counters = %+v, want absent: the salvage must not call the peer", results.FinalCounters.PC2)
+	if results.FinalCounters.PC2 == nil {
+		t.Errorf("final counters = %+v, want the responsive peer salvaged after the abort", results.FinalCounters)
+	}
+	if n := detachedCallCount(rc.calls, OpCountersSnapshot); n != 1 {
+		t.Errorf("detached counter calls = %d, want one", n)
 	}
 }

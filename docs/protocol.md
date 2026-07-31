@@ -450,7 +450,7 @@ PC1's operation pattern is:
 test_request -> (test_progress | heartbeat)* -> test_result
 ```
 
-`inReplyTo` correlates progress and results with the request ID. The worker applies `timeoutMs` through an operation context, and PC1 waits the same timeout plus 10 seconds of call grace. If no result arrives, even while heartbeats continue, PC1 emits `abort(request_timeout)` and ends the session. Late results without a pending call are logged and dropped.
+`inReplyTo` correlates progress and results with the request ID. The worker applies `timeoutMs` through an operation context. For ordinary plan RPCs, PC1 waits the same timeout plus 10 seconds of call grace; if no result arrives, even while heartbeats continue, PC1 emits `abort(request_timeout)` and ends the session. Bounded final-counter cleanup uses a detached RPC variant that waits only for `timeoutMs` and returns a local timeout without arming that session abort, so cleanup cannot replace the plan failure it is trying to preserve. Late results without a pending call are logged and dropped in either case.
 
 Both sides tick every 5 seconds but send a heartbeat only when no successful frame write has occurred for at least 80% of that interval, which is 4 seconds at defaults. Ordinary traffic thus suppresses redundant heartbeats. A heartbeat carries the sender's state and active operation.
 

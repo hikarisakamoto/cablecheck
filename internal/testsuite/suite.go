@@ -22,9 +22,14 @@ const (
 	RolePC2Key = "pc2"
 )
 
-// opCallTimeout is the request timeout for quick ops (counters, link
-// settings, iperf3 server start/stop): expected duration plus generous slack.
-const opCallTimeout = 30 * time.Second
+const (
+	// opCallTimeout is the request timeout for quick ops (counters, link
+	// settings, iperf3 server start/stop): expected duration plus generous slack.
+	opCallTimeout = 30 * time.Second
+	// detachedCounterTimeout bounds best-effort remote final snapshots during
+	// cleanup. It has no call grace and must not delay the real plan failure.
+	detachedCounterTimeout = 5 * time.Second
+)
 
 // SessionResults accumulates everything the plan driver measures, locally
 // and via the remote worker. Direction-sensitive results carry explicit
@@ -154,7 +159,7 @@ type QuickPlan struct {
 // Run executes the quick plan; it satisfies peer.PlanFunc. On error the
 // accumulated Results are preserved and marked Incomplete.
 func (q *QuickPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error) {
-	defer func() { runErr = q.salvageFinalCounters(ctx, runErr) }()
+	defer func() { runErr = q.salvageFinalCounters(ctx, rc, runErr) }()
 	steps := []func(context.Context, peer.RemoteCaller) error{
 		q.stepLink,
 		q.stepInitialCounters,
@@ -235,6 +240,26 @@ func (q *QuickPlan) callRemoteForTest(ctx context.Context, rc peer.RemoteCaller,
 	}
 }
 
+// callRemoteDetached performs a cleanup-safe RPC and decodes its typed
+// payload. Cleanup snapshots are useful only when they succeed, so every
+// non-ok worker result is a substantive error; transport/cancellation errors
+// remain wrapped for errors.Is classification by the caller.
+func (q *QuickPlan) callRemoteDetached(ctx context.Context, rc peer.RemoteCaller, op string,
+	params any, timeout time.Duration) (any, error) {
+	res, err := rc.CallDetached(ctx, op, params, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("remote %s: %w", op, err)
+	}
+	if res.Status != StatusOK {
+		return nil, fmt.Errorf("remote %s: status %s: %s", op, res.Status, res.Error)
+	}
+	out, err := DecodeOpResult(op, res.Result)
+	if err != nil {
+		return nil, fmt.Errorf("remote %s: %w", op, err)
+	}
+	return out, nil
+}
+
 // recordSkippedTest records one semantic test name, preserving the first
 // runtime reason when multiple RPCs belonging to that test are unavailable.
 func (q *QuickPlan) recordSkippedTest(name, reason string) {
@@ -282,14 +307,11 @@ func (q *QuickPlan) stepFinalCounters(ctx context.Context, rc peer.RemoteCaller)
 // salvageFinalCounters is the abort path's best-effort final boundary: an
 // aborted run skipped stepFinalCounters, losing the counter deltas that the
 // physical-layer evidence is built from even when the fault was recorded in
-// the baseline↔abort window. It captures the local side only. A remote call
-// here would ride the abort's teardown: its request-timeout expiry preempts
-// the plan-done event and replaces the real abort cause in the session
-// outcome, and its ErrSessionClosed/context.Canceled failure joined onto a
-// substantive plan error would make the whole error read as pure teardown
-// (peer.isCancellation). The capture context must not inherit the abort's
-// cancellation, only its values, like the soak plan's deferred boundary.
-func (q *QuickPlan) salvageFinalCounters(ctx context.Context, runErr error) error {
+// the baseline↔abort window. It captures the local side first, then asks a
+// still-responsive peer through the non-arming detached call path. The
+// capture context must not inherit the abort's cancellation, only its values,
+// like the soak plan's deferred boundary.
+func (q *QuickPlan) salvageFinalCounters(ctx context.Context, rc peer.RemoteCaller, runErr error) error {
 	if runErr == nil {
 		return nil
 	}
@@ -308,7 +330,29 @@ func (q *QuickPlan) salvageFinalCounters(ctx context.Context, runErr error) erro
 		return errors.Join(runErr, fmt.Errorf("testsuite: final counters after abort: %w", err))
 	}
 	q.Results.FinalCounters.PC1 = &snap
+	if q.Results.InitialCounters.PC2 == nil || len(q.Results.InitialCounters.PC2.Standard) == 0 {
+		return runErr
+	}
+	out, err := q.callRemoteDetached(context.WithoutCancel(ctx), rc, OpCountersSnapshot, nil, detachedCounterTimeout)
+	if err != nil {
+		if isCleanupCancellation(err) {
+			return runErr
+		}
+		return errors.Join(runErr, fmt.Errorf("testsuite: remote final counters after abort: %w", err))
+	}
+	if cs, ok := out.(*model.CounterSnapshot); ok {
+		q.Results.FinalCounters.PC2 = cs
+	}
 	return runErr
+}
+
+// isCleanupCancellation identifies failures that only say bounded cleanup
+// lost its context, session, or detached wait budget. Joining one onto a real
+// plan error would make peer.isCancellation hide that substantive cause.
+func isCleanupCancellation(err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, peer.ErrSessionClosed) ||
+		errors.Is(err, peer.ErrRequestTimeout)
 }
 
 // snapshotCounters fills one PeerCounters pair, local side first so both
@@ -320,6 +364,25 @@ func (q *QuickPlan) snapshotCounters(ctx context.Context, rc peer.RemoteCaller, 
 	}
 	into.PC1 = &snap
 	out, err := q.callRemoteForTest(ctx, rc, OpCountersSnapshot, nil, opCallTimeout, "counters")
+	if err != nil {
+		return err
+	}
+	if cs, ok := out.(*model.CounterSnapshot); ok {
+		into.PC2 = cs
+	}
+	return nil
+}
+
+// snapshotCountersDetached captures a whole-run cleanup boundary local-first,
+// using the non-arming RPC variant only for the remote leg.
+func (q *QuickPlan) snapshotCountersDetached(ctx context.Context, rc peer.RemoteCaller,
+	into *model.PeerCounters) error {
+	snap, err := q.Ops.Counters.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	into.PC1 = &snap
+	out, err := q.callRemoteDetached(ctx, rc, OpCountersSnapshot, nil, detachedCounterTimeout)
 	if err != nil {
 		return err
 	}

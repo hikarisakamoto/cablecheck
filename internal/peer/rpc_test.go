@@ -170,6 +170,66 @@ func TestRPCCorrelation(t *testing.T) {
 			t.Errorf("AbortReason = %q, want request_timeout", out.out.AbortReason)
 		}
 	})
+
+	t.Run("detached-timeout-does-not-arm-session-abort", func(t *testing.T) {
+		testutil.LeakCheck(t)
+		cfg1, cfg2 := testConfigs(t)
+		tr := newPipeTransport()
+		cfg1.Transport, cfg2.Transport = tr, tr
+		cfg1.NonInteractive = true
+		cfg1.CallGrace = time.Hour
+		logger, logs := newTestLogger()
+		cfg1.Logger = logger
+		fc := clockAsFake(t, cfg1.Clock)
+
+		detachedErr := make(chan error, 1)
+		planFailure := errors.New("original plan failure")
+		plan := func(ctx context.Context, rc RemoteCaller) error {
+			_, err := rc.CallDetached(ctx, "counters_snapshot", nil, 2*time.Second)
+			detachedErr <- err
+			if _, err := rc.Call(ctx, "follow_up", nil, 2*time.Second, nil); err != nil {
+				return err
+			}
+			return planFailure
+		}
+
+		ctx := t.Context()
+		resCh := startSession(ctx, cfg1, plan, nil)
+		h := startWorkerHarness(t, ctx, tr, cfg2)
+
+		h.await(protocol.TypeReady)
+		h.send(protocol.TypeReady, "", protocol.Ready{})
+		h.await(protocol.TypeStartConfirm)
+		advanceThroughCountdown(t, fc)
+
+		detachedReq := h.await(protocol.TypeTestRequest)
+		fc.BlockUntilWaiters(2)     // heartbeat ticker + detached expiry timer
+		fc.Advance(2 * time.Second) // no call grace on the detached path
+		if err := <-detachedErr; !errors.Is(err, ErrRequestTimeout) {
+			t.Fatalf("CallDetached error = %v, want ErrRequestTimeout", err)
+		}
+
+		// The detached call is already unregistered. Its late result is dropped,
+		// and a subsequent normal RPC still succeeds on the same session.
+		h.send(protocol.TypeTestResult, detachedReq.MessageID, protocol.TestResult{Status: "ok"})
+		followUp := h.await(protocol.TypeTestRequest)
+		h.send(protocol.TypeTestResult, followUp.MessageID, protocol.TestResult{Status: "ok"})
+
+		ab := h.await(protocol.TypeAbort)
+		abort, err := protocol.DecodePayload[protocol.Abort](ab)
+		testutil.Require(t, err, "decode abort")
+		if abort.Reason != "internal_error" || abort.Detail != planFailure.Error() {
+			t.Errorf("abort = %+v, want original plan failure as internal_error", abort)
+		}
+		out := awaitResult(t, resCh)
+		if errors.Is(out.err, ErrRequestTimeout) {
+			t.Errorf("Run error = %v, detached timeout replaced the plan failure", out.err)
+		}
+		if out.out.AbortReason != "internal_error" {
+			t.Errorf("AbortReason = %q, want internal_error", out.out.AbortReason)
+		}
+		containsAll(t, logs.String(), "detached test_request expired", "late test_result")
+	})
 }
 
 // TestRemoteCallerWarn pins the other half of the RemoteCaller surface: a
@@ -212,6 +272,15 @@ func TestRemoteCallerWarn(t *testing.T) {
 	}
 	if out.out.FinalState != StateCompleted {
 		t.Errorf("FinalState = %s, want completed", out.out.FinalState)
+	}
+}
+
+func TestCallDetachedRejectsClosedSessionBeforeWrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rc := &remoteCaller{s: &session{ctx: ctx}}
+	if _, err := rc.CallDetached(context.Background(), "counters_snapshot", nil, time.Second); !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("CallDetached error = %v, want ErrSessionClosed", err)
 	}
 }
 

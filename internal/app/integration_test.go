@@ -412,6 +412,12 @@ func testCleanExitIperfMissingSummary(t *testing.T) {
 	if len(rep.Tests.TCP) != 1 || !rep.Tests.TCP[0].Incomplete {
 		t.Errorf("TCP results = %+v, want one incomplete result", rep.Tests.TCP)
 	}
+	if rep.FinalCounters.PC1 == nil || rep.FinalCounters.PC2 == nil {
+		t.Errorf("final counters = %+v, want both sides salvaged while the peer remains live", rep.FinalCounters)
+	}
+	if len(rep.CounterDeltas.PC1) == 0 || len(rep.CounterDeltas.PC2) == 0 {
+		t.Errorf("counter deltas = %+v, want both sides computed after salvage", rep.CounterDeltas)
+	}
 	if rep.Failure != nil && (!strings.Contains(rep.Failure.Error, "end.sum_sent") ||
 		!strings.Contains(rep.Failure.Error, "end.sum_received")) {
 		t.Errorf("failure error = %q, want both missing summary fields", rep.Failure.Error)
@@ -585,6 +591,12 @@ func testSIGINTSimulation(t *testing.T) {
 	}
 	if rep.Failure == nil || rep.Failure.Error == "" {
 		t.Errorf("partial report misses FailureDetails: %+v", rep.Failure)
+	}
+	if rep.FinalCounters.PC1 == nil {
+		t.Errorf("final counters = %+v, want coordinator salvage after peer loss", rep.FinalCounters)
+	}
+	if rep.FinalCounters.PC2 != nil {
+		t.Errorf("final PC2 counters = %+v, want unavailable after peer disconnect", rep.FinalCounters.PC2)
 	}
 }
 
