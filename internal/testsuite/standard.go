@@ -127,7 +127,7 @@ func (p *StandardPlan) engine() *QuickPlan {
 // quick plan does — partial per-repeat and per-direction results survive.
 func (p *StandardPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error) {
 	q := p.engine()
-	defer func() { runErr = q.salvageFinalCounters(ctx, runErr) }()
+	defer func() { runErr = q.salvageFinalCounters(ctx, rc, runErr) }()
 	reps := repeats(p.TCPRepeats)
 	steps := []func(context.Context, peer.RemoteCaller) error{
 		q.stepLink,

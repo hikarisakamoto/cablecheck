@@ -199,7 +199,7 @@ func (c Config) callGrace() time.Duration {
 }
 
 // RemoteCaller is what the test plan programs against on the coordinator:
-// each Call is one test_request → test_result RPC to the worker.
+// each call is one test_request → test_result RPC to the worker.
 type RemoteCaller interface {
 	// SetStep sets display metadata attached to subsequent test requests. The
 	// plan calls it at the same boundary as its local step announcement.
@@ -210,6 +210,10 @@ type RemoteCaller interface {
 	// invoked from the session event loop goroutine and must not block.
 	Call(ctx context.Context, op string, params any, timeout time.Duration,
 		onProgress func(protocol.TestProgress)) (*protocol.TestResult, error)
+	// CallDetached is the cleanup-safe Call variant. It waits only for timeout
+	// (no session call grace) and returns ErrRequestTimeout without arming the
+	// session's request_timeout abort. Late results are dropped by correlation.
+	CallDetached(ctx context.Context, op string, params any, timeout time.Duration) (*protocol.TestResult, error)
 	// Warn sends a non-fatal warning frame to the peer.
 	Warn(code, text string)
 	// SetIdleTimeout changes the coordinator's local per-frame read timeout.

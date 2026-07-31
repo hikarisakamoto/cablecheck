@@ -147,12 +147,12 @@ func (p *SoakPlan) Run(ctx context.Context, rc peer.RemoteCaller) (runErr error)
 	// cancels an in-flight cycle, so use a cleanup context that retains values
 	// without inheriting cancellation.
 	defer func() {
-		if err := q.snapshotCounters(context.WithoutCancel(ctx), rc, &p.Results.FinalCounters); err != nil {
+		if err := q.snapshotCountersDetached(context.WithoutCancel(ctx), rc, &p.Results.FinalCounters); err != nil {
 			p.Results.Incomplete = true
 			finalErr := fmt.Errorf("testsuite: soak final counters: %w", err)
 			if runErr == nil {
 				runErr = finalErr
-			} else {
+			} else if !isCleanupCancellation(err) {
 				runErr = errors.Join(runErr, finalErr)
 			}
 		}

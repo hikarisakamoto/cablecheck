@@ -43,6 +43,11 @@ func (c *cableCoordCaller) Call(_ context.Context, op string, _ any, _ time.Dura
 	return &protocol.TestResult{Status: StatusOK, Result: result}, nil
 }
 
+func (c *cableCoordCaller) CallDetached(ctx context.Context, op string, params any,
+	timeout time.Duration) (*protocol.TestResult, error) {
+	return c.Call(ctx, op, params, timeout, nil)
+}
+
 func (c *cableCoordCaller) Warn(code, _ string) {
 	c.events = append(c.events, "warn:"+code)
 }

@@ -375,13 +375,16 @@ type RemoteCaller interface {
     // onProgress may be nil; called from the event loop goroutine — must not block.
     Call(ctx context.Context, op string, params any, timeout time.Duration,
          onProgress func(protocol.TestProgress)) (*protocol.TestResult, error)
+    // CallDetached has no call grace and does not arm request_timeout abort.
+    CallDetached(ctx context.Context, op string, params any,
+                 timeout time.Duration) (*protocol.TestResult, error)
     Warn(code, text string)
 }
 ```
 
-Internally, `Call` allocates a messageID, registers `pending[msgID] = &call{done: make(chan *protocol.TestResult, 1), onProgress: ...}`, writes the frame, and waits on `done`/`ctx`/timer. The pending map is owned by the event loop; registration could go through a command channel or a mutex, and with only two goroutines a mutex wins.
+Internally, both call variants allocate a messageID, register `pending[msgID] = &call{done: make(chan *protocol.TestResult, 1), onProgress: ...}` before writing the frame, and wait on `done`/`ctx`/timer. The pending map is mutex-protected because calls and result routing run on separate goroutines.
 
-**Timeout budget**: `request.TimeoutMs` = expected op duration + 20 s. The worker enforces it via the op ctx and reports `status:"timeout"`, which is a *result*, not a protocol failure. The coordinator waits `TimeoutMs + 10s` grace. If even that expires, the worker hasn't reported at all despite heartbeats (a wedged executor), so the coordinator sends `abort(request_timeout, stage=op)` and fails the session. A worker that heartbeats but can't answer isn't trustworthy for the remaining steps. Partial results are preserved (§7).
+**Timeout budget**: `request.TimeoutMs` = expected op duration + 20 s. The worker enforces it via the op ctx and reports `status:"timeout"`, which is a *result*, not a protocol failure. An ordinary coordinator call waits `TimeoutMs + 10s` grace. If even that expires, the worker hasn't reported at all despite heartbeats (a wedged executor), so the coordinator sends `abort(request_timeout, stage=op)` and fails the session. A worker that heartbeats but can't answer isn't trustworthy for the remaining steps. The detached cleanup variant instead waits exactly `TimeoutMs`, returns `ErrRequestTimeout`, and unregisters without emitting the terminal event. It is restricted to best-effort final-counter cleanup; any late result follows the normal unmatched-result log-and-drop path. Partial results are preserved (§7).
 
 **Duplicate protection**: messageIDs are `"<role>-%08d"`; the receiver keeps `maxSeq[role]` plus a ring of the last 128 seen IDs. A duplicate or non-increasing ID gets logged as a warning and dropped. TCP already guarantees ordering, but the check catches application bugs and costs nothing.
 
