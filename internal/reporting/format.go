@@ -14,8 +14,8 @@ var verdicts = map[model.HealthClass]string{
 	model.HealthExcellent:    "The cable passed every test with no anomalies.",
 	model.HealthGood:         "The cable is healthy; only minor deviations were observed.",
 	model.HealthWarning:      "The cable works but shows signs that deserve attention.",
-	model.HealthPoor:         "The cable exhibits significant problems and should be replaced.",
-	model.HealthFailed:       "The cable failed critical tests and must be replaced.",
+	model.HealthPoor:         "The link shows significant physical problems — the cable or its connectors are the leading suspect; confirm by substitution.",
+	model.HealthFailed:       "The link failed critical physical tests. Replace the cable first; if the fault persists, suspect connectors or the NIC port.",
 	model.HealthInconclusive: "The collected evidence does not support a verdict about the cable.",
 }
 

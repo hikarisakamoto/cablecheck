@@ -12,7 +12,7 @@ UDP loss:         not run
 
 Findings (top 3 of 4):
   [failed] PHY-01: The link was down when testing ended.
-  [failed] PHY-03: The link bounced 4 time(s) during the test.
+  [failed] PHY-03: The link carrier changed state 4 time(s) during the test.
   [marker] LIM-01: Critical evidence is missing - a clean-looking result would not be trustworthy.
 Recommendations (top 3 of 3):
   - Intermittent link: check connector seating, try a different NIC port, run `--mode soak` to catch drops. Evidence from this run: post-test link state reports no carrier on at least one side; carrier change counter advanced by 4 on the worse side.

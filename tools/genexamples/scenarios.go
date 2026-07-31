@@ -140,8 +140,8 @@ func seedHostLimited() *model.Report {
 	return r
 }
 
-// seedFailed: the link was down when testing ended (PHY-01 FAILED) after
-// bouncing four times (PHY-03 >=3 -> FAILED). No traffic completed. → FAILED.
+// seedFailed: the link was down when testing ended (PHY-01 FAILED) after four
+// carrier state changes (PHY-03 >=3 -> FAILED). No traffic completed. → FAILED.
 func seedFailed() *model.Report {
 	r := baseReport("failed")
 	r.Partial = true

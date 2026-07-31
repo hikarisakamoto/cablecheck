@@ -367,7 +367,7 @@
   "score": 25,
   "classificationReasons": [
     "The link was down when testing ended.",
-    "The link bounced 4 time(s) during the test.",
+    "The link carrier changed state 4 time(s) during the test.",
     "Critical evidence is missing — a clean-looking result would not be trustworthy.",
     "The run was interrupted — the report covers only the tests that completed."
   ],
@@ -392,7 +392,7 @@
       "ruleId": "PHY-03",
       "category": "physical",
       "severity": "failed",
-      "text": "The link bounced 4 time(s) during the test.",
+      "text": "The link carrier changed state 4 time(s) during the test.",
       "evidence": [
         "carrier change counter advanced by 4 on the worse side"
       ],

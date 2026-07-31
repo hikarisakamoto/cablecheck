@@ -74,7 +74,7 @@ These are synthetic, deterministic scenarios rendered by the same evaluator and 
 | Link falls back to 100 Mb/s | `POOR` 50/100 | Both NICs support 1 Gb/s, but the link negotiates at 100 Mb/s | [Summary](examples/reduced-speed/summary.txt) · [Full report](examples/reduced-speed/report.md) · [JSON](examples/reduced-speed/report.json) |
 | CRC errors under load | `FAILED` 25/100 | Throughput looks healthy while receive CRC errors climb by 1,555 | [Summary](examples/crc-errors/summary.txt) · [Full report](examples/crc-errors/report.md) · [JSON](examples/crc-errors/report.json) |
 | CPU-saturated host | `INCONCLUSIVE` | Poor throughput is softened because host load can explain it | [Summary](examples/host-limited/summary.txt) · [Full report](examples/host-limited/report.md) · [JSON](examples/host-limited/report.json) |
-| Link drops mid-run | `FAILED` 25/100 | Carrier loss, repeated link bounces, and missing critical evidence | [Summary](examples/failed/summary.txt) · [Full report](examples/failed/report.md) · [JSON](examples/failed/report.json) |
+| Link drops mid-run | `FAILED` 25/100 | Carrier loss, repeated carrier state changes, and missing critical evidence | [Summary](examples/failed/summary.txt) · [Full report](examples/failed/report.md) · [JSON](examples/failed/report.json) |
 
 ## Quick start
 

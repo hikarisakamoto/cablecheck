@@ -2,13 +2,13 @@
 
 ## 1. Overall Result
 
-**FAILED** — The cable failed critical tests and must be replaced.
+**FAILED** — The link failed critical physical tests. Replace the cable first; if the fault persists, suspect connectors or the NIC port.
 
 ## 2. Score & Rule Evidence
 
 - **Score:** 25/100
 - **Reason:** The link was down when testing ended.
-- **Reason:** The link bounced 4 time(s) during the test.
+- **Reason:** The link carrier changed state 4 time(s) during the test.
 - **Reason:** Critical evidence is missing — a clean-looking result would not be trustworthy.
 - **Reason:** Some planned measurements could not run — coverage is reduced.
 - **Reason:** The run was interrupted — the report covers only the tests that completed.
@@ -16,7 +16,7 @@
 | Rule | Category | Severity | Finding |
 | --- | --- | --- | --- |
 | PHY-01 | physical | failed | The link was down when testing ended. |
-| PHY-03 | physical | failed | The link bounced 4 time(s) during the test. |
+| PHY-03 | physical | failed | The link carrier changed state 4 time(s) during the test. |
 | LIM-01 | limitation | marker | Critical evidence is missing — a clean-looking result would not be trustworthy. |
 | LIM-02 | limitation | marker | Some planned measurements could not run — coverage is reduced. |
 | LIM-03 | limitation | marker | The run was interrupted — the report covers only the tests that completed. |
@@ -127,7 +127,7 @@
 
 - **PHY-01** [physical/failed] The link was down when testing ended.
   - post-test link state reports no carrier on at least one side
-- **PHY-03** [physical/failed] The link bounced 4 time(s) during the test.
+- **PHY-03** [physical/failed] The link carrier changed state 4 time(s) during the test.
   - carrier change counter advanced by 4 on the worse side
 - **LIM-01** [limitation/marker] Critical evidence is missing — a clean-looking result would not be trustworthy.
   - no TCP throughput result in either direction

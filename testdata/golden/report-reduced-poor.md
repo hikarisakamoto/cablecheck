@@ -2,7 +2,7 @@
 
 ## 1. Overall Result
 
-**POOR** — The cable exhibits significant problems and should be replaced.
+**POOR** — The link shows significant physical problems — the cable or its connectors are the leading suspect; confirm by substitution.
 
 ## 2. Score & Rule Evidence
 
